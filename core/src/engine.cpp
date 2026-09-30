@@ -69,11 +69,14 @@ int Engine::start(const SessionConfig& s, const AudioDeviceConfig& d, ma_context
         playbackChannels_ = d.clickOutput ? device_.playback.channels : 0;
         captureLatencyMs_ = 1000.f * device_.capture.internalPeriodSizeInFrames * device_.capture.internalPeriods /
                             float(device_.capture.internalSampleRate ? device_.capture.internalSampleRate : rate_);
+        playbackLatencyMs_ = d.clickOutput ? 1000.f * device_.playback.internalPeriodSizeInFrames * device_.playback.internalPeriods /
+                                                 float(device_.playback.internalSampleRate ? device_.playback.internalSampleRate : rate_)
+                                           : 0.f;
     } else {
         rate_ = d.sampleRate ? d.sampleRate : 48000;
         captureChannels_ = 1;
         playbackChannels_ = d.clickOutput ? 1 : 0;
-        captureLatencyMs_ = 0;
+        captureLatencyMs_ = playbackLatencyMs_ = 0;
     }
 
     live_ = live_config(s.mode, s.quality, rate_);
@@ -95,7 +98,7 @@ int Engine::start(const SessionConfig& s, const AudioDeviceConfig& d, ma_context
     waveMax_.assign(ANA_WAVE_COLUMNS, 0.f);
     scope_.assign(ANA_SCOPE_SAMPLES, 0.f);
     voice_.reset();
-    if (!is_chord_mode(s.mode)) voice_ = std::make_unique<VoicePipeline>(s, live_, rate_, hopFrames_, captureLatencyMs_ / 1000.0);
+    if (!is_chord_mode(s.mode)) voice_ = std::make_unique<VoicePipeline>(s, live_, rate_, hopFrames_, compensationMs() / 1000.0);
     vout_ = {};
     takeLog_.clear();
     takeLog_.reserve(kTakeLogCapacity);
@@ -510,7 +513,9 @@ void Engine::write_sidecar(uint64_t frames, uint64_t dropped) {
                  "  \"deviceRate\": %u,\n"
                  "  \"channels\": %u,\n"
                  "  \"inputLatencyMs\": %.3f,\n"
-                 "  \"inputLatencySource\": \"reported\",\n"
+                 "  \"outputLatencyMs\": %.3f,\n"
+                 "  \"compensationLatencyMs\": %.3f,\n"
+                 "  \"latencySource\": \"reported\",\n"
                  "  \"startSample\": %llu,\n"
                  "  \"firstDownbeatSample\": 0,\n"
                  "  \"frames\": %llu,\n"
@@ -522,6 +527,7 @@ void Engine::write_sidecar(uint64_t frames, uint64_t dropped) {
                  "  \"events\": [",
                  int(s.mode), int(s.quality), s.referenceA4, s.keySet ? "true" : "false", s.keyFifths, int(s.keyMode), int(s.clef),
                  s.meter.numerator, s.meter.denominator, s.bpm, s.countInBars, rate_, captureChannels_, captureLatencyMs_,
+                 playbackChannels_ ? playbackLatencyMs_ : 0.f, compensationMs(),
                  (unsigned long long)recStart_.load(), (unsigned long long)frames, recorderGaps_.load(), (unsigned long long)dropped,
                  !takeLogOverflow_.load() && flushDone_.load() ? "true" : "false");
     const double t0 = double(recStart_.load()) / rate_;

@@ -57,7 +57,9 @@ private:
     SessionConfig session_{};
     LiveConfig live_{};
     uint32_t rate_ = 48000, captureChannels_ = 1, playbackChannels_ = 0, hopFrames_ = 480, colFrames_ = 256;
-    float captureLatencyMs_ = 0;
+    float captureLatencyMs_ = 0, playbackLatencyMs_ = 0;
+    // Round trip (click out -> ear -> input) when the click plays, else input only (§13).
+    float compensationMs() const { return captureLatencyMs_ + (playbackChannels_ ? playbackLatencyMs_ : 0); }
     bool running_ = false, deviceOpen_ = false;
     ma_device device_{};
     std::string error_;

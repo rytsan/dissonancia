@@ -225,8 +225,8 @@ downbeat). The `RecorderThread` drains the recorder ring to a WAV file
 the callback. Ring sized for ≥ 5 s of audio; overflow increments a counter
 and marks a gap in the take (never silent data loss).
 
-Each take gets a JSON sidecar: `SessionConfig`, device rate, measured input
-latency, start sample, metronome BPM/meter and first-downbeat sample (if
+Each take gets a JSON sidecar: `SessionConfig`, device rate, round-trip
+latency used for compensation (and its source: loopback or reported), start sample, metronome BPM/meter and first-downbeat sample (if
 used), recorder gaps, and the confirmed LIVE event log (source of the fast
 path LIVE → score, section 20; the full STUDIO pipeline reprocesses from audio
 instead).
@@ -810,9 +810,24 @@ This is expected system behavior.
 
 Event timing contract (required by the score): a confirmed event is emitted
 late (confirmation takes 0.4–1 s), but its `startTimeSeconds` is BACKDATED to
-the onset that started it, on the sample clock, minus the measured input
+the onset that started it, on the sample clock, minus the compensation
 latency. Same rule for `MusicalNoteEvent`. The score therefore never inherits
 the confirmation delay.
+
+Compensation latency = ROUND-TRIP latency (output + input), not input alone.
+The bar grid is the frame at which the core GENERATES each click. The
+musician hears that click one output latency later, plays with it, and the
+sound reaches the input one input latency after that. A note played exactly
+on the beat therefore arrives at grid + output + input latency. Subtracting
+only the input latency would leave every note late on the grid by the output
+latency (typically 5–20 ms, enough to push notes across a 16th-note boundary
+at fast tempi).
+- Preferred source: a loopback calibration (START: output click → cable or
+  mic → input), which measures the whole round trip directly.
+- Fallback: backend-reported capture + playback latency, labelled "reported"
+  in the sidecar. Without a click output (metronome off), input latency only.
+- The musician's own anticipation or lag is not corrected: it is part of the
+  performance.
 
 End of the previous event: the previous chord stays open while a new
 candidate is provisional. When the new chord is CONFIRMED, the previous
@@ -957,7 +972,7 @@ tab; none of them exists in LIVE. Two entry points:
 
 - **A. From LIVE events (fast path, v1.0 priority):** input = confirmed LIVE
   event log (`MusicalNoteEvent`, `ChordEvent`, `OnsetEvent`) + sidecar
-  (meter, BPM, first-downbeat sample, input latency, key). Runs stages 5–8
+  (meter, BPM, first-downbeat sample, round-trip latency, key). Runs stages 5–8
   only. No audio needed — works even without REC (event log kept in C# memory
   for the session). Quality = what LIVE saw.
 - **B. From audio (full path):** REC take or imported file. Runs stages 0–8.
@@ -1084,7 +1099,7 @@ struct ChordScore {                // v1: chords only (one mode per session)
 // ChordScore. Melody + chords (or several staves) from ONE recording come from
 // STUDIO stage 3 (separation) + one analysis per stem.
 // Meter and bar lines come from SessionConfig (meter, bpm, metronome count-in),
-// compensated by the measured input latency — never guessed from free audio
+// compensated by the round-trip latency (section 13) — never guessed from free audio
 // when a score is requested.
 ```
 
