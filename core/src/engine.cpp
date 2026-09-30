@@ -98,8 +98,11 @@ int Engine::start(const SessionConfig& s, const AudioDeviceConfig& d, ma_context
     waveMax_.assign(ANA_WAVE_COLUMNS, 0.f);
     scope_.assign(ANA_SCOPE_SAMPLES, 0.f);
     voice_.reset();
+    chroma_.reset();
     if (!is_chord_mode(s.mode)) voice_ = std::make_unique<VoicePipeline>(s, live_, rate_, hopFrames_, compensationMs() / 1000.0);
+    else chroma_ = std::make_unique<ChromaFrontEnd>(s, live_.decimation, rate_, live_.fMin, live_.fMax, live_.binsPerOctave, hopFrames_);
     vout_ = {};
+    cout_ = {};
     takeLog_.clear();
     takeLog_.reserve(kTakeLogCapacity);
     takeLogOpen_ = takeLogOverflow_ = flushRequest_ = flushDone_ = false;
@@ -305,6 +308,7 @@ void Engine::process_hop(const float* x, uint32_t n) {
         voice_->process(x, n, anFrames_, vout_);
         for (uint32_t i = 0; i < vout_.eventCount; i++) publish_event(vout_.events[i]);
     }
+    if (chroma_) chroma_->process(x, n, anFrames_, cout_);
 
     LiveSnapshot& s = snapshots_.write_slot();
     double now = now_seconds();
@@ -349,7 +353,13 @@ void Engine::process_hop(const float* x, uint32_t n) {
     size_t tail = ANA_SCOPE_SAMPLES - scopeWrite_;
     std::memcpy(s.scope, scope_.data() + scopeWrite_, tail * sizeof(float));
     std::memcpy(s.scope + tail, scope_.data(), scopeWrite_ * sizeof(float));
-    std::memset(s._pad0, 0, sizeof s._pad0);
+    std::memset(s._pad1, 0, sizeof s._pad1);
+    s.cqtBinCount = cout_.bins;
+    s.cqtBinsPerOctave = cout_.binsPerOctave;
+    s.cqtMinHz = cout_.minHz;
+    s.tuning = cout_.tuning;
+    s.chroma = cout_.chroma;
+    std::memcpy(s.cqtMagnitude, cout_.magnitude, sizeof s.cqtMagnitude);
     snapshots_.publish();
 }
 

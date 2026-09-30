@@ -12,6 +12,7 @@
 #include "live_config.hpp"
 #include "lockfree.hpp"
 #include "miniaudio.h"
+#include "cqt.hpp"
 #include "voice.hpp"
 
 namespace dz {
@@ -117,6 +118,8 @@ private:
 
     // pipeline (only the selected one exists, §5)
     std::unique_ptr<VoicePipeline> voice_;
+    std::unique_ptr<ChromaFrontEnd> chroma_;
+    ChromaFrontEnd::Output cout_{};
     VoiceOutput vout_{};
 
     // confirmed event log of the take (sidecar, fast path LIVE -> SCORE)

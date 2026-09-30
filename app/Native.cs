@@ -50,6 +50,25 @@ unsafe struct NoteEstimateNative
     fixed byte _pad1[2];
 }
 
+[StructLayout(LayoutKind.Sequential)]
+struct TuningEstimateNative
+{
+    public byte Valid;
+    byte _p0, _p1, _p2;
+    public float ReferenceA4, OffsetCents, Confidence;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+unsafe struct ChromaVectorNative
+{
+    public fixed float Raw[12];
+    public fixed float Normalized[12];
+    public fixed float Smoothed[12];
+    public fixed float Bass[12];
+    public double TimestampSeconds;
+    public float Confidence, TuningOffsetCents;
+}
+
 /// Opaque event (type + sequence); payload decoded when SCORE consumes events (M6).
 [StructLayout(LayoutKind.Sequential, Size = 80)]
 struct AnalyzerEventNative
@@ -62,7 +81,7 @@ struct AnalyzerEventNative
 [StructLayout(LayoutKind.Sequential)]
 unsafe struct LiveSnapshotNative
 {
-    public const int WaveColumns = 1024, ScopeSamples = 2048;
+    public const int WaveColumns = 1024, ScopeSamples = 2048, MaxCqtBins = 160;
     public ulong Sequence;
     public double PublishTimeSeconds, RecordedSeconds;
     public ulong AnalyzedFrames;
@@ -76,10 +95,15 @@ unsafe struct LiveSnapshotNative
     public float NoteLatencyMs;
     public PitchEstimateNative Pitch;
     public NoteEstimateNative Note;
+    public ushort CqtBinCount, CqtBinsPerOctave;
+    public float CqtMinHz;
+    public TuningEstimateNative Tuning;
+    fixed byte _pad1[4];
+    public ChromaVectorNative Chroma;
+    public fixed float CqtMagnitude[MaxCqtBins];
     public fixed float WaveMin[WaveColumns];
     public fixed float WaveMax[WaveColumns];
     public fixed float Scope[ScopeSamples];
-    fixed byte _pad0[4];
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -91,7 +115,7 @@ struct AbiLayout
     public uint SessionConfigSize, AudioDeviceConfigSize, LiveSnapshotSize, AnalyzerEventSize;
     public uint SnapshotWaveMinOffset, SnapshotScopeOffset, SnapshotBeatInBarOffset, EventDataOffset;
     public uint ChordEventSize, NoteEventSize;
-    public uint SnapshotPitchOffset, SnapshotNoteOffset;
+    public uint SnapshotPitchOffset, SnapshotNoteOffset, SnapshotChromaOffset, SnapshotCqtOffset;
 }
 
 static partial class Ana
@@ -132,6 +156,8 @@ static partial class Ana
         Eq("LiveSnapshot.scope", l.SnapshotScopeOffset, Marshal.OffsetOf<LiveSnapshotNative>(nameof(LiveSnapshotNative.Scope)));
         Eq("LiveSnapshot.pitch", l.SnapshotPitchOffset, Marshal.OffsetOf<LiveSnapshotNative>(nameof(LiveSnapshotNative.Pitch)));
         Eq("LiveSnapshot.note", l.SnapshotNoteOffset, Marshal.OffsetOf<LiveSnapshotNative>(nameof(LiveSnapshotNative.Note)));
+        Eq("LiveSnapshot.chroma", l.SnapshotChromaOffset, Marshal.OffsetOf<LiveSnapshotNative>(nameof(LiveSnapshotNative.Chroma)));
+        Eq("LiveSnapshot.cqtMagnitude", l.SnapshotCqtOffset, Marshal.OffsetOf<LiveSnapshotNative>(nameof(LiveSnapshotNative.CqtMagnitude)));
         Eq("AnalyzerEvent", l.AnalyzerEventSize, Unsafe.SizeOf<AnalyzerEventNative>());
     }
 }
@@ -253,6 +279,9 @@ public sealed class NativeLiveSource : ILiveSource
         f.NoteLatencyMs = _snap.NoteLatencyMs;
         f.ChordSymbol = "";
         f.ChordConfirmed = false;
+        fixed (float* chroma = _snap.Chroma.Normalized) new ReadOnlySpan<float>(chroma, 12).CopyTo(f.Chroma);
+        f.TuningValid = _snap.Tuning.Valid != 0;
+        f.TuningCents = _snap.Tuning.OffsetCents;
 
         // Drain every frame so the queue never overflows; SCORE (M6) will consume the payloads.
         fixed (AnalyzerEventNative* ev = _events)

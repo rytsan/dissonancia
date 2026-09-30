@@ -43,6 +43,10 @@ public sealed class LiveFrame
     public int[] ChordPitchClasses = [];
     public int[] Frets = [];               // per string (low E first), -1 = muted
 
+    public readonly float[] Chroma = new float[12];   // normalized, C = 0 (chord modes)
+    public float TuningCents;                          // estimated global offset vs session A4
+    public bool TuningValid;
+
     public bool NoteValid;
     public Pitch Note;
     public float Cents, Hz, NoteLatencyMs;

@@ -203,3 +203,29 @@ TEST_CASE("REC: count-in, bar-aligned start, WAV + sidecar, metronome locked") {
     std::remove(wav.c_str());
     std::remove(json.c_str());
 }
+
+TEST_CASE("chord mode: CQT and chroma reach the snapshot") {
+    Engine e;
+    REQUIRE(e.start(session(AnalysisMode::GuitarChords), headless(false), nullptr, nullptr) == ANA_OK);
+    std::vector<float> in(480);
+    for (uint64_t pos = 0; pos < 48000; pos += 480) {
+        std::fill(in.begin(), in.end(), 0.f);
+        for (double midi : {50.0, 54.0, 57.0})   // D major
+            for (size_t i = 0; i < in.size(); i++)
+                in[i] += float(0.1 * std::sin(2 * 3.14159265358979 * 440 * std::pow(2.0, (midi - 69) / 12) * double(pos + i) / 48000));
+        e.on_audio(in.data(), nullptr, 480);
+        std::this_thread::sleep_for(std::chrono::microseconds(200));
+    }
+    LiveSnapshot s{};
+    REQUIRE(wait_until([&] { e.read_snapshot(&s); return s.analyzedFrames == 48000; }));
+    CHECK(s.cqtBinCount == 72);
+    CHECK(s.cqtBinsPerOctave == 12);
+    CHECK(s.cqtMinHz == Approx(82.41).margin(0.05));
+    CHECK(s.settleSeconds == Approx(0.210).margin(0.002));
+    int best = 0;
+    for (int i = 1; i < 12; i++) best = s.chroma.normalized[i] > s.chroma.normalized[best] ? i : best;
+    CHECK((best == 2 || best == 6 || best == 9));
+    CHECK(s.chroma.normalized[1] == 0);   // C# absent
+    CHECK(s.cqtMagnitude[50 - 40] > 0.05f);   // D3 bin
+    e.stop();
+}

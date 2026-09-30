@@ -11,6 +11,7 @@
 #  define ANA_API __attribute__((visibility("default")))
 #endif
 
+constexpr size_t ANA_MAX_CQT_BINS = 160;   // 24 bpo x 6 octaves + margin
 constexpr size_t ANA_WAVE_COLUMNS = 1024;
 constexpr size_t ANA_SCOPE_SAMPLES = 2048;
 constexpr size_t ANA_EVENT_QUEUE_CAPACITY = 4096;
@@ -146,6 +147,26 @@ struct NoteEstimate {                  // stable note (median + tracker), spelle
     uint8_t _pad1[2];
 };
 
+// ---------------------------------------------------------------- CQT / chroma / tuning (§8, §9)
+
+struct TuningEstimate {
+    uint8_t valid;                     // bool: enough stable peaks, >= 60 % inliers
+    uint8_t _pad0[3];
+    float referenceA4;                 // estimated A4 (session A4 x offset)
+    float offsetCents;                 // median deviation of stable peaks from the tempered grid
+    float confidence;                  // inlier fraction (+-15 cents of the median)
+};
+
+struct ChromaVector {
+    float raw[12];                     // energy per pitch class, C = 0
+    float normalized[12];              // log-compressed, max = 1, noise bins zeroed
+    float smoothed[12];
+    float bass[12];                    // bass chroma (section 11, M4)
+    double timestampSeconds;
+    float confidence;
+    float tuningOffsetCents;           // kernel set in use
+};
+
 // ---------------------------------------------------------------- snapshot (§22)
 // Meters, scope, transport, latency, pitch (M1). Chord blocks are added by M3+
 // (the layout test keeps C# in sync).
@@ -175,10 +196,15 @@ struct LiveSnapshot {
     float noteLatencyMs;               // estimated onset -> publish of the stable note
     PitchEstimate pitch;
     NoteEstimate note;
+    uint16_t cqtBinCount, cqtBinsPerOctave;   // 0 in mono modes
+    float cqtMinHz;                    // bin k = cqtMinHz * 2^(k / bpo), tuning applied
+    TuningEstimate tuning;
+    uint8_t _pad1[4];
+    ChromaVector chroma;
+    float cqtMagnitude[ANA_MAX_CQT_BINS];   // inline copy, no pointers
     float waveMin[ANA_WAVE_COLUMNS];
     float waveMax[ANA_WAVE_COLUMNS];
     float scope[ANA_SCOPE_SAMPLES];    // last samples, oldest first
-    uint8_t _pad0[4];
 };
 
 // Layout exported for the C# layout test (§22).
@@ -186,7 +212,7 @@ struct AbiLayout {
     uint32_t sessionConfigSize, audioDeviceConfigSize, liveSnapshotSize, analyzerEventSize;
     uint32_t snapshotWaveMinOffset, snapshotScopeOffset, snapshotBeatInBarOffset, eventDataOffset;
     uint32_t chordEventSize, noteEventSize;
-    uint32_t snapshotPitchOffset, snapshotNoteOffset;
+    uint32_t snapshotPitchOffset, snapshotNoteOffset, snapshotChromaOffset, snapshotCqtOffset;
 };
 
 // ---------------------------------------------------------------- functions

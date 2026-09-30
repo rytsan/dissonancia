@@ -590,6 +590,27 @@ struct alignas(64) CQTFrame {
 };
 ```
 
+Implemented in M2 (`core/src/cqt.cpp`), measured on the dev machine
+(12 bpo, 72 bins, 82.4 Hz–5 kHz, 20 ms hop):
+- Each octave keeps only its newest samples, and every bin is ONE direct
+  time-domain dot product with a Hann-windowed complex kernel
+  (L_k = Q fs / f_k), shared by all octaves in normalized frequency. LIVE needs
+  one frame per hop, so this beats per-octave FFTs at these sizes:
+  16 µs/hop (0.08 % of one core), 4× faster than the same CQT at full rate
+  without decimation (66 µs). FFT + sparse CSR kernels only if a larger
+  bpo/range makes the direct form lose in the microbench.
+- IIR half-band (6 all-pass coefficients, transition 0.08): flat to 0.12 fs,
+  < −60 dB above 0.33 fs, group delay 3.3 input samples per stage (≈ 4 ms for
+  the whole cascade vs ≈ 19 ms for a 31-tap FIR cascade).
+- Main-lobe leakage into the neighbour bin is −6.5 dB (inherent to Q ≈ 17).
+  Chroma removes it per bin (m_k − 0.95·L·max(neighbours), L measured at
+  init), so a lone D does not light C♯/D♯ while real adjacent tones (B + C)
+  survive. Bins below −20 dB of the strongest pitch class are zeroed.
+- Global tuning: 11 precomputed kernel sets (−50…+50 cents, 10-cent steps);
+  the estimator (median of peak deviations, ≥ 64 peaks, ≥ 60 % inliers,
+  7-cent hysteresis) switches sets without allocation. +20-cent loopback
+  input read as +23.
+
 Implementation order: (1) reference → (2) precomputed sparse CSR kernels →
 (3) octave decimation filter bank → (4) SIMD (AVX2/NEON). One pipeline feeds
 chroma, peaks, bass AND onset flux (spectral flux over CQT magnitudes is
