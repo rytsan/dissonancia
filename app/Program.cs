@@ -51,6 +51,9 @@ public sealed class MainWindow : Window
     readonly TextBlock _scoreTitle = new() { FontWeight = FontWeight.Bold, Foreground = Ui.Label };
     readonly TextBlock _scoreStatus = new() { Foreground = Ui.Label, VerticalAlignment = VerticalAlignment.Center };
     Score? _score;
+    readonly StackPanel _scorePages = new() { Spacing = 12 };
+    Verovio? _verovio;
+    string? _verovioError;
     readonly TextBlock _scoreText = new() { FontFamily = new FontFamily("Cascadia Mono, Consolas, DejaVu Sans Mono, monospace"), FontSize = 22, TextWrapping = TextWrapping.Wrap };
     readonly Stopwatch _clock = Stopwatch.StartNew();
     double _lastFrame;
@@ -67,7 +70,7 @@ public sealed class MainWindow : Window
         Clock = () => _clock.Elapsed.TotalSeconds;
         _source = new FakeLiveSource(_session);   // design data until START opens the core
         _core = NativeCore.TryLoad(out _coreError);
-        Closed += (_, _) => _core?.Dispose();
+        Closed += (_, _) => { _core?.Dispose(); _verovio?.Dispose(); };
 
         var input = new InputModule { Height = 150 };
         var scope = new ScopeModule { Height = 170 };
@@ -187,16 +190,38 @@ public sealed class MainWindow : Window
                                   Display(_score.ChordChart()) + (_score.RomanLine().Length > 0 ? "\n\n" + Display(_score.RomanLine(), roman: true) : "") +
                                   (cadences.Length > 0 ? "\n\ncadences\n" + cadences : "") +
                                   (_score.QuantizedNotes.Count > 0 ? "\n\n" + string.Join("  ", _score.QuantizedNotes.Select(n => n.Note.Sounding.Name)) : "");
+                RenderScore(_score);
                 return;
             }
             catch (Exception e) { _scoreStatus.Text = $"could not read {Path.GetFileName(path)}: {e.Message}"; }
         }
+        _scorePages.Children.Clear();
         // No take yet: fast path from the LIVE timeline (spec §20 entry A).
         var bars = _frame.RecordedBars.Count > 0 ? _frame.RecordedBars : _frame.TimelineBars;
         _scoreTitle.Text = "no REC take yet  ·  LIVE timeline";
         _scoreText.Text = $"{_session.Key.Label}   ·   {_session.BeatsPerBar}/{_session.BeatUnit}   ·   ♩ = {_session.Bpm:0}\n\n" +
                           string.Join("\n", bars.Chunk(4).Select(c => "| " + string.Join(" | ", c) + " |"));
     }
+
+    /// Engraved score from the MusicXML writer through Verovio (SVG -> bitmap, paper on the dark face).
+    void RenderScore(Score score)
+    {
+        _scorePages.Children.Clear();
+        if (_verovio is null && _verovioError is null) { _verovio = Verovio.TryCreate(out var err); if (_verovio is null) _verovioError = err; }
+        if (_verovio is null) { _scoreStatus.Text = _verovioError ?? ""; return; }
+        int width = Math.Max(600, (int)(_tabs.Bounds.Width - 100));
+        foreach (var svg in _verovio.Render(score.MusicXml(), width))
+            if (SvgBitmap(svg) is { } bmp)
+                _scorePages.Children.Add(new Border
+                {
+                    Background = Brushes.White, CornerRadius = new CornerRadius(3), HorizontalAlignment = HorizontalAlignment.Left,
+                    Child = new Image { Source = bmp, Width = bmp.Size.Width / 2, Height = bmp.Size.Height / 2 },
+                });
+        if (_scorePages.Children.Count == 0) _scoreStatus.Text = "Verovio could not engrave this take: " + _verovio.Log;
+    }
+
+    static Avalonia.Media.Imaging.Bitmap? SvgBitmap(string svg) =>
+        SvgRaster.Png(svg, 2) is { } png ? new Avalonia.Media.Imaging.Bitmap(new MemoryStream(png)) : null;
 
     Button ExportButton()
     {
@@ -219,7 +244,7 @@ public sealed class MainWindow : Window
         return roman ? s.Replace('o', '°').Replace('h', 'ø') : s;
     }
 
-    Control BuildScoreTab() => new Border
+    Control BuildScoreTab() => new ScrollViewer { Content = new Border
     {
         Margin = new Thickness(16), Padding = new Thickness(24), Background = Ui.Face, CornerRadius = new CornerRadius(6),
         Child = new StackPanel
@@ -235,9 +260,10 @@ public sealed class MainWindow : Window
                     Children = { ExportButton(), _scoreStatus },
                 },
                 new TextBlock { Text = "Exports next to the take: MusicXML (open in MuseScore), MIDI type 1, JSON (both timelines), text chart.", Foreground = Ui.Label },
+                _scorePages,
             },
         },
-    };
+    } };
 
     static Control Placeholder(string title, string text) => new Border
     {

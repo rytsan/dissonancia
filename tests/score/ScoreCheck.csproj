@@ -6,8 +6,16 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>Dissonancia</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../../app/Score.cs;../../app/Theory.cs" />
+    <Compile Include="../../app/Score.cs;../../app/Theory.cs;../../app/Verovio.cs" />
+  </ItemGroup>
+  <!-- Verovio import check runs when the core was built with DZ_WITH_VEROVIO (skipped otherwise). -->
+  <ItemGroup>
+    <None Include="../../core/build/verovio/lib/*verovio.so;../../core/build/verovio/lib/*verovio.dylib;../../core/build/verovio/bin/*verovio.dll"
+          CopyToOutputDirectory="PreserveNewest" Link="%(Filename)%(Extension)" Visible="false" />
+    <None Include="../../core/build/verovio/share/verovio/**/*" CopyToOutputDirectory="PreserveNewest"
+          Link="verovio-data/%(RecursiveDir)%(Filename)%(Extension)" Visible="false" />
   </ItemGroup>
 </Project>

@@ -29,7 +29,7 @@ measured, and [`docs/spec.md`](docs/spec.md) for the full design.
 | M4 onsets, bass, inversions, arpeggios | done |
 | M5 music theory (Roman numerals, cadences) | done |
 | M5b rack modules | partly |
-| M6 LIVE → score / MusicXML / MIDI / JSON | done, Verovio view pending |
+| M6 LIVE → score (Verovio), MusicXML / MIDI / JSON | done |
 | M7+ STUDIO | planned |
 
 ## Build
@@ -38,7 +38,8 @@ Requirements: CMake ≥ 3.24, a C++20 compiler (GCC 13 / Clang 17 / MSVC 2022),
 Ninja (optional), .NET SDK 10.
 
 ```bash
-# core + tests (Catch2 is fetched by CMake)
+# core + tests (Catch2 and Verovio are fetched by CMake; Verovio builds once, ~2 min;
+# -DDZ_WITH_VEROVIO=OFF skips it and the SCORE tab shows text only)
 cmake -S core -B core/build -G Ninja
 cmake --build core/build
 core/build/dz_tests
@@ -74,5 +75,6 @@ docs/   IMPLEMENTATION.md, spec.md, spec.v2.1.md, graph/ (knowledge graph)
 
 ## License
 
-MIT. Dependencies are MIT / public domain (miniaudio, Catch2). Verovio
-(LGPL-3.0, planned for SCORE) will stay a separate, dynamically linked library.
+MIT. Dependencies are MIT / public domain (miniaudio, Catch2, Svg.Skia).
+Verovio (LGPL-3.0, SCORE engraving) is a separate shared library loaded at run
+time, built from its unmodified source; its Leipzig font is SIL OFL 1.1.

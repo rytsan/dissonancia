@@ -13,7 +13,7 @@ The target design is [`spec.md`](spec.md); this file describes only what is buil
 | M4 | Onsets, onset gating, bass, inversions, arpeggios | Done |
 | M5 | Music theory: chord spelling, Roman numerals, cadences, LCD staff | Done (live cadences use harmonic evidence only) |
 | M5b | Rack modules: fretboard/keyboard, waterfall, tuner, edit mode, stage mode | Partly (GUI prototype) |
-| M6 | LIVE → SCORE fast path, MusicXML/MIDI, Verovio | Done except the Verovio view (SCORE shows text) |
+| M6 | LIVE → SCORE fast path, MusicXML/MIDI, Verovio | Done (MuseScore round trip still to check by hand) |
 | M7+ | STUDIO (import, editor, separation, choir, VST3) | Not started |
 
 ## Architecture as built
@@ -177,8 +177,19 @@ Only the pipeline chosen on START exists in a session (`voice_` for mono modes,
   (`dissonancia-score/1`), text chord chart (`| C | G7/B Bbm7 | % |`) plus the
   Roman numeral line.
 - SCORE tab: loads the newest take, shows key/meter/BPM, the chord chart,
-  numerals, cadences and melody notes; EXPORT writes the four files next to
-  the take. With no take yet it shows the LIVE timeline (fast path).
+  numerals, cadences and melody notes, and the engraved score; EXPORT writes
+  the four files next to the take. With no take yet it shows the LIVE
+  timeline (fast path).
+- Engraving: our MusicXML goes through Verovio (`app/Verovio.cs`, P/Invoke on
+  its C wrapper), one SVG per page, rasterized at 2× by Svg.Skia
+  (`app/SvgRaster.cs`) on white paper. Verovio is LGPL-3.0: built by the
+  core's CMake (`DZ_WITH_VEROVIO`, pinned source tarball with SHA-256) as its
+  own shared library and loaded at run time, never linked into our code.
+  Its text glyphs (tempo note, chord accidentals) are embedded as WOFF2,
+  which Skia cannot read, so the Leipzig TTF (SIL OFL) is installed with the
+  data and served by family name. Svg.Skia is pinned to 5.1.1, the last on
+  SkiaSharp 3.119 (Avalonia 12's version). Without the library the tab
+  shows text only and says why.
 
 ### GUI (prototype, C# / Avalonia 12.1, .NET 10)
 - START: mode, quality, key cascade, clef, meter, BPM, count-in, audio
@@ -233,8 +244,9 @@ allocation in the callback or the analysis steady state fails the run.
   2 → 4 rule, long notes, triplets, dotted eighth + sixteenth, harmony
   placement and chart, symbol parsing, MusicXML well-formed with ties,
   tuplets, harmony and 8vb clef, every measure full, MIDI tracks and tempo,
-  sidecar loading in 3/4. A sidecar written by the core's REC test loads
-  and exports end to end.
+  sidecar loading in 3/4; every sample validates against the MusicXML 4.0
+  XSD (downloaded once, cached) and imports into Verovio. A sidecar written
+  by the core's REC test loads and exports end to end.
 - Theory: 31 Roman numeral cases (major, minor, flat and sharp keys, applied,
   borrowed, figured bass); cadences from the tracker (authentic, plagal,
   deceptive, half, none without a key).
@@ -251,10 +263,10 @@ allocation in the callback or the analysis steady state fails the run.
   data.
 - GUI: text rendering still allocates per frame outside the cached strings
   (spec §22.7); rack edit mode; waterfall.
-- SCORE: Verovio view (LGPL, separate dynamic library) not integrated, the tab
-  shows text; MusicXML not yet validated against the XSD in CI or opened in
-  MuseScore; triplets only as eighth triplets; no tempo detection (the
-  session BPM is used).
+- SCORE: open an exported take in MuseScore once (manual acceptance); no
+  CI yet for the XSD/Verovio checks; triplets only as eighth triplets; no
+  tempo detection (the session BPM is used); the page is re-engraved only
+  when the tab opens (no reflow on resize).
 - Windows build and run not yet verified (developed on WSL2).
 
 ## Knowledge graph

@@ -1,4 +1,5 @@
 using System.Xml;
+using System.Xml.Schema;
 using Dissonancia;
 
 // 4/4 at 120 BPM: one quarter = 0.5 s, 12 divisions.
@@ -88,5 +89,51 @@ var take = Take.Load(path);
 Check(take.Notes[0].Sounding == new Pitch(4, 0, 3) && take.BeatsPerBar == 3 && take.Chords[0].Roman == "I" && take.Cadences.Count == 1, "sidecar load");
 Check(Score.Build(take).Measures[0].Items.Sum(i => i.Duration) == 36, "3/4 measure");
 
+// Every MusicXML we write validates against the MusicXML 4.0 XSD (downloaded once, cached next to the binary).
+var samples = new[] { s1, s2, s4, s5, s6, s7, Score.Build(t8), Score.Build(take) }.Select(x => x.MusicXml()).ToArray();
+if (Schema() is { } schema)
+    for (int i = 0; i < samples.Length; i++)
+    {
+        var errors = new List<string>();
+        var settings = new XmlReaderSettings { ValidationType = ValidationType.Schema, Schemas = schema, DtdProcessing = DtdProcessing.Ignore, XmlResolver = null };
+        settings.ValidationEventHandler += (_, e) => errors.Add($"{e.Severity}: {e.Message} (line {e.Exception?.LineNumber})");
+        using (var r = XmlReader.Create(new StringReader(samples[i]), settings)) while (r.Read()) { }
+        Check(errors.Count == 0, $"XSD sample {i + 1}{(errors.Count > 0 ? ": " + errors[0] : "")}");
+    }
+else Console.WriteLine("skip XSD (schema not reachable)");
+
+// Verovio imports it (the engraving the SCORE tab shows).
+if (Verovio.TryCreate(out var vrvError) is { } vrv)
+    using (vrv)
+        for (int i = 0; i < samples.Length; i++)
+        {
+            var pages = vrv.Render(samples[i], 1000);
+            string log = vrv.Log;
+            Check(pages.Length >= 1 && pages[0].Contains("<svg") && !log.Contains("Error"), $"Verovio {vrv.Version} sample {i + 1}: {pages.Length} page(s){(log.Length > 0 ? " log: " + log.Trim() : "")}");
+        }
+else Console.WriteLine("skip Verovio: " + vrvError);
+
 Console.WriteLine(failures == 0 ? "all checks passed" : $"{failures} FAILED");
 return failures == 0 ? 0 : 1;
+
+static XmlSchemaSet? Schema()
+{
+    string dir = Path.Combine(AppContext.BaseDirectory, "xsd");
+    try
+    {
+        Directory.CreateDirectory(dir);
+        using var http = new HttpClient();
+        foreach (var f in new[] { "musicxml.xsd", "xlink.xsd", "xml.xsd" })
+        {
+            string path = Path.Combine(dir, f);
+            if (File.Exists(path)) continue;
+            string text = http.GetStringAsync("https://raw.githubusercontent.com/w3c/musicxml/v4.0/schema/" + f).Result;
+            File.WriteAllText(path, text.Replace("http://www.musicxml.org/xsd/xml.xsd", "xml.xsd").Replace("http://www.musicxml.org/xsd/xlink.xsd", "xlink.xsd"));
+        }
+        var set = new XmlSchemaSet { XmlResolver = new XmlUrlResolver() };
+        set.Add(null, Path.Combine(dir, "musicxml.xsd"));
+        set.Compile();
+        return set;
+    }
+    catch (Exception e) { Console.WriteLine("schema: " + e.Message); return null; }
+}
