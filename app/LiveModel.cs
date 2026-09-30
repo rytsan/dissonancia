@@ -37,6 +37,8 @@ public sealed class LiveFrame
     public bool ChordConfirmed;
     public string ChordAlternatives = "";
     public string ChordReason = "";
+    public string ChordRoman = "";         // Roman numeral in the session key, "" = no key
+    public string Cadence = "", CadenceEvidence = "";   // last cadence candidate (live: harmonic evidence only)
     public float ChordLatencyMs, ChordConfirmElapsedMs;
     public Pitch Bass;
     public bool BassSettled, BassValid;
@@ -61,6 +63,7 @@ public sealed class LiveFrame
     public bool Simulated;
 
     public readonly List<string> TimelineBars = [];   // confirmed chord per bar, oldest first
+    public readonly List<string> TimelineRomans = []; // Roman numeral per TimelineBars entry (may be shorter: fake source)
     public string ProvisionalChord = "";
     public double BarPhase;                           // 0..1 position inside the current bar
     public readonly List<string> RecordedBars = [];   // fast-path event log (confirmed chords of the take)

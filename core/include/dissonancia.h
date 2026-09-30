@@ -63,6 +63,13 @@ enum class ChordQuality : uint8_t {
     Power, Dom7, Maj7, Min7, HalfDim7, Dim7, Maj6, Min6, Add9, Unknown
 };
 
+// Harmonic function of a chord in the session key (§15). Out of key is never an error.
+enum class DiatonicStatus : uint8_t {
+    Diatonic, ChromaticPassing, ChromaticNeighbor,
+    AppliedDominant, BorrowedChord, PossibleModulation, Unknown
+};
+enum class CadenceType : uint8_t { None, PerfectAuthentic, ImperfectAuthentic, Half, Plagal, Deceptive, Phrygian };
+
 struct OnsetEvent {
     double timestampSeconds;
     float strength;
@@ -94,9 +101,24 @@ struct ChordEvent {
     uint8_t detectedCount, missingCount;
     int8_t detectedNotes[8];
     int8_t missingNotes[8];
-    uint8_t _pad0[2];
+    char roman[12];                    // ASCII Roman numeral in the key, e.g. "V7", "ii65", "V/V", "bVII", "viio7"; "" = no key
+    DiatonicStatus diatonicStatus;
+    uint8_t _pad0;
     float confidence;
     uint8_t incomplete, arpeggiated, provisional, bassSettled;   // bool
+    uint8_t _pad1[4];
+};
+
+// Harmonic cadence candidate (§17), from root motion + bass position. LIVE has no melody and
+// no phrase analysis, so the confidence stays below 0.8 and the evidence says what was used.
+struct CadenceEvent {
+    double timestampSeconds;           // arrival (backdated onset) of the final chord
+    CadenceType type;
+    uint8_t _pad0[3];
+    float confidence;
+    char fromRoman[16];
+    char toRoman[16];
+    char evidence[40];                 // ASCII, e.g. "5-1, root position, V7"
 };
 
 enum class AnalyzerEventType : uint8_t {
@@ -104,7 +126,8 @@ enum class AnalyzerEventType : uint8_t {
     NoteStart,      // display only (provisional)
     NoteEnd,        // COMPLETE MusicalNoteEvent (start + end)
     ChordConfirmed, // display only (end not yet known)
-    ChordEnded      // COMPLETE ChordEvent (start + end)
+    ChordEnded,     // COMPLETE ChordEvent (start + end)
+    Cadence         // CadenceEvent, after the chord that completes it
 };
 
 struct AnalyzerEvent {
@@ -115,6 +138,7 @@ struct AnalyzerEvent {
         OnsetEvent onset;
         MusicalNoteEvent note;
         ChordEvent chord;
+        CadenceEvent cadence;
     } data;
 };
 
@@ -195,7 +219,8 @@ struct ChordCandidate {
     int8_t detected[8];
     int8_t missing[8];
     int8_t extra[8];
-    uint8_t _pad0;
+    char roman[12];                    // as ChordEvent.roman
+    DiatonicStatus diatonicStatus;
     float rootScore, thirdScore, fifthScore, chromaScore, bassScore, temporalScore, tonalScore, totalScore;
     float confidence;
     uint8_t hasBass, incomplete, arpeggiated;   // bool

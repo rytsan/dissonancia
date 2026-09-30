@@ -27,7 +27,8 @@ measured, and [`docs/spec.md`](docs/spec.md) for the full design.
 | M2 CQT, chroma, tuning | done |
 | M3 chords (templates, tracker, ambiguity, key/cadence context) | done |
 | M4 onsets, bass, inversions, arpeggios | done |
-| M5 music theory, M5b rack modules | partly |
+| M5 music theory (Roman numerals, cadences) | done |
+| M5b rack modules | partly |
 | M6 LIVE → score / MusicXML / MIDI | next |
 | M7+ STUDIO | planned |
 

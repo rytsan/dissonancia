@@ -38,10 +38,20 @@ public:
     void symbol(int root, ChordQuality q, char (&out)[16]) const;
     // Appends "/bass": a chord tone is spelled from the root's letter (E/G#, not E/Ab), others by key.
     void slash(int root, ChordQuality q, int bassPc, char (&out)[16]) const;
+    // Roman numeral in the session key (§17): case by third, o/+/h for dim/aug/half-dim, figured
+    // bass for inversions (bassPc < 0 = unknown: root position assumed), V/x and viio/x for applied
+    // chords, b/# against the key's scale. Minor accepts the raised leading tone (V, viio). No key -> "".
+    void roman(int root, ChordQuality q, int bassPc, char (&out)[12], DiatonicStatus& status) const;
+    // Cadence candidate (§17) from harmonic motion: previous -> last on arrival (authentic, plagal,
+    // deceptive), or last at a phrase end (half, Phrygian). previous may be empty (symbol "").
+    // Returns false when no cadence applies.
+    bool cadence(const ChordCandidate& previous, const ChordCandidate& last, bool phraseEnd, CadenceEvent& out) const;
 
     static constexpr int kQualities = 15;
 
 private:
+    Spelled root_spelling(int root) const;
+
     float templates_[kQualities * 12][12];
     uint16_t masks_[kQualities * 12];
     bool keySet_;
@@ -79,6 +89,7 @@ private:
         uint32_t frames;
     };
     void emit(Output& out, AnalyzerEventType type, const Chord& ch, double end);
+    void emit_cadence(Output& out, const ChordCandidate& previous, const Chord& last, bool phraseEnd);
 
     ChordMatcher matcher_;
     double hop_, latencyComp_, confirmSeconds_, releaseSeconds_;
@@ -89,6 +100,7 @@ private:
     double candStart_ = 0, candTime_ = 0, lastSound_ = 0, silentSince_ = -1;
     float candLatencyMs_ = 0, curLatencyMs_ = 0;
     ChordHistory history_;
+    ChordCandidate previous_{};      // confirmed chord before cur_ (symbol "" = none): cadence context
     float acc_[12]{};                // arpeggio accumulator (decaying max-hold of chroma energy)
     bool bassSettledNow_ = false;
 };

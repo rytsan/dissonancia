@@ -72,13 +72,17 @@ ChordMatcher::ChordMatcher(const SessionConfig& s)
         }
 }
 
-void ChordMatcher::symbol(int root, ChordQuality q, char (&out)[16]) const {
+Spelled ChordMatcher::root_spelling(int root) const {
     // Diatonic roots follow the key. Chromatic roots take the lowered form (bIII, bVI, bVII, bII),
     // except the raised 4th (#iv / vii of V): Bb in C major, not A#; F# stays F#.
     int tonic = ((7 * (fifths_ + 12)) % 12);
     bool raised4 = (root - tonic + 12) % 12 == 6;
     speller_.reset_phrase();
-    Spelled sp = speller_.spell(60 + root, raised4 ? 59 + root : 61 + root);
+    return speller_.spell(60 + root, raised4 ? 59 + root : 61 + root);
+}
+
+void ChordMatcher::symbol(int root, ChordQuality q, char (&out)[16]) const {
+    Spelled sp = root_spelling(root);
     static const char* acc[5] = {"bb", "b", "", "#", "x"};
     std::snprintf(out, sizeof out, "%c%s%s", "CDEFGAB"[sp.letter], acc[sp.alter + 2], def(q).suffix);
 }
@@ -153,6 +157,139 @@ float ChordMatcher::context(int root, ChordQuality q, int prevRoot, ChordQuality
         else if ((prevRoot - root + 12) % 12 == 7) prior += 0.15f;   // root falls a fifth
     }
     return std::min(prior, 1.f);
+}
+
+namespace {
+
+constexpr int kMajorScale[7] = {0, 2, 4, 5, 7, 9, 11}, kMinorScale[7] = {0, 2, 3, 5, 7, 8, 10};
+
+bool in_scale(int pc, int tonic, const int* scale, bool leadingTone) {
+    int i = (pc - tonic + 12) % 12;
+    for (int k = 0; k < 7; k++)
+        if (scale[k] == i) return true;
+    return leadingTone && i == 11;
+}
+
+bool seventh_chord(ChordQuality q) {
+    return q == ChordQuality::Dom7 || q == ChordQuality::Maj7 || q == ChordQuality::Min7 || q == ChordQuality::HalfDim7 || q == ChordQuality::Dim7;
+}
+
+}  // namespace
+
+void ChordMatcher::roman(int root, ChordQuality q, int bassPc, char (&out)[12], DiatonicStatus& status) const {
+    out[0] = 0;
+    status = DiatonicStatus::Unknown;
+    if (!keySet_) return;
+    const QualityDef& d = def(q);
+    const int* own = minor_ ? kMinorScale : kMajorScale;
+    const int* parallel = minor_ ? kMajorScale : kMinorScale;
+    auto all_in = [&](const int* scale, bool leadingTone) {
+        for (int i = 0; i < d.n; i++)
+            if (!in_scale((root + d.iv[i]) % 12, tonic_, scale, leadingTone)) return false;
+        return true;
+    };
+    // Degree from the letter distance to the tonic, accidental against the key's own scale.
+    auto numeral = [&](int r, bool lower, char (&buf)[8]) {
+        static const char* up[7] = {"I", "II", "III", "IV", "V", "VI", "VII"};
+        static const char* lo[7] = {"i", "ii", "iii", "iv", "v", "vi", "vii"};
+        int deg = (root_spelling(r).letter - root_spelling(tonic_).letter + 7) % 7;
+        int alt = ((r - tonic_ - own[deg]) % 12 + 12) % 12;
+        if (alt > 6) alt -= 12;
+        if (minor_ && deg == 6 && alt == 1) alt = 0;   // raised leading tone: vii, not #vii
+        const char* acc = alt == -2 ? "bb" : alt == -1 ? "b" : alt == 1 ? "#" : alt == 2 ? "##" : "";
+        std::snprintf(buf, sizeof buf, "%s%s", acc, (lower ? lo : up)[deg]);
+    };
+
+    int inv = 0;   // index of the bass among the chord tones; -1 = bass outside the chord
+    if (bassPc >= 0 && bassPc != root) {
+        inv = -1;
+        for (int i = 0; i < d.n; i++)
+            if ((root + d.iv[i]) % 12 == bassPc) inv = i;
+    }
+    static const char* triadFig[3] = {"", "6", "64"};
+    static const char* seventhFig[4] = {"7", "65", "43", "42"};
+    const bool triad = q == ChordQuality::Major || q == ChordQuality::Minor || q == ChordQuality::Diminished || q == ChordQuality::Augmented;
+    const char* fig = seventh_chord(q) ? seventhFig[std::max(inv, 0)] : triad && inv > 0 ? triadFig[inv] : "";
+    const char* qs = "";
+    switch (q) {
+        case ChordQuality::Diminished: case ChordQuality::Dim7: qs = "o"; break;
+        case ChordQuality::HalfDim7: qs = "h"; break;
+        case ChordQuality::Augmented: qs = "+"; break;
+        case ChordQuality::Maj7: qs = "M"; break;
+        case ChordQuality::Sus2: qs = "sus2"; break;
+        case ChordQuality::Sus4: qs = "sus4"; break;
+        case ChordQuality::Power: qs = "5"; break;
+        case ChordQuality::Maj6: case ChordQuality::Min6: qs = "add6"; break;   // "6" alone is an inversion
+        case ChordQuality::Add9: qs = "add9"; break;
+        default: break;
+    }
+    const Family f = family(q);
+    const bool lower = f == Family::Minor || f == Family::Diminished;
+    char num[8];
+
+    const bool neapolitan = (root - tonic_ + 12) % 12 == 1 && q == ChordQuality::Major;
+    if (all_in(own, minor_)) status = DiatonicStatus::Diatonic;
+    else if (all_in(parallel, false) || neapolitan) status = DiatonicStatus::BorrowedChord;
+    else {
+        // Applied chord: dominant a fifth above, or leading-tone chord a semitone below, a diatonic
+        // major or minor triad other than the tonic.
+        const bool dominant = q == ChordQuality::Major || q == ChordQuality::Dom7;
+        const bool leading = q == ChordQuality::Diminished || q == ChordQuality::Dim7 || q == ChordQuality::HalfDim7;
+        const int target = dominant ? (root + 5) % 12 : leading ? (root + 1) % 12 : -1;
+        if (target >= 0 && target != tonic_ && in_scale(target, tonic_, own, false) && in_scale(target + 7, tonic_, own, minor_)) {
+            char tn[8];
+            numeral(target, !in_scale(target + 4, tonic_, own, minor_), tn);
+            status = DiatonicStatus::AppliedDominant;
+            std::snprintf(out, sizeof out, "%s%.1s%.2s/%.4s", dominant ? "V" : "vii", qs, fig, tn);   // widths: fits 11 chars
+            return;
+        }
+    }
+    numeral(root, lower, num);
+    std::snprintf(out, sizeof out, "%.5s%.4s%.2s", num, qs, fig);
+}
+
+bool ChordMatcher::cadence(const ChordCandidate& prev, const ChordCandidate& last, bool phraseEnd, CadenceEvent& e) const {
+    e = {};
+    if (!keySet_) return false;
+    auto semis = [&](const ChordCandidate& c) { return (c.rootPitchClass - tonic_ + 12) % 12; };
+    auto dominant = [&](const ChordCandidate& c) { return semis(c) == 7 && (c.quality == ChordQuality::Major || c.quality == ChordQuality::Dom7); };
+    auto rootPosition = [](const ChordCandidate& c) { return c.hasBass && c.bassPitchClass == c.rootPitchClass; };
+    const bool hasPrev = prev.symbol[0] != 0;
+    const bool tonicArrival = semis(last) == 0 && (family(last.quality) == Family::Major || family(last.quality) == Family::Minor);
+    const bool bothRoot = hasPrev && rootPosition(prev) && rootPosition(last);
+    const bool bassKnown = hasPrev && prev.hasBass && last.hasBass;
+    const bool v7 = hasPrev && prev.quality == ChordQuality::Dom7;
+    const char* motion = "";
+    float conf = 0;
+
+    if (!phraseEnd && hasPrev && dominant(prev) && tonicArrival) {
+        e.type = bothRoot ? CadenceType::PerfectAuthentic : CadenceType::ImperfectAuthentic;
+        motion = "5-1";
+        conf = 0.45f + (bothRoot ? 0.15f : 0) + (v7 ? 0.1f : 0);
+    } else if (!phraseEnd && hasPrev && semis(prev) == 5 && tonicArrival) {
+        e.type = CadenceType::Plagal;
+        motion = "4-1";
+        conf = 0.4f + (bothRoot ? 0.1f : 0);
+    } else if (!phraseEnd && hasPrev && dominant(prev) && semis(last) == (minor_ ? 8 : 9) &&
+               family(last.quality) == (minor_ ? Family::Major : Family::Minor)) {
+        e.type = CadenceType::Deceptive;
+        motion = minor_ ? "5-b6" : "5-6";
+        conf = 0.45f + (v7 ? 0.1f : 0);
+    } else if (phraseEnd && dominant(last)) {
+        const bool phrygian = minor_ && hasPrev && semis(prev) == 5 && family(prev.quality) == Family::Minor && prev.hasBass &&
+                              prev.bassPitchClass == (tonic_ + 8) % 12;
+        e.type = phrygian ? CadenceType::Phrygian : CadenceType::Half;
+        motion = phrygian ? "iv6-V, phrase end" : "ends on V";
+        conf = phrygian ? 0.5f : 0.35f + (rootPosition(last) ? 0.1f : 0);
+    } else {
+        return false;
+    }
+    e.confidence = std::min(conf, 0.75f);   // LIVE: no melody, no meter, never definitive (§17)
+    if (hasPrev) std::memcpy(e.fromRoman, prev.roman, sizeof prev.roman);
+    std::memcpy(e.toRoman, last.roman, sizeof last.roman);
+    const char* bass = phraseEnd ? "" : bothRoot ? ", root position" : bassKnown ? ", inverted" : ", bass unknown";
+    std::snprintf(e.evidence, sizeof e.evidence, "%s%s%s; no melody", motion, bass, v7 && !phraseEnd ? ", V7" : "");
+    return true;
 }
 
 void ChordMatcher::slash(int root, ChordQuality q, int bassPc, char (&out)[16]) const {
@@ -265,6 +402,7 @@ void ChordMatcher::match(const float* energy, const ChordHistory& h, int bassPc,
             c.bassScore = root == bassPc ? 1.f : (masks_[s.t] >> bassPc & 1) ? 0.5f : 0.f;
             if (bassPc != root) slash(root, d.q, bassPc, c.symbol);   // inversion only with a settled bass
         }
+        roman(root, d.q, bassPc, c.roman, c.diatonicStatus);
     };
 
     fill(top[0], out.best);
@@ -338,11 +476,23 @@ void ChordTracker::emit(Output& out, AnalyzerEventType type, const Chord& ch, do
     c.missingCount = ch.c.missingCount;
     std::memcpy(c.detectedNotes, ch.c.detected, sizeof c.detectedNotes);
     std::memcpy(c.missingNotes, ch.c.missing, sizeof c.missingNotes);
+    std::memcpy(c.roman, ch.c.roman, sizeof c.roman);
+    c.diatonicStatus = ch.c.diatonicStatus;
     c.confidence = float(ch.sumConfidence / std::max<uint32_t>(1, ch.frames));
     c.incomplete = ch.c.incomplete;
     c.provisional = 0;
     c.bassSettled = ch.c.hasBass;
     c.arpeggiated = ch.c.arpeggiated;
+}
+
+void ChordTracker::emit_cadence(Output& out, const ChordCandidate& previous, const Chord& last, bool phraseEnd) {
+    CadenceEvent c;
+    if (out.eventCount == 4 || !matcher_.cadence(previous, last.c, phraseEnd, c)) return;
+    c.timestampSeconds = last.start - latencyComp_;   // arrival of the final chord
+    AnalyzerEvent& e = out.events[out.eventCount++];
+    e = {};
+    e.type = AnalyzerEventType::Cadence;
+    e.data.cadence = c;
 }
 
 namespace {
@@ -386,7 +536,9 @@ void ChordTracker::process(const ChromaVector& chroma, double t, double frameEnd
         candidateOn_ = false;
         if (active_ && t - silentSince_ >= releaseSeconds_) {   // silence closes the chord at the release
             emit(out, AnalyzerEventType::ChordEnded, cur_, lastSound_);
+            emit_cadence(out, previous_, cur_, true);   // silence = phrase end
             active_ = false;
+            previous_ = {};
         }
     } else {
         silentSince_ = -1;
@@ -401,6 +553,7 @@ void ChordTracker::process(const ChromaVector& chroma, double t, double frameEnd
                 cur_.c.hasBass = 1;
                 cur_.c.bassPitchClass = best.bassPitchClass;
                 std::memcpy(cur_.c.symbol, best.symbol, sizeof cur_.c.symbol);
+                std::memcpy(cur_.c.roman, best.roman, sizeof cur_.c.roman);
             }
         } else {
             if (!candidateOn_ || !same_chord(best, cand_)) {
@@ -416,12 +569,14 @@ void ChordTracker::process(const ChromaVector& chroma, double t, double frameEnd
             if (candTime_ + 1e-9 >= confirmSeconds_ && best.confidence >= 0.2f) {
                 // Confirmed: the previous chord ends exactly at the new chord's backdated onset.
                 if (active_) emit(out, AnalyzerEventType::ChordEnded, cur_, candStart_);
+                previous_ = active_ ? cur_.c : ChordCandidate{};
                 cur_ = {best, candStart_, best.confidence, 1};
                 history_ = {best.rootPitchClass, best.quality, history_.currentRoot, history_.currentQuality};   // cadence context
                 curLatencyMs_ = candLatencyMs_;
                 active_ = true;
                 candidateOn_ = false;
                 emit(out, AnalyzerEventType::ChordConfirmed, cur_, candStart_);
+                emit_cadence(out, previous_, cur_, false);
             }
         }
     }
@@ -437,6 +592,7 @@ void ChordTracker::flush(Output& out) {
     out.eventCount = 0;
     if (active_) emit(out, AnalyzerEventType::ChordEnded, cur_, lastSound_);
     active_ = candidateOn_ = false;
+    previous_ = {};
 }
 
 }  // namespace dz

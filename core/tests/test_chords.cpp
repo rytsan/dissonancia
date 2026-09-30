@@ -38,6 +38,7 @@ struct Result {
     std::vector<double> onsets;        // detected onset times
     std::vector<std::pair<double, std::string>> previews;   // (time, preview symbol) per hop
     std::vector<std::pair<double, BassEstimate>> bass;
+    std::vector<CadenceEvent> cadences;
     ChordTracker::Output last{};
 };
 
@@ -77,6 +78,7 @@ Result run(const std::vector<Segment>& segs, const SessionConfig& s = session(),
                 const AnalyzerEvent& e = r.last.events[i];
                 if (e.type == AnalyzerEventType::ChordEnded) r.ended.push_back(e.data.chord);
                 if (e.type == AnalyzerEventType::ChordConfirmed) { r.confirmed.push_back(e.data.chord); r.confirmedAt.push_back(double(pos + kHop) / kRate); }
+                if (e.type == AnalyzerEventType::Cadence) r.cadences.push_back(e.data.cadence);
             }
         }
     }
@@ -260,4 +262,63 @@ TEST_CASE("arpeggio: sequential notes accumulate into the chord") {
     REQUIRE_FALSE(r.confirmed.empty());
     CHECK(std::string(r.confirmed[0].symbol) == "C");
     CHECK(r.confirmed[0].arpeggiated);
+}
+
+TEST_CASE("roman numerals: case, figures, applied, borrowed, minor leading tone") {
+    struct Case { int8_t fifths; bool minor; int root; ChordQuality q; int bass; const char* roman; DiatonicStatus status; };
+    using Q = ChordQuality;
+    using S = DiatonicStatus;
+    const Case cases[] = {
+        {0, false, 7, Q::Dom7, -1, "V7", S::Diatonic},        {0, false, 7, Q::Dom7, 11, "V65", S::Diatonic},
+        {0, false, 7, Q::Dom7, 5, "V42", S::Diatonic},        {0, false, 0, Q::Major, 7, "I64", S::Diatonic},
+        {0, false, 2, Q::Minor, 5, "ii6", S::Diatonic},       {0, false, 11, Q::Diminished, -1, "viio", S::Diatonic},
+        {0, false, 5, Q::Maj7, -1, "IVM7", S::Diatonic},      {0, false, 11, Q::HalfDim7, -1, "viih7", S::Diatonic},
+        {0, false, 2, Q::Major, -1, "V/V", S::AppliedDominant}, {0, false, 2, Q::Dom7, 6, "V65/V", S::AppliedDominant},
+        {0, false, 4, Q::Dom7, -1, "V7/vi", S::AppliedDominant}, {0, false, 1, Q::Dim7, -1, "viio7/ii", S::AppliedDominant},
+        {0, false, 10, Q::Major, -1, "bVII", S::BorrowedChord}, {0, false, 5, Q::Minor, -1, "iv", S::BorrowedChord},
+        {0, false, 8, Q::Major, -1, "bVI", S::BorrowedChord},  {0, false, 1, Q::Major, -1, "bII", S::BorrowedChord},
+        {0, false, 0, Q::Maj6, -1, "Iadd6", S::Diatonic},
+        {0, true, 4, Q::Major, -1, "V", S::Diatonic},          {0, true, 4, Q::Dom7, -1, "V7", S::Diatonic},
+        {0, true, 8, Q::Dim7, -1, "viio7", S::Diatonic},       {0, true, 0, Q::Major, -1, "III", S::Diatonic},
+        {0, true, 7, Q::Major, -1, "VII", S::Diatonic},        {0, true, 5, Q::Major, -1, "VI", S::Diatonic},
+        {0, true, 2, Q::Minor, -1, "iv", S::Diatonic},         {0, true, 9, Q::Major, -1, "I", S::BorrowedChord},
+        {0, true, 2, Q::Major, -1, "IV", S::BorrowedChord},    {0, true, 11, Q::Major, -1, "V/V", S::AppliedDominant},
+        {-3, false, 8, Q::Major, -1, "IV", S::Diatonic},       {-3, false, 11, Q::Major, -1, "bVI", S::BorrowedChord},
+        {3, true, 1, Q::Major, -1, "V", S::Diatonic},          // F# minor: C# major (E# leading tone)
+    };
+    for (const auto& c : cases) {
+        ChordMatcher m(session(c.fifths, c.minor));
+        char roman[12];
+        DiatonicStatus st;
+        m.roman(c.root, c.q, c.bass, roman, st);
+        INFO("fifths " << int(c.fifths) << (c.minor ? " minor" : " major") << " root " << c.root << " -> " << roman);
+        CHECK(std::string(roman) == c.roman);
+        CHECK(int(st) == int(c.status));
+    }
+    ChordMatcher noKey(session(0, false, false));
+    char roman[12];
+    DiatonicStatus st;
+    noKey.roman(7, ChordQuality::Dom7, -1, roman, st);
+    CHECK(roman[0] == 0);
+}
+
+TEST_CASE("cadences from the tracker: authentic, plagal, deceptive, half") {
+    const std::vector<int> G7 = {43, 59, 62, 65}, C = {48, 64, 67, 72}, F = {41, 57, 60, 65}, Am = {45, 60, 64, 69}, G = {43, 59, 62, 67};
+    auto only = [](const Result& r, CadenceType t) {
+        INFO(r.cadences.size() << " cadences");
+        REQUIRE(r.cadences.size() == 1);
+        INFO(r.cadences[0].fromRoman << " -> " << r.cadences[0].toRoman << ": " << r.cadences[0].evidence);
+        CHECK(int(r.cadences[0].type) == int(t));
+        CHECK(r.cadences[0].confidence <= 0.75f);
+        return r.cadences[0];
+    };
+    CadenceEvent pac = only(run({{G7, 1.2}, {C, 1.2}}), CadenceType::PerfectAuthentic);
+    CHECK(std::string(pac.fromRoman) == "V7");
+    CHECK(std::string(pac.toRoman) == "I");
+    CHECK(std::string(pac.evidence).find("root position") != std::string::npos);
+    only(run({{F, 1.2}, {C, 1.2}}), CadenceType::Plagal);
+    only(run({{G, 1.2}, {Am, 1.2}}), CadenceType::Deceptive);
+    only(run({{C, 1.2}, {G, 1.2}, {{}, 0.6}}), CadenceType::Half);
+    CHECK(run({{C, 1.2}, {F, 1.2}}).cadences.empty());
+    CHECK(run({{G7, 1.2}, {C, 1.2}}, session(0, false, false)).cadences.empty());   // no key, no function
 }

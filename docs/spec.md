@@ -885,6 +885,8 @@ struct ChordEvent {
     uint8_t missingCount;
     std::array<int8_t, 8> detectedNotes;
     std::array<int8_t, 8> missingNotes;
+    char roman[12];            // Roman numeral in the key (M5), "" = no key
+    DiatonicStatus diatonicStatus;
 
     float confidence;
     bool incomplete;
@@ -1022,6 +1024,12 @@ Initial rules:
 
 Output ALWAYS with confidence + list of textual evidence. Never state a
 definitive cadence without metric and melodic context.
+
+Implemented (M5, LIVE): `ChordMatcher::roman` / `cadence`, `CadenceEvent`
+(88 bytes, in the `AnalyzerEvent` union). Live cadences use root motion and
+bass position only; half/Phrygian need a phrase end (silence release).
+Confidence ≤ 0.75, evidence ends with "no melody". POST adds meter, melody,
+duration and phrase analysis.
 
 ## 18. SOLFÈGE
 
@@ -1263,7 +1271,8 @@ enum class AnalyzerEventType : uint8_t {
     NoteStart,      // display only (provisional)
     NoteEnd,        // COMPLETE MusicalNoteEvent (start + end)
     ChordConfirmed, // display only (end not yet known)
-    ChordEnded      // COMPLETE ChordEvent (start + end)
+    ChordEnded,     // COMPLETE ChordEvent (start + end)
+    Cadence         // CadenceEvent (§17), after the chord that completes it
 };
 
 struct AnalyzerEvent {
@@ -1274,6 +1283,7 @@ struct AnalyzerEvent {
         OnsetEvent onset;
         MusicalNoteEvent note;
         ChordEvent chord;
+        CadenceEvent cadence;
     } data;
 };
 // C#: [StructLayout(LayoutKind.Explicit)], union members at the same

@@ -80,7 +80,8 @@ unsafe struct ChordCandidateNative
     public fixed sbyte Detected[8];
     public fixed sbyte Missing[8];
     public fixed sbyte Extra[8];
-    byte _pad0;
+    public fixed byte Roman[12];
+    public byte DiatonicStatus;
     public float RootScore, ThirdScore, FifthScore, ChromaScore, BassScore, TemporalScore, TonalScore, TotalScore, Confidence;
     public byte HasBass, Incomplete, Arpeggiated;
     byte _pad1;
@@ -109,16 +110,17 @@ unsafe struct BassEstimateNative
     public float PreviewHz, SettleRemainingMs;
 }
 
-public enum AnalyzerEventType : byte { Onset, NoteStart, NoteEnd, ChordConfirmed, ChordEnded }
+public enum AnalyzerEventType : byte { Onset, NoteStart, NoteEnd, ChordConfirmed, ChordEnded, Cadence }
 
-/// Event header + raw payload; payload fields are read by offset (ChordEvent.symbol at data + 24).
+/// Event header + raw payload; payload fields are read by offset (ChordEvent.symbol at data + 24,
+/// roman at + 62; CadenceEvent type at + 8, confidence + 12, fromRoman + 16, toRoman + 32, evidence + 48).
 [StructLayout(LayoutKind.Sequential)]
 unsafe struct AnalyzerEventNative
 {
     public AnalyzerEventType Type;
     byte _p0, _p1, _p2;
     public uint Sequence;
-    public fixed byte Data[72];
+    public fixed byte Data[88];
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -283,7 +285,7 @@ public sealed class NativeLiveSource : ILiveSource
     LiveSnapshotNative _snap;   // held in a field: ana_read_snapshot copies into it in place
     readonly AnalyzerEventNative[] _events = new AnalyzerEventNative[256];
     uint _nextSequence;
-    readonly TextCache _symbol = new(), _alt0 = new(), _alt1 = new(), _alt2 = new(), _reason = new(), _event = new();
+    readonly TextCache _symbol = new(), _roman = new(), _alt0 = new(), _alt1 = new(), _alt2 = new(), _reason = new(), _event = new();
     string _alternatives = "";
     readonly int[][] _pcSets = Enumerable.Range(0, 9).Select(n => new int[n]).ToArray();
     bool _metronome = true;
@@ -336,6 +338,7 @@ public sealed class NativeLiveSource : ILiveSource
         // Chords (M3): preview every hop; confirmed state from the tracker. No bass yet (M4).
         ref readonly var ch = ref _snap.Chord;
         fixed (byte* sym = ch.Best.Symbol) f.ChordSymbol = _symbol.Get(sym, 16, Display);
+        fixed (byte* rn = ch.Best.Roman) f.ChordRoman = _roman.Get(rn, 12, DisplayRoman);
         f.ChordConfirmed = _snap.ChordConfirmed != 0;
         f.ChordConfidence = ch.Best.Confidence;
         f.ChordLatencyMs = _snap.ChordLatencyMs;
@@ -371,11 +374,26 @@ public sealed class NativeLiveSource : ILiveSource
                 {
                     if (ev[i].Sequence != _nextSequence) EventGaps++;
                     _nextSequence = ev[i].Sequence + 1;
-                    if (ev[i].Type != AnalyzerEventType.ChordConfirmed) continue;
-                    // Chord timeline: one cell per confirmed chord change, newest last.
-                    string sym = _event.Get(ev[i].Data + 24, 16, Display);
-                    f.TimelineBars.Add(sym);
-                    if (f.TimelineBars.Count > 8) f.TimelineBars.RemoveAt(0);
+                    byte* d = ev[i].Data;
+                    switch (ev[i].Type)
+                    {
+                        case AnalyzerEventType.ChordConfirmed:   // chord timeline: one cell per confirmed change, newest last
+                            f.TimelineBars.Add(_event.Get(d + 24, 16, Display));
+                            f.TimelineRomans.Add(_event.Get(d + 62, 12, DisplayRoman));
+                            if (f.TimelineBars.Count > 8) { f.TimelineBars.RemoveAt(0); f.TimelineRomans.RemoveAt(0); }
+                            break;
+                        case AnalyzerEventType.ChordEnded when f.TimelineBars.Count > 0:
+                            // A bass that settled after the confirmation adds the inversion: the final symbol wins.
+                            f.TimelineBars[^1] = _event.Get(d + 24, 16, Display);
+                            f.TimelineRomans[^1] = _event.Get(d + 62, 12, DisplayRoman);
+                            break;
+                        case AnalyzerEventType.Cadence:
+                            string from = _event.Get(d + 16, 16, DisplayRoman), to = _event.Get(d + 32, 16, DisplayRoman);
+                            string evidence = _event.Get(d + 48, 40);
+                            f.Cadence = $"{(from.Length > 0 ? from + " → " : "")}{to}  {CadenceName(d[8])} {*(float*)(d + 12):0.00}";
+                            f.CadenceEvidence = evidence;
+                            break;
+                    }
                 }
         }
     }
@@ -398,6 +416,14 @@ public sealed class NativeLiveSource : ILiveSource
 
     /// ASCII chord symbol from the core -> display ("F#m7b5" -> "F♯m7♭5"; letters are upper case, so 'b' is a flat).
     static string Display(string s) => s.Replace('#', '♯').Replace('b', '♭');
+
+    /// ASCII Roman numeral -> display ("viio7/V" -> "vii°7/V", "viih7" -> "viiø7", "bVII" -> "♭VII").
+    static string DisplayRoman(string s) => s.Replace('#', '♯').Replace('b', '♭').Replace('o', '°').Replace('h', 'ø');
+
+    static string CadenceName(byte t) => t switch
+    {
+        1 => "perfect authentic", 2 => "imperfect authentic", 3 => "half", 4 => "plagal", 5 => "deceptive", 6 => "Phrygian", _ => "",
+    };
 }
 
 /// Rebuilds a managed string only when the native bytes change (no per-frame allocation, spec §22.7).

@@ -11,7 +11,7 @@ The target design is [`spec.md`](spec.md); this file describes only what is buil
 | M2 | CQT engine, chroma, global tuning | Done |
 | M3 | Chord templates, matching, tracker, ambiguity reasons | Done |
 | M4 | Onsets, onset gating, bass, inversions, arpeggios | Done |
-| M5 | Music theory: chord spelling, Roman numerals, cadences, LCD staff | Partly (key spelling, key/cadence context, LCD staff) |
+| M5 | Music theory: chord spelling, Roman numerals, cadences, LCD staff | Done (live cadences use harmonic evidence only) |
 | M5b | Rack modules: fretboard/keyboard, waterfall, tuner, edit mode, stage mode | Partly (GUI prototype) |
 | M6 | LIVE → SCORE fast path, MusicXML/MIDI, Verovio | Not started (event log + sidecar ready) |
 | M7+ | STUDIO (import, editor, separation, choir, VST3) | Not started |
@@ -134,6 +134,27 @@ Only the pipeline chosen on START exists in a session (`voice_` for mono modes,
 - Arpeggio accumulator: a decaying max-hold used only for sparse frames, so
   strummed changes are never smeared.
 
+### M5 — music theory
+- Key cascade, key-signature spelling, chord symbols with key-aware roots and
+  chord-tone slash basses, LCD mini staff (from M1–M4).
+- Roman numerals on every candidate and chord event (`roman`, ASCII in the
+  ABI, shown as ♭ ♯ ° ø): case by the third, `o` / `+` / `h` for dim / aug /
+  half-dim, `M7`, figured bass for inversions (6, 64, 65, 43, 42), applied
+  chords (`V/V`, `V65/V`, `viio7/ii`), accidentals against the key's scale
+  (`bVII`, `bII`). Minor accepts the raised leading tone (V, viio7).
+- `DiatonicStatus` per chord: diatonic, applied dominant, borrowed from the
+  parallel mode (plus the Neapolitan), otherwise unknown. Never an error.
+- Cadence events (`AnalyzerEventType::Cadence`, `CadenceEvent`): perfect /
+  imperfect authentic (root position of both chords decides), plagal,
+  deceptive on arrival; half and Phrygian when silence ends the phrase. LIVE
+  has no melody or phrase analysis, so confidence is capped at 0.75 and the
+  evidence text says what was used. Metric position and melody come in POST.
+- Sidecar: chords carry `roman`, `diatonicStatus`, `inversion`; cadences are
+  written as their own entries.
+- GUI: Roman numeral and last cadence on the analyzer display, numerals under
+  each timeline cell; a `ChordEnded` replaces the timeline cell, so a bass
+  that settles after the confirmation still shows its inversion.
+
 ### GUI (prototype, C# / Avalonia 12.1, .NET 10)
 - START: mode, quality, key cascade, clef, meter, BPM, count-in, audio
   device/rate/period/exclusive/click output.
@@ -168,7 +189,7 @@ item).
 
 ## Tests
 
-`core/build/dz_tests`: 26 Catch2 cases. Every real-time path runs inside an
+`core/build/dz_tests`: 28 Catch2 cases. Every real-time path runs inside an
 `RtScope`, and the test binary's `operator new` aborts there, so any heap
 allocation in the callback or the analysis steady state fails the run.
 
@@ -183,6 +204,9 @@ allocation in the callback or the analysis steady state fails the run.
   microbench.
 - Chords: all qualities, ambiguities, key spelling, tracker timing, key/cadence
   context, bass inversions, settle timing, onsets and gating, arpeggio.
+- Theory: 31 Roman numeral cases (major, minor, flat and sharp keys, applied,
+  borrowed, figured bass); cadences from the tracker (authentic, plagal,
+  deceptive, half, none without a key).
 
 ## Open items
 

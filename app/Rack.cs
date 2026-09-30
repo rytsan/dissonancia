@@ -298,6 +298,8 @@ public sealed class LcdModule : RackModule
             double textY = inner.Y + dot * 1.3 * 7 + 10;
             Plasma.Text(ctx, $"alt  {f.ChordAlternatives}", inner.X, textY, 13, false);
             if (f.ChordReason.Length > 0) Plasma.Text(ctx, f.ChordReason, inner.X, textY + 18, 12, false);
+            if (f.ChordRoman.Length > 0) Plasma.Text(ctx, f.ChordRoman, rx, textY - 4, 18, f.ChordConfirmed, Ui.Mono, Ui.Align.Right);
+            if (f.Cadence.Length > 0) Plasma.Text(ctx, f.Cadence, rx, textY + 18, 12, false, Ui.Mono, Ui.Align.Right);
 
             ctx.DrawLine(Plasma.LineDim, new Point(inner.X, split - 6), new Point(inner.Right, split - 6));
         }
@@ -497,6 +499,8 @@ public sealed class TimelineModule : RackModule
                 ctx.DrawRectangle(i == count - 1 ? Ui.Lcd : new ImmutableSolidColorBrush(Color.FromUInt32(0xFF1A1C20)), Ui.LcdLineDim, cell, 3, 3);
             string sym = prov ? f.ProvisionalChord : f.TimelineBars[i];
             Ui.Text(ctx, sym, cell.Center.X, cell.Center.Y - 11, 18, prov ? Ui.Amber : Ui.LcdText, Ui.Mono, Ui.Align.Center);
+            string roman = prov ? f.ChordRoman : i < f.TimelineRomans.Count ? f.TimelineRomans[i] : "";
+            if (roman.Length > 0) Ui.Text(ctx, roman, cell.Center.X, cell.Center.Y + 10, 12, prov ? Ui.Amber : Ui.LcdText, Ui.Mono, Ui.Align.Center);
         }
         // playhead in the current bar
         double px = r.X + (count - 1) * w + 2 + (w - 4) * f.BarPhase;

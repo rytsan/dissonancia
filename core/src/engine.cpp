@@ -399,7 +399,7 @@ bool Engine::push_event(AnalyzerEvent e) {
 void Engine::publish_event(const AnalyzerEvent& e) {
     AnalyzerEvent copy = e;
     push_event(copy);
-    bool complete = e.type == AnalyzerEventType::NoteEnd || e.type == AnalyzerEventType::ChordEnded;
+    bool complete = e.type == AnalyzerEventType::NoteEnd || e.type == AnalyzerEventType::ChordEnded || e.type == AnalyzerEventType::Cadence;
     uint64_t rs = recStart_.load(std::memory_order_acquire);
     if (complete && takeLogOpen_.load(std::memory_order_acquire) && rs != kNever && anFrames_ >= rs) {
         if (takeLog_.size() < kTakeLogCapacity) takeLog_.push_back(e);   // within reserved capacity: no allocation
@@ -576,10 +576,19 @@ void Engine::write_sidecar(uint64_t frames, uint64_t dropped) {
         const AnalyzerEvent& e = takeLog_[i];
         if (e.type == AnalyzerEventType::ChordEnded) {
             const ChordEvent& c = e.data.chord;
-            std::fprintf(f, "%s\n    {\"type\": \"chord\", \"seq\": %u, \"start\": %.4f, \"end\": %.4f, \"symbol\": \"%s\", \"root\": %d,"
-                            " \"bass\": %d, \"quality\": %d, \"confidence\": %.3f, \"incomplete\": %s, \"bassSettled\": %s}",
-                         i ? "," : "", e.sequence, c.startTimeSeconds - t0, c.endTimeSeconds - t0, c.symbol, c.rootPitchClass, c.bassPitchClass,
-                         int(c.quality), c.confidence, c.incomplete ? "true" : "false", c.bassSettled ? "true" : "false");
+            std::fprintf(f, "%s\n    {\"type\": \"chord\", \"seq\": %u, \"start\": %.4f, \"end\": %.4f, \"symbol\": \"%s\", \"roman\": \"%s\","
+                            " \"diatonicStatus\": %d, \"root\": %d, \"bass\": %d, \"inversion\": %d, \"quality\": %d, \"confidence\": %.3f,"
+                            " \"incomplete\": %s, \"bassSettled\": %s}",
+                         i ? "," : "", e.sequence, c.startTimeSeconds - t0, c.endTimeSeconds - t0, c.symbol, c.roman, int(c.diatonicStatus),
+                         c.rootPitchClass, c.bassPitchClass, c.inversion, int(c.quality), c.confidence, c.incomplete ? "true" : "false",
+                         c.bassSettled ? "true" : "false");
+            continue;
+        }
+        if (e.type == AnalyzerEventType::Cadence) {
+            const CadenceEvent& c = e.data.cadence;
+            std::fprintf(f, "%s\n    {\"type\": \"cadence\", \"seq\": %u, \"time\": %.4f, \"cadence\": %d, \"from\": \"%s\", \"to\": \"%s\","
+                            " \"confidence\": %.3f, \"evidence\": \"%s\"}",
+                         i ? "," : "", e.sequence, c.timestampSeconds - t0, int(c.type), c.fromRoman, c.toRoman, c.confidence, c.evidence);
             continue;
         }
         if (e.type != AnalyzerEventType::NoteEnd) continue;
