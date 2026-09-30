@@ -259,6 +259,15 @@ LIVE layer only. POST has no latency budget.
 | GUI snapshot read | once per rendered frame (display refresh, ≥ 60 Hz), never per audio block |
 | xruns in 10 min | 0 |
 
+Why these budgets are enough: LIVE is VISUAL feedback — the musician hears the
+instrument acoustically, never a processed return. Sub-10 ms latency matters
+only for monitoring processed audio, which LIVE does not do. Visual lag of
+~40–60 ms is well inside audio/visual sync tolerance (ITU-R BT.1359: up to
+~125 ms of picture lag). Sample-rate changes are NOT a latency lever (window
+length is set by the lowest frequency's period, not by the rate). Deferred
+option, only if users report visual lag: voice-range preset on START (bass /
+tenor / alto / soprano) raising f_min and shortening the YIN window.
+
 Reference machine: to be fixed before M0 closes (CPU model, OS, audio
 interface/backend). CPU figures without it are invalid.
 
