@@ -117,9 +117,38 @@ struct AnalyzerEvent {
     } data;
 };
 
+// ---------------------------------------------------------------- pitch (§7)
+
+struct PitchEstimate {                 // instantaneous, every hop (tuner needle)
+    uint8_t voiced;                    // bool
+    uint8_t _pad0[3];
+    float frequencyHz;
+    float midiFloat;                   // 69 + 12 log2(f / A4)
+    float confidence;
+    float clarity;
+    float rms;
+    double timestampSeconds;           // window centre, sample clock, delay-compensated
+};
+
+struct NoteEstimate {                  // stable note (median + tracker), spelled (§22.2)
+    uint8_t valid;                     // bool
+    int8_t midi;                       // sounding pitch
+    int8_t letter;                     // 0=C .. 6=B
+    int8_t alter;                      // -2..+2
+    int8_t writtenOctave;              // octave of the LETTER, after clef shift (Cb4 = MIDI 59)
+    char writtenName[8];               // ASCII, e.g. "C#4", "Db4", "Cb4", "Fx5"
+    uint8_t _pad0[3];
+    float detectedHz;
+    float expectedHz;
+    float cents;                       // instantaneous pitch vs the stable note
+    float confidence;
+    uint8_t chromatic, diatonic;       // bool
+    uint8_t _pad1[2];
+};
+
 // ---------------------------------------------------------------- snapshot (§22)
-// M0 subset: meters, scope, transport, latency. Pitch/chord blocks are added by
-// M1+ (the layout test keeps C# in sync).
+// Meters, scope, transport, latency, pitch (M1). Chord blocks are added by M3+
+// (the layout test keeps C# in sync).
 
 struct LiveSnapshot {
     uint64_t sequence;
@@ -143,6 +172,9 @@ struct LiveSnapshot {
     float cpuPercent;                  // analysis thread busy time / wall time
     uint8_t beatInBar;                 // 1-based, 0 = metronome off
     uint8_t recording, countingIn, clipLatched;   // bool
+    float noteLatencyMs;               // estimated onset -> publish of the stable note
+    PitchEstimate pitch;
+    NoteEstimate note;
     float waveMin[ANA_WAVE_COLUMNS];
     float waveMax[ANA_WAVE_COLUMNS];
     float scope[ANA_SCOPE_SAMPLES];    // last samples, oldest first
@@ -154,6 +186,7 @@ struct AbiLayout {
     uint32_t sessionConfigSize, audioDeviceConfigSize, liveSnapshotSize, analyzerEventSize;
     uint32_t snapshotWaveMinOffset, snapshotScopeOffset, snapshotBeatInBarOffset, eventDataOffset;
     uint32_t chordEventSize, noteEventSize;
+    uint32_t snapshotPitchOffset, snapshotNoteOffset;
 };
 
 // ---------------------------------------------------------------- functions

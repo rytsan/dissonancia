@@ -67,6 +67,8 @@ void ana_struct_layout(AbiLayout* out) {
     out->eventDataOffset = offsetof(AnalyzerEvent, data);
     out->chordEventSize = sizeof(ChordEvent);
     out->noteEventSize = sizeof(MusicalNoteEvent);
+    out->snapshotPitchOffset = offsetof(LiveSnapshot, pitch);
+    out->snapshotNoteOffset = offsetof(LiveSnapshot, note);
 }
 
 int32_t ana_capture_device_count(AnalyzerHandle* h) {

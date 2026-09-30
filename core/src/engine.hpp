@@ -3,6 +3,7 @@
 #pragma once
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -11,6 +12,7 @@
 #include "live_config.hpp"
 #include "lockfree.hpp"
 #include "miniaudio.h"
+#include "voice.hpp"
 
 namespace dz {
 
@@ -44,6 +46,8 @@ private:
     void analysis_loop();
     void recorder_loop();
     void process_hop(const float* x, uint32_t n);
+    void publish_event(const AnalyzerEvent& e);
+    void flush_pipeline();
     void mix_click(float* out, uint32_t frames, uint64_t pos);
     void write_sidecar(uint64_t frames, uint64_t dropped);
     uint64_t next_downbeat_after(uint64_t frame, uint32_t extraBars) const;
@@ -108,6 +112,16 @@ private:
     uint64_t seq_ = 0;
     uint32_t eventSeq_ = 0;
     std::atomic<uint32_t> droppedEvents_{0};
+
+    // pipeline (only the selected one exists, §5)
+    std::unique_ptr<VoicePipeline> voice_;
+    VoiceOutput vout_{};
+
+    // confirmed event log of the take (sidecar, fast path LIVE -> SCORE)
+    static constexpr size_t kTakeLogCapacity = 1 << 16;
+    std::vector<AnalyzerEvent> takeLog_;
+    std::atomic<bool> takeLogOpen_{false}, takeLogOverflow_{false};
+    std::atomic<bool> flushRequest_{false}, flushDone_{false};
 
     TripleBuffer<LiveSnapshot> snapshots_;
     SpscQueue<AnalyzerEvent, ANA_EVENT_QUEUE_CAPACITY> events_;

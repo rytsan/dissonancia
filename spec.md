@@ -476,6 +476,13 @@ Algorithmic execution strategy:
   $d(\tau) = r_t(0) + r_{t+\tau}(0) - 2r_t(\tau)$ via PocketFFT/pffft
   (energy terms via running sum of squares), $O(N \log N)$.
 
+"Window" in the mode × quality table is the TOTAL analysed span: integration
+length = window − max lag (max lag = rate / f_min), so the window is also the
+worst-case look-back. Measured on synthetic input (M1, sample clock, 48 kHz):
+time-to-first-pitch 30 / 30 / 40 ms and time-to-stable 55 / 50 / 60 ms for
+LowLatency / Balanced / HighPrecision. Time-domain scalar YIN costs ≈ 2 % of
+one core; SIMD and the FFT variant wait until a measurement asks for them.
+
 Two latencies, two outputs:
 - Instantaneous pitch (tuner needle, cents): published EVERY hop, no median.
 - Stable note (label, score events): causal median of 3 frames + tracker

@@ -30,6 +30,36 @@ unsafe struct AudioDeviceConfigNative
 }
 
 [StructLayout(LayoutKind.Sequential)]
+struct PitchEstimateNative
+{
+    public byte Voiced;
+    byte _p0, _p1, _p2;
+    public float FrequencyHz, MidiFloat, Confidence, Clarity, Rms;
+    public double TimestampSeconds;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+unsafe struct NoteEstimateNative
+{
+    public byte Valid;
+    public sbyte Midi, Letter, Alter, WrittenOctave;
+    public fixed byte WrittenName[8];
+    fixed byte _pad0[3];
+    public float DetectedHz, ExpectedHz, Cents, Confidence;
+    public byte Chromatic, Diatonic;
+    fixed byte _pad1[2];
+}
+
+/// Opaque event (type + sequence); payload decoded when SCORE consumes events (M6).
+[StructLayout(LayoutKind.Sequential, Size = 80)]
+struct AnalyzerEventNative
+{
+    public byte Type;
+    byte _p0, _p1, _p2;
+    public uint Sequence;
+}
+
+[StructLayout(LayoutKind.Sequential)]
 unsafe struct LiveSnapshotNative
 {
     public const int WaveColumns = 1024, ScopeSamples = 2048;
@@ -43,6 +73,9 @@ unsafe struct LiveSnapshotNative
     public uint WaveWriteIndex;
     public float WaveColumnSeconds, CpuPercent;
     public byte BeatInBar, Recording, CountingIn, ClipLatched;
+    public float NoteLatencyMs;
+    public PitchEstimateNative Pitch;
+    public NoteEstimateNative Note;
     public fixed float WaveMin[WaveColumns];
     public fixed float WaveMax[WaveColumns];
     public fixed float Scope[ScopeSamples];
@@ -58,6 +91,7 @@ struct AbiLayout
     public uint SessionConfigSize, AudioDeviceConfigSize, LiveSnapshotSize, AnalyzerEventSize;
     public uint SnapshotWaveMinOffset, SnapshotScopeOffset, SnapshotBeatInBarOffset, EventDataOffset;
     public uint ChordEventSize, NoteEventSize;
+    public uint SnapshotPitchOffset, SnapshotNoteOffset;
 }
 
 static partial class Ana
@@ -74,6 +108,7 @@ static partial class Ana
     [LibraryImport(Lib, EntryPoint = "ana_start")] public static partial int Start(nint h, in SessionConfigNative s, in AudioDeviceConfigNative d);
     [LibraryImport(Lib, EntryPoint = "ana_stop")] public static partial int Stop(nint h);
     [LibraryImport(Lib, EntryPoint = "ana_read_snapshot")] public static partial void ReadSnapshot(nint h, ref LiveSnapshotNative s);
+    [LibraryImport(Lib, EntryPoint = "ana_drain_events")] public static unsafe partial int DrainEvents(nint h, AnalyzerEventNative* events, int cap);
     [LibraryImport(Lib, EntryPoint = "ana_rec_start", StringMarshalling = StringMarshalling.Utf8)] public static partial int RecStart(nint h, string wavPath);
     [LibraryImport(Lib, EntryPoint = "ana_rec_stop")] public static partial int RecStop(nint h);
     [LibraryImport(Lib, EntryPoint = "ana_set_metronome")] public static partial int SetMetronome(nint h, byte on, float bpm, TimeSignatureNative meter);
@@ -95,6 +130,9 @@ static partial class Ana
         Eq("LiveSnapshot.beatInBar", l.SnapshotBeatInBarOffset, Marshal.OffsetOf<LiveSnapshotNative>(nameof(LiveSnapshotNative.BeatInBar)));
         Eq("LiveSnapshot.waveMin", l.SnapshotWaveMinOffset, Marshal.OffsetOf<LiveSnapshotNative>(nameof(LiveSnapshotNative.WaveMin)));
         Eq("LiveSnapshot.scope", l.SnapshotScopeOffset, Marshal.OffsetOf<LiveSnapshotNative>(nameof(LiveSnapshotNative.Scope)));
+        Eq("LiveSnapshot.pitch", l.SnapshotPitchOffset, Marshal.OffsetOf<LiveSnapshotNative>(nameof(LiveSnapshotNative.Pitch)));
+        Eq("LiveSnapshot.note", l.SnapshotNoteOffset, Marshal.OffsetOf<LiveSnapshotNative>(nameof(LiveSnapshotNative.Note)));
+        Eq("AnalyzerEvent", l.AnalyzerEventSize, Unsafe.SizeOf<AnalyzerEventNative>());
     }
 }
 
@@ -164,7 +202,12 @@ public sealed class NativeLiveSource : ILiveSource
     readonly nint _h;
     readonly Session _session;
     LiveSnapshotNative _snap;   // held in a field: ana_read_snapshot copies into it in place
+    readonly AnalyzerEventNative[] _events = new AnalyzerEventNative[256];
+    uint _nextSequence;
     bool _metronome = true;
+
+    /// Events lost between core and GUI (sequence gaps), shown as incomplete event log.
+    public int EventGaps { get; private set; }
 
     internal NativeLiveSource(nint h, Session s) { _h = h; _session = s; }
 
@@ -201,10 +244,27 @@ public sealed class NativeLiveSource : ILiveSource
         f.RecorderGaps = (int)_snap.RecorderGaps;
         f.Simulated = false;
 
-        // No pitch/chord pipeline yet (M1+): the LCD shows nothing rather than invented values.
+        // Pitch (M1). Chords arrive with M3: until then the chord LCD stays empty.
+        ref readonly var n = ref _snap.Note;
+        f.NoteValid = n.Valid != 0;
+        if (f.NoteValid) f.Note = new Pitch(n.Letter, n.Alter, n.WrittenOctave - _session.Clef.OctaveShift());   // GUI holds sounding pitch
+        f.Hz = _snap.Pitch.Voiced != 0 ? _snap.Pitch.FrequencyHz : 0;
+        f.Cents = f.NoteValid ? n.Cents : 0;
+        f.NoteLatencyMs = _snap.NoteLatencyMs;
         f.ChordSymbol = "";
         f.ChordConfirmed = false;
-        f.NoteValid = false;
+
+        // Drain every frame so the queue never overflows; SCORE (M6) will consume the payloads.
+        fixed (AnalyzerEventNative* ev = _events)
+        {
+            int count;
+            while ((count = Ana.DrainEvents(_h, ev, _events.Length)) > 0)
+                for (int i = 0; i < count; i++)
+                {
+                    if (ev[i].Sequence != _nextSequence) EventGaps++;
+                    _nextSequence = ev[i].Sequence + 1;
+                }
+        }
     }
 
     public void ToggleRec(double now)

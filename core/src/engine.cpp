@@ -94,6 +94,12 @@ int Engine::start(const SessionConfig& s, const AudioDeviceConfig& d, ma_context
     waveMin_.assign(ANA_WAVE_COLUMNS, 0.f);
     waveMax_.assign(ANA_WAVE_COLUMNS, 0.f);
     scope_.assign(ANA_SCOPE_SAMPLES, 0.f);
+    voice_.reset();
+    if (!is_chord_mode(s.mode)) voice_ = std::make_unique<VoicePipeline>(s, live_, rate_, hopFrames_, captureLatencyMs_ / 1000.0);
+    vout_ = {};
+    takeLog_.clear();
+    takeLog_.reserve(kTakeLogCapacity);
+    takeLogOpen_ = takeLogOverflow_ = flushRequest_ = flushDone_ = false;
     clickAccent_ = make_click(rate_, 1760, 0.5f);
     clickBeat_ = make_click(rate_, 1320, 0.35f);
 
@@ -136,6 +142,7 @@ int Engine::stop() {
     wake_.notify_one();
     analysisThread_.join();
     recorderThread_.join();
+    flush_pipeline();   // analysis thread is gone: this thread is now the only producer
     if (ringsInit_) { ma_pcm_rb_uninit(&analysisRing_); ma_pcm_rb_uninit(&recorderRing_); ringsInit_ = false; }
     running_ = false;
     return ANA_OK;
@@ -250,12 +257,14 @@ void Engine::analysis_loop() {
             process_hop(hopBuf_.data(), hopFrames_);
             float busy = float((now_seconds() - t0) / live_.hopSeconds) * 100.f;
             cpu_ += 0.05f * (busy - cpu_);
+            if (flushRequest_.load(std::memory_order_acquire)) flush_pipeline();
         }
+        if (flushRequest_.load(std::memory_order_acquire)) flush_pipeline();
         if (stopFlag_.load()) break;
         uint32_t g = wake_.load(std::memory_order_acquire);
         waiting_.store(true, std::memory_order_relaxed);
         std::atomic_thread_fence(std::memory_order_seq_cst);
-        if (ma_pcm_rb_available_read(&analysisRing_) < hopFrames_ && !stopFlag_.load())
+        if (ma_pcm_rb_available_read(&analysisRing_) < hopFrames_ && !stopFlag_.load() && !flushRequest_.load())
             wake_.wait(g, std::memory_order_acquire);
         waiting_.store(false, std::memory_order_relaxed);
     }
@@ -288,6 +297,11 @@ void Engine::process_hop(const float* x, uint32_t n) {
     if (peakDb >= peakHoldDb_ || t - peakHoldT_ > kPeakHoldSeconds) { peakHoldDb_ = peakDb; peakHoldT_ = t; }
     if (clearClip_.exchange(false, std::memory_order_relaxed)) clip_ = false;
     if (peak >= 0.999f) clip_ = true;
+
+    if (voice_) {
+        voice_->process(x, n, anFrames_, vout_);
+        for (uint32_t i = 0; i < vout_.eventCount; i++) publish_event(vout_.events[i]);
+    }
 
     LiveSnapshot& s = snapshots_.write_slot();
     double now = now_seconds();
@@ -324,6 +338,9 @@ void Engine::process_hop(const float* x, uint32_t n) {
     s.waveWriteIndex = waveWrite_;
     s.waveColumnSeconds = float(colFrames_) / rate_;
     s.cpuPercent = cpu_;
+    s.pitch = vout_.pitch;
+    s.note = vout_.note;
+    s.noteLatencyMs = vout_.note.valid ? vout_.noteLatencySeconds * 1000.f + s.latencyProcessingMs : 0.f;
     std::memcpy(s.waveMin, waveMin_.data(), sizeof s.waveMin);
     std::memcpy(s.waveMax, waveMax_.data(), sizeof s.waveMax);
     size_t tail = ANA_SCOPE_SAMPLES - scopeWrite_;
@@ -338,6 +355,30 @@ bool Engine::push_event(AnalyzerEvent e) {
     if (events_.try_push(e)) return true;
     droppedEvents_.fetch_add(1, std::memory_order_relaxed);
     return false;
+}
+
+void Engine::publish_event(const AnalyzerEvent& e) {
+    AnalyzerEvent copy = e;
+    push_event(copy);
+    bool complete = e.type == AnalyzerEventType::NoteEnd || e.type == AnalyzerEventType::ChordEnded;
+    uint64_t rs = recStart_.load(std::memory_order_acquire);
+    if (complete && takeLogOpen_.load(std::memory_order_acquire) && rs != kNever && anFrames_ >= rs) {
+        if (takeLog_.size() < kTakeLogCapacity) takeLog_.push_back(e);   // within reserved capacity: no allocation
+        else takeLogOverflow_.store(true, std::memory_order_relaxed);
+    }
+}
+
+// Closes open notes/chords as complete events (§3 completeness rule). Runs on the analysis
+// thread (REC stop) or on the API thread after the analysis thread has joined (ana_stop).
+void Engine::flush_pipeline() {
+    if (voice_) {
+        voice_->flush(vout_);
+        for (uint32_t i = 0; i < vout_.eventCount; i++) publish_event(vout_.events[i]);
+        vout_.eventCount = 0;
+    }
+    takeLogOpen_.store(false, std::memory_order_release);
+    flushRequest_.store(false, std::memory_order_relaxed);
+    flushDone_.store(true, std::memory_order_release);
 }
 
 void Engine::read_snapshot(LiveSnapshot* out) { *out = snapshots_.read(); }
@@ -375,6 +416,9 @@ int Engine::rec_start(const char* wavPath) {
         metroGen_.fetch_add(1, std::memory_order_release);
     }
     recPath_ = wavPath;
+    takeLog_.clear();   // analysis thread does not touch the log while it is closed
+    takeLogOverflow_ = false;
+    takeLogOpen_.store(true, std::memory_order_release);
     recWritten_ = 0;
     recDropped_ = 0;
     recorderGaps_ = 0;
@@ -399,6 +443,17 @@ int Engine::rec_stop() {
     while (encoder_.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline)
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
     bool closed = encoder_.load() == nullptr;
+
+    // Flush open events into the take log on the analysis thread, then read the (closed) log.
+    flushDone_.store(false);
+    flushRequest_.store(true, std::memory_order_release);
+    wake_.fetch_add(1, std::memory_order_release);
+    wake_.notify_one();
+    auto flushDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (!flushDone_.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < flushDeadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    takeLogOpen_.store(false, std::memory_order_release);
+
     if (closed) {
         if (empty) std::remove(recPath_.c_str());
         else write_sidecar(recWritten_.load(), recDropped_.load());
@@ -463,12 +518,24 @@ void Engine::write_sidecar(uint64_t frames, uint64_t dropped) {
                  "  \"droppedFrames\": %llu,\n"
                  "  \"normalizationGainDb\": null,\n"
                  "  \"eventLogComplete\": %s,\n"
-                 "  \"events\": []\n"
-                 "}\n",
+                 "  \"eventTimeBase\": \"seconds from the first downbeat of the take\",\n"
+                 "  \"events\": [",
                  int(s.mode), int(s.quality), s.referenceA4, s.keySet ? "true" : "false", s.keyFifths, int(s.keyMode), int(s.clef),
                  s.meter.numerator, s.meter.denominator, s.bpm, s.countInBars, rate_, captureChannels_, captureLatencyMs_,
                  (unsigned long long)recStart_.load(), (unsigned long long)frames, recorderGaps_.load(), (unsigned long long)dropped,
-                 droppedEvents_.load() == 0 ? "true" : "false");
+                 !takeLogOverflow_.load() && flushDone_.load() ? "true" : "false");
+    const double t0 = double(recStart_.load()) / rate_;
+    for (size_t i = 0; i < takeLog_.size(); i++) {
+        const AnalyzerEvent& e = takeLog_[i];
+        if (e.type != AnalyzerEventType::NoteEnd) continue;   // chords: M3
+        const MusicalNoteEvent& n = e.data.note;
+        std::fprintf(f,
+                     "%s\n    {\"type\": \"note\", \"seq\": %u, \"start\": %.4f, \"end\": %.4f, \"midi\": %d, \"name\": \"%s\","
+                     " \"avgHz\": %.2f, \"medianHz\": %.2f, \"avgCents\": %.1f, \"confidence\": %.3f, \"chromatic\": %s, \"vibrato\": %s}",
+                     i ? "," : "", e.sequence, n.startTimeSeconds - t0, n.endTimeSeconds - t0, n.midi, n.writtenName, n.avgHz, n.medianHz,
+                     n.avgCents, n.confidence, n.chromatic ? "true" : "false", n.vibrato ? "true" : "false");
+    }
+    std::fprintf(f, "\n  ]\n}\n");
     std::fclose(f);
 }
 
