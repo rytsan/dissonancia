@@ -47,6 +47,24 @@ static class Ui
     public static readonly IPen VuNeedle = P(0xFF111111, 1.6);
     public static readonly IBrush VuInkBrush = B(0xFF2B2418);
 
+    // VU glass: sheen (curved reflection), top inner shadow, edge vignette, warm backlight, needle shadow.
+    static ImmutableGradientStop S(double o, uint argb) => new(o, Color.FromUInt32(argb));
+    static RelativePoint Rel(double x, double y) => new(x, y, RelativeUnit.Relative);
+    public static readonly IBrush GlassSheen = new ImmutableLinearGradientBrush(
+        [S(0, 0x00FFFFFF), S(0.74, 0x00FFFFFF), S(0.76, 0x60FFFFFF), S(1, 0x0CFFFFFF)], startPoint: Rel(0, 0), endPoint: Rel(0, 1));
+    public static readonly IBrush GlassShadow = new ImmutableLinearGradientBrush(
+        [S(0, 0x70000000), S(0.2, 0x00000000)], startPoint: Rel(0, 0), endPoint: Rel(0, 1));
+    public static readonly IBrush GlassVignette = new ImmutableRadialGradientBrush(
+        [S(0, 0x00000000), S(0.72, 0x00000000), S(1, 0x55000000)], center: Rel(0.5, 0.55), gradientOrigin: Rel(0.5, 0.55),
+        radiusX: new RelativeScalar(0.75, RelativeUnit.Relative), radiusY: new RelativeScalar(0.9, RelativeUnit.Relative));
+    public static readonly IBrush Backlight = new ImmutableRadialGradientBrush(
+        [S(0, 0x55FFD890), S(1, 0x00FFD890)], center: Rel(0.5, 1), gradientOrigin: Rel(0.5, 1),
+        radiusX: new RelativeScalar(0.7, RelativeUnit.Relative), radiusY: new RelativeScalar(0.9, RelativeUnit.Relative));
+    public static readonly IBrush GlassStreak = B(0x16FFFFFF);
+    public static readonly IPen NeedleShadow = P(0x38000000, 2.4);
+    public static readonly IPen BezelOuter = P(0xFF0B0C0E, 4);
+    public static readonly IPen BezelHighlight = P(0x40FFFFFF, 1);
+
     public static readonly IBrush Scope = B(0xFF050E09);
     public static readonly IPen ScopeGrid = P(0xFF10261A, 1);
     public static readonly IPen ScopeTrace = P(0xFF7CFFB2, 1.2);
@@ -126,7 +144,9 @@ public sealed class InputModule : RackModule
         var f = Frame!;
         // VU face
         var face = new Rect(r.X, r.Y, Math.Min(230, r.Width * 0.55), r.Height);
-        ctx.DrawRectangle(Ui.VuFace, Ui.VuInk, face, 5, 5);
+        var faceClip = new RoundedRect(face, 6);
+        ctx.DrawRectangle(Ui.VuFace, null, face, 6, 6);
+        using (ctx.PushClip(faceClip)) ctx.DrawRectangle(Ui.Backlight, null, face);
         var pivot = new Point(face.Center.X, face.Bottom + face.Height * 0.35);
         double radius = face.Height * 1.05;
         const double a0 = -0.78, a1 = 0.78;       // radians from vertical
@@ -151,8 +171,31 @@ public sealed class InputModule : RackModule
             }
         }
         Ui.Text(ctx, "VU", face.Center.X, face.Bottom - 26, 13, Ui.VuInkBrush, Ui.SansBold, Ui.Align.Center);
-        using (ctx.PushClip(face))
-            ctx.DrawLine(Ui.VuNeedle, pivot, OnArc(VuPos(f.VuLevel), radius * 0.9));
+        using (ctx.PushClip(faceClip))
+        {
+            var tip = OnArc(VuPos(f.VuLevel), radius * 0.9);
+            var shadow = new Point(2.5, 3.5);   // needle sits a few mm above the scale, under the glass
+            ctx.DrawLine(Ui.NeedleShadow, pivot + shadow, tip + shadow);
+            ctx.DrawLine(Ui.VuNeedle, pivot, tip);
+
+            // Glass: inner shadow under the bezel, edge vignette, curved reflection, a thin streak.
+            ctx.DrawRectangle(Ui.GlassShadow, null, face);
+            ctx.DrawRectangle(Ui.GlassVignette, null, face);
+            var sheen = new Rect(face.X - face.Width * 0.35, face.Y - face.Height * 1.6, face.Width * 1.7, face.Height * 2.1);
+            ctx.DrawEllipse(Ui.GlassSheen, null, sheen.Center, sheen.Width / 2, sheen.Height / 2);
+            var streak = new StreamGeometry();
+            using (var g = streak.Open())
+            {
+                g.BeginFigure(new Point(face.X + face.Width * 0.62, face.Y), true);
+                g.LineTo(new Point(face.X + face.Width * 0.70, face.Y));
+                g.LineTo(new Point(face.X + face.Width * 0.46, face.Bottom));
+                g.LineTo(new Point(face.X + face.Width * 0.40, face.Bottom));
+                g.EndFigure(true);
+            }
+            ctx.DrawGeometry(Ui.GlassStreak, null, streak);
+        }
+        ctx.DrawRectangle(null, Ui.BezelOuter, face.Inflate(1.5), 7, 7);
+        ctx.DrawRectangle(null, Ui.BezelHighlight, face.Deflate(0.5), 6, 6);
 
         // Peak LED ladder (dBFS), target zone -18..-6
         double x0 = face.Right + 18, w = r.Right - x0, y = r.Y + 14;
@@ -217,104 +260,123 @@ public sealed class ScopeModule : RackModule
     }
 }
 
-/// LCD panel: chord line on top, monophonic note (or bass) below with a mini staff.
+/// Plasma display: chord line on top, monophonic note (or bass) below with a mini staff.
 public sealed class LcdModule : RackModule
 {
+    StreamGeometry? _grid;
+    Size _gridSize;
+
     public LcdModule() { Title = "ANALYZER"; }
 
     protected override void DrawContent(DrawingContext ctx, Rect r)
     {
         var f = Frame!;
-        ctx.DrawRectangle(Ui.Lcd, Ui.LcdEdge, r, 6, 6);
-        var inner = r.Deflate(14);
+        Plasma.Panel(ctx, r, ref _grid, ref _gridSize);
+        var inner = r.Deflate(16);
         bool chords = Session.IsChordMode;
-        double split = chords ? inner.Y + inner.Height * 0.52 : inner.Y;
+        double split = chords ? inner.Y + inner.Height * 0.54 : inner.Y;
 
         if (chords)
         {
-            // Ghost segments behind the symbol, like an unlit LCD.
-            Ui.Text(ctx, "888888", inner.X, inner.Y - 4, 52, Ui.LcdGhost, Ui.Mono);
-            Ui.Text(ctx, f.ChordSymbol, inner.X, inner.Y - 4, 52, Ui.LcdText, Ui.Mono);
+            // Chord symbol: 7 dot-matrix cells, unlit dots visible like a real gas-plasma panel.
+            double rx = inner.Right, status = 150;
+            double dot = Math.Min((inner.Width - status - 10) / (7 * 6 * 1.3), (split - inner.Y - 62) / (7 * 1.3));
+            Plasma.DotText(ctx, f.ChordSymbol, inner.X, inner.Y, dot, cells: 7, dim: !f.ChordConfirmed);   // provisional = dimmer
 
-            double rx = inner.Right;
-            Ui.Led(ctx, new Point(rx - 118, inner.Y + 10), 5, !f.ChordConfirmed, Ui.Amber, Ui.AmberOff);
-            Ui.Text(ctx, "PROV", rx - 108, inner.Y + 3, 11, f.ChordConfirmed ? Ui.LcdDim : Ui.Amber, Ui.SansBold);
-            Ui.Led(ctx, new Point(rx - 58, inner.Y + 10), 5, f.ChordConfirmed, Ui.Green, Ui.GreenOff);
-            Ui.Text(ctx, "CONF", rx - 48, inner.Y + 3, 11, f.ChordConfirmed ? Ui.Green : Ui.LcdDim, Ui.SansBold);
+            Plasma.Lamp(ctx, new Point(rx - 140, inner.Y + 8), 4.5, !f.ChordConfirmed && f.ChordSymbol.Length > 0);
+            Plasma.Text(ctx, "PROV", rx - 130, inner.Y + 1, 11, !f.ChordConfirmed, Ui.SansBold);
+            Plasma.Lamp(ctx, new Point(rx - 70, inner.Y + 8), 4.5, f.ChordConfirmed);
+            Plasma.Text(ctx, "CONF", rx - 60, inner.Y + 1, 11, f.ChordConfirmed, Ui.SansBold);
 
-            // Confidence bar (10 segments)
             for (int i = 0; i < 10; i++)
-                ctx.DrawRectangle(i < f.ChordConfidence * 10 ? Ui.LcdText : Ui.LcdGhost, null,
-                    new Rect(rx - 118 + i * 11.5, inner.Y + 26, 9, 8), 1, 1);
-            Ui.Text(ctx, $"{f.ChordConfidence:0.00}", rx - 124, inner.Y + 22, 12, Ui.LcdText, Ui.Mono, Ui.Align.Right);
+                Plasma.Lamp(ctx, new Point(rx - 136 + i * 13.5, inner.Y + 30), 3.6, i < f.ChordConfidence * 10);
+            Plasma.Text(ctx, $"{f.ChordConfidence:0.00}", rx, inner.Y + 40, 12, true, Ui.Mono, Ui.Align.Right);
 
-            string ms = f.ChordConfirmed ? Ui.Ms(f.ChordLatencyMs) : $"{Ui.Ms(f.ChordLatencyMs)} · +{f.ChordConfirmElapsedMs:0} ms";
-            Ui.Text(ctx, ms, rx, inner.Y + 44, 13, Ui.LcdText, Ui.Mono, Ui.Align.Right);
+            string ms = f.ChordConfirmed ? Ui.Ms(f.ChordLatencyMs) : $"{Ui.Ms(f.ChordLatencyMs)} · +{f.ChordConfirmElapsedMs:0}";
+            Plasma.Text(ctx, ms, rx, inner.Y + 58, 13, true, Ui.Mono, Ui.Align.Right);
 
-            Ui.Text(ctx, $"alt: {f.ChordAlternatives}", inner.X, inner.Y + 66, 13, Ui.LcdDim, Ui.Mono);
-            if (f.ChordReason.Length > 0) Ui.Text(ctx, $"reason: {f.ChordReason}", inner.X, inner.Y + 86, 12, Ui.LcdDim, Ui.Mono);
+            double textY = inner.Y + dot * 1.3 * 7 + 10;
+            Plasma.Text(ctx, $"alt  {f.ChordAlternatives}", inner.X, textY, 13, false);
+            if (f.ChordReason.Length > 0) Plasma.Text(ctx, f.ChordReason, inner.X, textY + 18, 12, false);
 
-            ctx.DrawLine(Ui.LcdLineDim, new Point(inner.X, split - 6), new Point(inner.Right, split - 6));
+            ctx.DrawLine(Plasma.LineDim, new Point(inner.X, split - 6), new Point(inner.Right, split - 6));
         }
 
-        // Lower line: bass (chord modes) or monophonic note (mono modes), spelled and clef-shifted.
-        var sounding = chords ? f.Bass : f.Note;
-        bool valid = chords || f.NoteValid;
-        var written = sounding.WithOctaveShift(Session.Clef.OctaveShift());
-        double big = chords ? 40 : 64, y = split + (chords ? 4 : 10);
-        string label = chords ? "BASS" : "NOTE";
-        Ui.Text(ctx, label, inner.X, y, 10, Ui.LcdDim, Ui.SansBold);
-        Ui.Text(ctx, valid ? written.Name : "—", inner.X, y + 12, big, Ui.LcdText, Ui.Mono);
+        if (!chords) { DrawNoteScreen(ctx, inner, f); return; }
 
-        double infoX = inner.X + (chords ? 130 : 210);
-        if (chords)
-        {
-            Ui.Led(ctx, new Point(infoX + 5, y + 30), 5, f.BassSettled, Ui.Green, Ui.GreenOff);
-            Ui.Text(ctx, f.BassSettled ? "settled" : "settling", infoX + 22, y + 22, 13, f.BassSettled ? Ui.LcdText : Ui.Amber, Ui.Mono);
-            Ui.Text(ctx, $"{sounding.Hz():0.0} Hz", infoX, y + 44, 13, Ui.LcdDim, Ui.Mono);
-        }
-        else
-        {
-            DrawCents(ctx, new Rect(infoX, y + 18, 190, 26), f.Cents);
-            Ui.Text(ctx, $"{f.Cents:+0;-0}¢   {f.Hz:0.0} Hz", infoX, y + 50, 14, Ui.LcdText, Ui.Mono);
-            Ui.Text(ctx, Ui.Ms(f.NoteLatencyMs), infoX, y + 72, 13, Ui.LcdDim, Ui.Mono);
-        }
-        if (Session.Clef == Clef.Treble8vb) Ui.Text(ctx, "written 8vb", inner.X, y + 12 + big * 1.25, 10, Ui.LcdDim, Ui.Mono);
-
-        double staffW = 170, staffH = chords ? 56 : 80;
-        DrawStaff(ctx, new Rect(inner.Right - staffW, y + (chords ? 10 : 20), staffW, staffH), written, valid);
+        // Lower line (chord modes): bass, spelled and clef-shifted.
+        bool valid = f.ChordSymbol.Length > 0;
+        var written = f.Bass.WithOctaveShift(Session.Clef.OctaveShift());
+        double y = split + 2, noteDot = 4.2;
+        Plasma.Text(ctx, "BASS", inner.X, y, 10, false, Ui.SansBold);
+        Plasma.DotText(ctx, valid ? written.Name : "", inner.X, y + 16, noteDot, cells: 4);
+        double infoX = inner.X + Plasma.CellWidth(noteDot) * 4 + 14;
+        Plasma.Lamp(ctx, new Point(infoX + 5, y + 26), 4.5, f.BassSettled);
+        Plasma.Text(ctx, f.BassSettled ? "settled" : "settling", infoX + 18, y + 18, 13, f.BassSettled, Ui.Mono);
+        Plasma.Text(ctx, valid ? $"{f.Bass.Hz():0.0} Hz" : "— Hz", infoX, y + 40, 13, false);
+        if (Session.Clef == Clef.Treble8vb) Plasma.Text(ctx, "written 8vb", inner.X, y + 22 + noteDot * 1.3 * 7, 10, false);
+        DrawStaff(ctx, new Rect(inner.Right - 160, y + 10, 160, 56), written, valid);
     }
 
-    static void DrawCents(DrawingContext ctx, Rect r, float cents)
+    /// Mono modes: the whole display is the note — big spelled name, staff, full-width cents meter.
+    void DrawNoteScreen(DrawingContext ctx, Rect inner, LiveFrame f)
     {
-        ctx.DrawLine(Ui.LcdLineDim, new Point(r.X, r.Center.Y), new Point(r.Right, r.Center.Y));
+        var written = f.Note.WithOctaveShift(Session.Clef.OctaveShift());
+        double staffW = Math.Min(230, inner.Width * 0.38);
+        double dot = Math.Min((inner.Width - staffW - 24) / (4 * 6 * 1.3), (inner.Height * 0.5) / (7 * 1.3));
+        double noteH = dot * 1.3 * 7;
+        Plasma.Text(ctx, "NOTE", inner.X, inner.Y, 10, false, Ui.SansBold);
+        Plasma.DotText(ctx, f.NoteValid ? written.Name : "", inner.X, inner.Y + 16, dot, cells: 4);
+        DrawStaff(ctx, new Rect(inner.Right - staffW, inner.Y + 10, staffW, noteH + 6), written, f.NoteValid);
+
+        double y = inner.Y + 16 + noteH + 22;
+        var meter = new Rect(inner.X, y, inner.Width, 34);
+        DrawCents(ctx, meter, f.Cents, f.NoteValid);
+        foreach (var (c, t) in new[] { (-50, "-50"), (0, "0"), (50, "+50") })
+            Plasma.Text(ctx, t, meter.X + meter.Width * (c + 50) / 100.0, meter.Bottom + 2, 10, false, Ui.Mono, Ui.Align.Center);
+
+        double ty = meter.Bottom + 22;
+        Plasma.Text(ctx, f.NoteValid ? $"{f.Cents:+0;-0} ¢" : "— ¢", inner.X, ty, 20);
+        Plasma.Text(ctx, f.NoteValid ? $"{f.Hz:0.0} Hz" : "— Hz", inner.X + inner.Width * 0.36, ty, 20);
+        Plasma.Text(ctx, Ui.Ms(f.NoteLatencyMs), inner.Right, ty, 20, true, Ui.Mono, Ui.Align.Right);
+        if (Session.Clef == Clef.Treble8vb) Plasma.Text(ctx, "written 8vb", inner.X + inner.Width * 0.36, inner.Y, 10, false);
+    }
+
+    static void DrawCents(DrawingContext ctx, Rect r, float cents, bool valid)
+    {
+        ctx.DrawLine(Plasma.LineDim, new Point(r.X, r.Center.Y), new Point(r.Right, r.Center.Y));
         for (int c = -50; c <= 50; c += 10)
         {
             double x = r.X + r.Width * (c + 50) / 100.0;
-            ctx.DrawLine(c == 0 ? Ui.LcdLine : Ui.LcdLineDim, new Point(x, r.Center.Y - (c == 0 ? 10 : 5)), new Point(x, r.Center.Y + (c == 0 ? 10 : 5)));
+            var a = new Point(x, r.Center.Y - (c == 0 ? 10 : 5));
+            var b = new Point(x, r.Center.Y + (c == 0 ? 10 : 5));
+            if (c == 0) Plasma.GlowLine(ctx, a, b); else ctx.DrawLine(Plasma.LineDim, a, b);
         }
+        if (!valid) return;
         double nx = r.X + r.Width * (Math.Clamp(cents, -50, 50) + 50) / 100.0;
-        ctx.DrawRectangle(Math.Abs(cents) < 5 ? Ui.Green : Math.Abs(cents) < 15 ? Ui.LcdText : Ui.Amber, null, new Rect(nx - 2, r.Y, 4, r.Height), 1, 1);
+        var bar = new Rect(nx - 2.5, r.Y, 5, r.Height);
+        ctx.DrawRectangle(Plasma.Halo, null, bar.Inflate(4), 3, 3);
+        ctx.DrawRectangle(Math.Abs(cents) < 5 ? Plasma.Hot : Plasma.Lit, null, bar, 1.5, 1.5);   // in tune = white-hot
     }
 
     void DrawStaff(DrawingContext ctx, Rect r, Pitch written, bool valid)
     {
         double gap = r.Height / 6, bottom = r.Bottom - gap;   // 5 lines, 4 spaces
         double Y(int pos) => bottom - pos * gap / 2;
-        for (int i = 0; i < 5; i++) ctx.DrawLine(Ui.LcdLine, new Point(r.X, Y(i * 2)), new Point(r.Right, Y(i * 2)));
+        for (int i = 0; i < 5; i++) Plasma.GlowLine(ctx, new Point(r.X, Y(i * 2)), new Point(r.Right, Y(i * 2)));
 
         var clef = Session.Clef;
         string glyph = clef switch { Clef.Bass => "𝄢", Clef.Alto or Clef.Tenor => "𝄡", _ => "𝄞" };
         double clefSize = gap * 4.2;
-        Ui.Text(ctx, glyph, r.X + 2, Y(clef is Clef.Bass ? 8 : clef is Clef.Alto ? 6 : clef is Clef.Tenor ? 8 : 6) - clefSize * 0.55, clefSize, Ui.LcdText, Ui.Music);
-        if (clef == Clef.Treble8vb) Ui.Text(ctx, "8", r.X + 12, Y(-4), gap * 1.3, Ui.LcdText, Ui.SansBold);
+        Plasma.Glyph(ctx, glyph, r.X + 2, Y(clef is Clef.Bass ? 8 : clef is Clef.Alto ? 6 : clef is Clef.Tenor ? 8 : 6) - clefSize * 0.55, clefSize, Ui.Music);
+        if (clef == Clef.Treble8vb) Plasma.Glyph(ctx, "8", r.X + 12, Y(-4), gap * 1.3, Ui.SansBold);
 
         // Key signature
         double kx = r.X + gap * 3.2;
         string acc = Session.Key.Fifths >= 0 ? "♯" : "♭";
         foreach (var pos in clef.KeySignaturePositions(Session.Key.Fifths))
         {
-            Ui.Text(ctx, acc, kx, Y(pos) - gap * 1.25, gap * 2, Ui.LcdText, Ui.Music);
+            Plasma.Glyph(ctx, acc, kx, Y(pos) - gap * 1.25, gap * 2, Ui.Music);
             kx += gap * 0.95;
         }
         if (!valid) return;
@@ -322,11 +384,13 @@ public sealed class LcdModule : RackModule
         // Note head, accidental, ledger lines
         int notePos = written.Step - clef.BottomLineStep();
         double nx = Math.Max(kx + gap * 2.4, r.X + r.Width * 0.72);
-        for (int p = -2; p >= notePos; p -= 2) ctx.DrawLine(Ui.LcdLine, new Point(nx - gap * 1.1, Y(p)), new Point(nx + gap * 1.1, Y(p)));
-        for (int p = 10; p <= notePos; p += 2) ctx.DrawLine(Ui.LcdLine, new Point(nx - gap * 1.1, Y(p)), new Point(nx + gap * 1.1, Y(p)));
-        ctx.DrawEllipse(Ui.LcdText, null, new Point(nx, Y(notePos)), gap * 0.62, gap * 0.46);
+        for (int p = -2; p >= notePos; p -= 2) Plasma.GlowLine(ctx, new Point(nx - gap * 1.1, Y(p)), new Point(nx + gap * 1.1, Y(p)));
+        for (int p = 10; p <= notePos; p += 2) Plasma.GlowLine(ctx, new Point(nx - gap * 1.1, Y(p)), new Point(nx + gap * 1.1, Y(p)));
+        var head = new Point(nx, Y(notePos));
+        ctx.DrawEllipse(Plasma.Halo, null, head, gap * 1.0, gap * 0.85);
+        ctx.DrawEllipse(Plasma.Lit, null, head, gap * 0.62, gap * 0.46);
         if (ShowAccidental(written))
-            Ui.Text(ctx, Theory.Accidental(written.Alter) is { Length: > 0 } a ? a : "♮", nx - gap * 2.1, Y(notePos) - gap * 1.25, gap * 2, Ui.LcdText, Ui.Music);
+            Plasma.Glyph(ctx, Theory.Accidental(written.Alter) is { Length: > 0 } a ? a : "♮", nx - gap * 2.1, Y(notePos) - gap * 1.25, gap * 2, Ui.Music);
     }
 
     /// Accidental is printed only when it differs from the key signature.
@@ -526,28 +590,46 @@ public sealed class StatusModule : RackModule
 /// Stage mode (spec §22.5): huge chord and note, beat LEDs, one ms line.
 public sealed class StageView : RackModule
 {
+    StreamGeometry? _grid;
+    Size _gridSize;
+
     public StageView() { Title = "STAGE  ·  Esc to leave"; }
 
     protected override void DrawContent(DrawingContext ctx, Rect r)
     {
         var f = Frame!;
-        ctx.DrawRectangle(Ui.Lcd, Ui.LcdEdge, r, 8, 8);
+        Plasma.Panel(ctx, r, ref _grid, ref _gridSize);
         double h = r.Height;
-        if (Session.IsChordMode)
-            Ui.Text(ctx, f.ChordSymbol, r.Center.X, r.Y + h * 0.08, h * 0.34, f.ChordConfirmed ? Ui.LcdText : Ui.Amber, Ui.Mono, Ui.Align.Center);
-        var p = (Session.IsChordMode ? f.Bass : f.Note).WithOctaveShift(Session.Clef.OctaveShift());
-        Ui.Text(ctx, p.Name, r.Center.X, r.Y + h * (Session.IsChordMode ? 0.5 : 0.15), h * (Session.IsChordMode ? 0.16 : 0.36), Ui.LcdText, Ui.Mono, Ui.Align.Center);
-        if (!Session.IsChordMode)
+        bool chords = Session.IsChordMode;
+        var p = (chords ? f.Bass : f.Note).WithOctaveShift(Session.Clef.OctaveShift());
+
+        // Big dot-matrix readout, centred: chord (7 cells) or note (4 cells).
+        int cells = chords ? 7 : 4;
+        double dot = Math.Min(r.Width * 0.85 / (cells * 6 * 1.3), h * (chords ? 0.34 : 0.42) / (7 * 1.3));
+        string main = Centre(chords ? f.ChordSymbol : f.NoteValid ? p.Name : "", cells);
+        Plasma.DotText(ctx, main, r.Center.X - Plasma.CellWidth(dot) * cells / 2, r.Y + h * 0.08, dot, cells, dim: chords && !f.ChordConfirmed);
+        if (chords)
         {
-            double bw = r.Width * 0.6, bx = r.Center.X - bw / 2, by = r.Y + h * 0.68;
-            ctx.DrawRectangle(Ui.LcdGhost, null, new Rect(bx, by, bw, 14), 3, 3);
-            double nx = bx + bw * (Math.Clamp(f.Cents, -50, 50) + 50) / 100;
-            ctx.DrawRectangle(Math.Abs(f.Cents) < 5 ? Ui.Green : Ui.Amber, null, new Rect(nx - 4, by - 6, 8, 26), 2, 2);
+            double bassDot = dot * 0.42;
+            Plasma.DotText(ctx, Centre(f.ChordSymbol.Length > 0 ? p.Name : "", 4), r.Center.X - Plasma.CellWidth(bassDot) * 2, r.Y + h * 0.52, bassDot, 4);
+        }
+        else
+        {
+            double bw = r.Width * 0.6, bx = r.Center.X - bw / 2, by = r.Y + h * 0.66;
+            ctx.DrawLine(Plasma.LineDim, new Point(bx, by + 7), new Point(bx + bw, by + 7));
+            Plasma.GlowLine(ctx, new Point(r.Center.X, by - 6), new Point(r.Center.X, by + 20));
+            if (f.NoteValid)
+            {
+                double nx = bx + bw * (Math.Clamp(f.Cents, -50, 50) + 50) / 100;
+                var bar = new Rect(nx - 5, by - 8, 10, 30);
+                ctx.DrawRectangle(Plasma.Halo, null, bar.Inflate(6), 4, 4);
+                ctx.DrawRectangle(Math.Abs(f.Cents) < 5 ? Plasma.Hot : Plasma.Lit, null, bar, 2, 2);
+            }
         }
         for (int i = 1; i <= Session.BeatsPerBar; i++)
-            Ui.Led(ctx, new Point(r.Center.X + (i - (Session.BeatsPerBar + 1) / 2.0) * 60, r.Y + h * 0.82), 14,
-                f.BeatInBar == i, i == 1 ? Ui.Red : Ui.Green, i == 1 ? Ui.RedOff : Ui.GreenOff);
-        string rec = f.Recording ? "● REC" : f.CountingIn ? "COUNT-IN" : "";
-        Ui.Text(ctx, $"{rec}   capture {f.CaptureMs:0} ms · proc {f.ProcessingMs:0} ms · display {f.DisplayMs:0} ms", r.Center.X, r.Bottom - 30, 16, Ui.LcdDim, Ui.Mono, Ui.Align.Center);
+            Plasma.Lamp(ctx, new Point(r.Center.X + (i - (Session.BeatsPerBar + 1) / 2.0) * 60, r.Y + h * 0.82), i == 1 ? 16 : 12, f.BeatInBar == i);
+        string rec = f.Recording ? "● REC   " : f.CountingIn ? "COUNT-IN   " : "";
+        static string Centre(string s, int cells) => new string(' ', Math.Max(0, (cells - Plasma.CellCount(s)) / 2)) + s;
+        Plasma.Text(ctx, $"{rec}capture {f.CaptureMs:0} ms · proc {f.ProcessingMs:0} ms · display {f.DisplayMs:0} ms", r.Center.X, r.Bottom - 30, 16, f.Recording, Ui.Mono, Ui.Align.Center);
     }
 }

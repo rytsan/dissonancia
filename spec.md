@@ -1335,8 +1335,19 @@ Live spelling rules (deterministic, no look-ahead):
 
 Visual language: a recording-studio rack. Dark rack units with ears and
 screws, mixing analog elements (VU needle on a backlit face, knobs, toggle
-switches) and digital elements (LCD/VFD panel, 7-segment counters, LED
+switches) and digital elements (gas-plasma display, 7-segment counters, LED
 ladders). Drawn as vectors (no photo textures), high contrast, HiDPI-scalable.
+
+- Analyzer display and stage mode: orange gas-plasma look. Main readouts
+  (chord symbol, note, bass) in a 5×7 dot matrix with the unlit dots visible;
+  lit dots glow (halo + core + hot centre); provisional chords are dimmer
+  than confirmed ones; secondary text in the same orange with a soft glow;
+  fine pixel grid on a recessed dark panel (`app/Plasma.cs`). In mono modes
+  the whole display is the note: big name, staff, full-width cents meter
+  (white-hot marker within ±5 cents).
+- VU meter under glass: warm backlight, top inner shadow, edge vignette,
+  curved reflection and a thin streak, needle casting a shadow on the scale,
+  dark bezel with a highlight edge.
 
 ```
 ┌─ LIVE ─────────────────────────────────────────────────────────────────┐
