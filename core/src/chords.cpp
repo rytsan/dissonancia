@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 
 namespace dz {
 
@@ -35,6 +36,8 @@ const QualityDef& def(ChordQuality q) {
 }
 
 // Amplitude a single note puts on pitch classes relative to itself (partials 1..6, 1/h).
+constexpr float kContextWeight = 0.06f;
+
 constexpr float kPartialPc[12] = {1.0f + 0.5f + 0.25f, 0, 0, 0, 0.2f, 0, 0, 0.33f + 0.17f, 0, 0, 0, 0};
 
 bool contains(const int8_t* a, int n, int v) {
@@ -47,10 +50,10 @@ bool contains(const int8_t* a, int n, int v) {
 
 // ---------------------------------------------------------------- matcher
 
-ChordMatcher::ChordMatcher(const SessionConfig& s) : keySet_(s.keySet != 0), fifths_(s.keyFifths) {
+ChordMatcher::ChordMatcher(const SessionConfig& s)
+    : keySet_(s.keySet != 0), fifths_(s.keyFifths), minor_(s.keyMode != KeyMode::Major),
+      tonic_((7 * (s.keyFifths + 12) + (s.keyMode != KeyMode::Major ? 9 : 0)) % 12) {
     speller_.configure(s.keyFifths, s.keyMode);
-    for (int pc = 0; pc < 12; pc++)
-        if (speller_.diatonic(60 + pc)) keyMask_ |= uint16_t(1u << pc);
     for (int qi = 0; qi < kQualities; qi++)
         for (int root = 0; root < 12; root++) {
             int t = qi * 12 + root;
@@ -79,7 +82,89 @@ void ChordMatcher::symbol(int root, ChordQuality q, char (&out)[16]) const {
     std::snprintf(out, sizeof out, "%c%s%s", "CDEFGAB"[sp.letter], acc[sp.alter + 2], def(q).suffix);
 }
 
-void ChordMatcher::match(const float* energy, ChordRecognitionResult& out) const {
+namespace {
+
+enum class Family { Major, Minor, Dominant, Diminished, Other };
+
+Family family(ChordQuality q) {
+    switch (q) {
+        case ChordQuality::Major: case ChordQuality::Maj7: case ChordQuality::Maj6: case ChordQuality::Add9:
+        case ChordQuality::Sus2: case ChordQuality::Sus4: return Family::Major;
+        case ChordQuality::Minor: case ChordQuality::Min7: case ChordQuality::Min6: return Family::Minor;
+        case ChordQuality::Dom7: return Family::Dominant;
+        case ChordQuality::Diminished: case ChordQuality::HalfDim7: case ChordQuality::Dim7: return Family::Diminished;
+        default: return Family::Other;   // power (no third), augmented
+    }
+}
+
+bool fits(Family rule, ChordQuality q) {
+    Family f = family(q);
+    if (q == ChordQuality::Power) return rule == Family::Major || rule == Family::Minor || rule == Family::Dominant;
+    return f == rule || (rule == Family::Dominant && f == Family::Major);   // a V triad is still dominant
+}
+
+struct DegreeRule { int semis; Family family; float weight; const char* roman; };
+
+// Function of a chord by its root's distance from the tonic. Includes the chromatic chords a
+// live player uses constantly: harmonic-minor V, secondary dominants, borrowed chords.
+constexpr DegreeRule kMajorRules[] = {
+    {0, Family::Major, 1.0f, "I"},    {7, Family::Dominant, 0.95f, "V"}, {5, Family::Major, 0.85f, "IV"},
+    {9, Family::Minor, 0.7f, "vi"},   {2, Family::Minor, 0.7f, "ii"},    {4, Family::Minor, 0.5f, "iii"},
+    {11, Family::Diminished, 0.4f, "vii"}, {2, Family::Dominant, 0.35f, "V/V"}, {4, Family::Dominant, 0.35f, "V/vi"},
+    {9, Family::Dominant, 0.35f, "V/ii"}, {0, Family::Dominant, 0.35f, "V/IV"}, {5, Family::Minor, 0.3f, "iv"},
+    {10, Family::Major, 0.3f, "bVII"}, {8, Family::Major, 0.3f, "bVI"},
+};
+constexpr DegreeRule kMinorRules[] = {
+    {0, Family::Minor, 1.0f, "i"},    {7, Family::Dominant, 0.95f, "V"}, {5, Family::Minor, 0.85f, "iv"},
+    {8, Family::Major, 0.7f, "VI"},   {3, Family::Major, 0.6f, "III"},   {10, Family::Major, 0.6f, "VII"},
+    {2, Family::Diminished, 0.5f, "ii"}, {7, Family::Minor, 0.45f, "v"}, {11, Family::Diminished, 0.45f, "vii"},
+    {5, Family::Major, 0.35f, "IV"},  {0, Family::Major, 0.3f, "I"},
+};
+
+}  // namespace
+
+float ChordMatcher::context(int root, ChordQuality q, int prevRoot, ChordQuality prevQ, const char** why) const {
+    if (!keySet_) return 0;
+    auto degree = [&](int r, ChordQuality cq, const char** roman) {
+        int semis = (r - tonic_ + 12) % 12;
+        float best = 0.15f;   // anything else: possible, just not expected
+        const DegreeRule* rules = minor_ ? kMinorRules : kMajorRules;
+        size_t n = minor_ ? std::size(kMinorRules) : std::size(kMajorRules);
+        for (size_t i = 0; i < n; i++)
+            if (rules[i].semis == semis && fits(rules[i].family, cq) && rules[i].weight > best) {
+                best = rules[i].weight;
+                if (roman) *roman = rules[i].roman;
+            }
+        return best;
+    };
+    const char* roman = nullptr;
+    float prior = 0.7f * degree(root, q, &roman);
+    if (why) *why = roman;
+
+    if (prevRoot >= 0) {
+        int from = (prevRoot - tonic_ + 12) % 12, to = (root - tonic_ + 12) % 12;
+        Family pf = family(prevQ);
+        bool prevDominant = from == 7 && (pf == Family::Dominant || pf == Family::Major);
+        bool tonicChord = to == 0 && family(q) == (minor_ ? Family::Minor : Family::Major);
+        if (prevDominant && tonicChord) { prior += 0.5f; if (why) *why = minor_ ? "V-i cadence" : "V-I cadence"; }
+        else if (from == 5 && tonicChord) { prior += 0.3f; if (why) *why = "plagal cadence"; }
+        else if (prevDominant && to == (minor_ ? 8 : 9)) { prior += 0.25f; if (why) *why = "deceptive cadence"; }
+        else if ((prevRoot - root + 12) % 12 == 7) prior += 0.15f;   // root falls a fifth
+    }
+    return std::min(prior, 1.f);
+}
+
+void ChordMatcher::match(const float* energy, const ChordHistory& h, ChordRecognitionResult& out) const {
+    auto previous = [&](int root, ChordQuality q, ChordQuality& pq) {
+        bool isCurrent = root == h.currentRoot && q == h.currentQuality;
+        pq = isCurrent ? h.beforeQuality : h.currentQuality;
+        return isCurrent ? h.beforeRoot : h.currentRoot;
+    };
+    auto ctx = [&](int root, ChordQuality q, const char** why) {
+        ChordQuality pq;
+        int pr = previous(root, q, pq);
+        return context(root, q, pr, pq, why);
+    };
     out = {};
     float amp[12], mx = 0;
     double norm = 0;
@@ -106,7 +191,9 @@ void ChordMatcher::match(const float* energy, ChordRecognitionResult& out) const
             if (!in && amp[k] >= 0.6f * mx) score -= 0.04f;
             if (in && amp[k] < 0.3f * mx) score -= 0.04f;
         }
-        if (keySet_ && (masks_[t] & ~keyMask_) == 0) score += 0.002f;   // tonal context: tie-break only
+        // Context (key function + cadence) weighs less than one Occam penalty: it decides only
+        // what the audio leaves open (identical sets, C+E dyad), never overrides a clear chord.
+        score += kContextWeight * ctx(t % 12, kDefs[t / 12].q, nullptr);
         for (int i = 0; i < 4; i++)
             if (score > top[i].score) {
                 for (int j = 3; j > i; j--) top[j] = top[j - 1];
@@ -141,6 +228,8 @@ void ChordMatcher::match(const float* energy, ChordRecognitionResult& out) const
         c.fifthScore = amp[(root + 7) % 12] / mx;
         c.chromaScore = s.score;
         c.totalScore = s.score;
+        c.tonalScore = ctx(root, d.q, nullptr);
+        c.chromaScore = s.score - kContextWeight * c.tonalScore;   // acoustic part only
         c.incomplete = c.missingCount > 0;
     };
 
@@ -163,9 +252,19 @@ void ChordMatcher::match(const float* energy, ChordRecognitionResult& out) const
 
     ChordQuality q = out.best.quality;
     const ChordCandidate& alt = out.alternatives[0];
+    // Did the context decide? (the runner-up was acoustically as good or better)
+    const char* function = nullptr;
+    ctx(out.best.rootPitchClass, q, &function);
+    bool contextDecided = out.alternativeCount && alt.chromaScore >= out.best.chromaScore - 0.005f && function;
+    if (contextDecided && (sameSet || margin < 0.02f)) {
+        std::snprintf(out.explanation, sizeof out.explanation, sameSet ? "%s = %s: %s in key, bass decides" : "%s over %s: %s in key",
+                      out.best.symbol, alt.symbol, function);
+        return;
+    }
     if (symmetric) std::snprintf(out.explanation, sizeof out.explanation, "symmetric chord - root needs bass");
     else if (sameSet) std::snprintf(out.explanation, sizeof out.explanation, "%s = %s - bass decides", out.best.symbol, alt.symbol);
     else if (q == ChordQuality::Power || q == ChordQuality::Sus2 || q == ChordQuality::Sus4) std::snprintf(out.explanation, sizeof out.explanation, "no third - major/minor unknown");
+    else if (out.best.missingCount && function) std::snprintf(out.explanation, sizeof out.explanation, "incomplete chord, %s in key", function);
     else if (out.best.missingCount) std::snprintf(out.explanation, sizeof out.explanation, "incomplete chord");
     else if (margin < 0.01f) std::snprintf(out.explanation, sizeof out.explanation, "close to %s", alt.symbol);
 }
@@ -202,7 +301,7 @@ void ChordTracker::emit(Output& out, AnalyzerEventType type, const Chord& ch, do
 
 void ChordTracker::process(const ChromaVector& chroma, double t, double frameEnd, Output& out) {
     out.eventCount = 0;
-    matcher_.match(chroma.raw, out.preview);
+    matcher_.match(chroma.raw, history_, out.preview);
     const ChordCandidate& best = out.preview.best;
     const bool sound = best.symbol[0] != 0;
 
@@ -235,6 +334,7 @@ void ChordTracker::process(const ChromaVector& chroma, double t, double frameEnd
                 // Confirmed: the previous chord ends exactly at the new chord's backdated onset.
                 if (active_) emit(out, AnalyzerEventType::ChordEnded, cur_, candStart_);
                 cur_ = {best, candStart_, best.confidence, 1};
+                history_ = {best.rootPitchClass, best.quality, history_.currentRoot, history_.currentQuality};   // cadence context
                 curLatencyMs_ = candLatencyMs_;
                 active_ = true;
                 candidateOn_ = false;

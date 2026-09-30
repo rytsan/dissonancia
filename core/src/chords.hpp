@@ -14,11 +14,26 @@
 
 namespace dz {
 
+// Confirmed chords so far: the current one and the one before it. A template equal to the
+// current chord is judged against the chord before it (its own arrival), any other template
+// against the current chord (the move it would make).
+struct ChordHistory {
+    int currentRoot = -1;
+    ChordQuality currentQuality = ChordQuality::Unknown;
+    int beforeRoot = -1;
+    ChordQuality beforeQuality = ChordQuality::Unknown;
+};
+
 class ChordMatcher {
 public:
     explicit ChordMatcher(const SessionConfig& s);
     // chromaEnergy: 12 energies (ChromaVector.raw), already leakage-cleaned; all zero = silence.
-    void match(const float* chromaEnergy, ChordRecognitionResult& out) const;
+    // history: confirmed chords so far, for the backward-looking context prior.
+    void match(const float* chromaEnergy, const ChordHistory& history, ChordRecognitionResult& out) const;
+
+    // Tonal context prior in [0, 1] (spec §12 tonalScore): function of the chord in the key
+    // (major or minor mode) + cadence from the previous chord. Causal: no look-ahead.
+    float context(int root, ChordQuality q, int previousRoot, ChordQuality previousQuality, const char** why) const;
     void symbol(int root, ChordQuality q, char (&out)[16]) const;
 
     static constexpr int kQualities = 15;
@@ -29,7 +44,8 @@ private:
     bool keySet_;
     mutable Speller speller_;
     int8_t fifths_ = 0;
-    uint16_t keyMask_ = 0;
+    bool minor_ = false;
+    int tonic_ = 0;   // pitch class of the tonic of the session key (relative minor in minor mode)
 };
 
 class ChordTracker {
@@ -67,6 +83,7 @@ private:
     ChordCandidate cand_{};
     double candStart_ = 0, candTime_ = 0, lastSound_ = 0, silentSince_ = -1;
     float candLatencyMs_ = 0, curLatencyMs_ = 0;
+    ChordHistory history_;
 };
 
 }  // namespace dz

@@ -17,12 +17,13 @@ namespace {
 constexpr double kPi = 3.14159265358979323846;
 constexpr uint32_t kRate = 48000, kHop = 960;   // 20 ms at 48 kHz
 
-SessionConfig session(int8_t fifths = 0) {
+SessionConfig session(int8_t fifths = 0, bool minor = false, bool keySet = true) {
     SessionConfig s{};
+    s.keyMode = minor ? KeyMode::NaturalMinor : KeyMode::Major;
     s.mode = AnalysisMode::GuitarChords;
     s.quality = AudioQuality::Balanced;
     s.referenceA4 = 440;
-    s.keySet = 1;
+    s.keySet = keySet;
     s.keyFifths = fifths;
     s.meter = {4, 4};
     s.bpm = 120;
@@ -117,7 +118,7 @@ TEST_CASE("chord matcher: 15 qualities x 4 roots, identical sets flagged, never 
 }
 
 TEST_CASE("chord ambiguities: C6 = Am7, symmetric, missing third") {
-    Result c6 = run({{{48, 52, 55, 57}, 1.0}});   // C E G A
+    Result c6 = run({{{48, 52, 55, 57}, 1.0}}, session(0, false, false));   // C E G A, no key: nothing can decide
     std::string why = c6.last.preview.explanation;
     INFO(c6.last.preview.best.symbol << " / " << why);
     CHECK(c6.last.preview.ambiguous);
@@ -154,4 +155,33 @@ TEST_CASE("chord tracker: passing tone ignored, backdated onsets, no overlap, si
     double confirmDelay = r.confirmedAt[1] - r.confirmed[1].startTimeSeconds;
     std::printf("[measure] chord confirmation %.0f ms after the backdated onset (documented 0.4-1 s)\n", confirmDelay * 1000);
     CHECK((confirmDelay >= 0.4 && confirmDelay <= 1.0));
+}
+
+TEST_CASE("context: key mode + cadence decide what the audio leaves open, never override it") {
+    auto last = [](const Result& r) { return std::string(r.last.preview.best.symbol); };
+    auto why = [](const Result& r) { return std::string(r.last.preview.explanation); };
+    const std::vector<int> G = {43, 47, 50, 55}, E = {40, 44, 47, 52}, E7 = {40, 44, 47, 50}, dyadCE = {48, 52, 60}, C6 = {48, 52, 55, 57};
+
+    // C + E only (no G, no A): C major after G = V-I -> C; A minor after E = V-i -> Am.
+    Result maj = run({{G, 1.0}, {dyadCE, 1.0}}, session(0, false));
+    INFO("C major: " << last(maj) << " / " << why(maj));
+    CHECK(last(maj) == "C");
+    CHECK(why(maj).find("V-I") != std::string::npos);
+    Result min = run({{E, 1.0}, {dyadCE, 1.0}}, session(0, true));
+    INFO("A minor: " << last(min) << " / " << why(min));
+    CHECK(last(min) == "Am");
+    CHECK(why(min).find("V-i") != std::string::npos);
+
+    // Identical sets: C6 in C major after G7-ish; Am7 in A minor after E7. Still flagged.
+    Result c6 = run({{G, 1.0}, {C6, 1.0}}, session(0, false));
+    CHECK(last(c6) == "C6");
+    CHECK(c6.last.preview.ambiguous);
+    Result am7 = run({{E7, 1.0}, {C6, 1.0}}, session(0, true));
+    CHECK(last(am7) == "Am7");
+    CHECK(why(am7).find("bass decides") != std::string::npos);
+
+    // A full C triad stays C even in A minor right after E: the audio is clear.
+    CHECK(last(run({{E, 1.0}, {{48, 52, 55}, 1.0}}, session(0, true))) == "C");
+    // And a full A minor triad stays Am in C major after G.
+    CHECK(last(run({{G, 1.0}, {{45, 48, 52}, 1.0}}, session(0, false))) == "Am");
 }

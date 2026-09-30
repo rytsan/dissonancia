@@ -797,7 +797,21 @@ Implemented in M3 (`core/src/chords.cpp`):
   measured from its backdated onset. A return of the confirmed chord cancels
   the candidate, so passing tones never confirm. Silence of 0.15 s closes
   the chord at the last sounding frame.
-- Measured on synthetic chords (15 qualities × 4 roots): 44/60 exact; the
+- Tonal context prior (`tonalScore`, LIVE, causal — no look-ahead): when a key
+  is set, each candidate gets a prior from (a) its function in the key,
+  separately for MAJOR and MINOR mode (major: I, V, IV, vi, ii, iii, vii°;
+  minor: i, V from the harmonic minor, iv, VI, III, VII, ii°, v; plus
+  secondary dominants and borrowed chords at low weight), and (b) the cadence
+  from the previous confirmed chord (V→I / V→i authentic, IV→I plagal, V→vi /
+  V→VI deceptive, root falling a fifth). A template equal to the current
+  chord is judged by its own arrival; any other template by the move it
+  would make. Weight 0.06, below 2 Occam penalties: context decides only what
+  the audio leaves open and never overrides a clear chord. Example: C+E alone
+  after E in A minor → Am ("V-i"); the same dyad after G in C major → C; a full
+  C triad stays C in A minor; C E G A → C6 in C major, Am7 in A minor, still
+  flagged ("bass decides"). POST keeps the full functional analysis with
+  look-ahead (section 17).
+- Measured on synthetic chords (15 qualities × 4 roots): 45/60 exact; the
   other 16 are identical pitch-class sets (6 ≡ m7, m6 ≡ ø7, aug, dim7), all
   flagged ambiguous with the reason. Confirmation lands 402 ms after the onset.
 
