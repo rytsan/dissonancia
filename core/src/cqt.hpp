@@ -8,10 +8,13 @@
 // microbench, tests/test_cqt.cpp).
 #pragma once
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include "dissonancia.h"
 #include "halfband.hpp"
+
+namespace dz { class OnsetDetector; class BassTracker; }
 
 namespace dz {
 
@@ -22,6 +25,7 @@ public:
 
     // fMin is snapped to the tempered grid of a4. Bins: fMin * 2^(k / bpo), whole octaves.
     void init(double liveRate, float fMin, float fMax, int bpo, float a4, uint32_t maxBlock);
+    void ensure_history(uint32_t samples);          // per octave; init time only (allocates)
     void push(const float* x, uint32_t n);         // live-rate samples
     void compute(float* magnitude) const;          // bins() values, amplitude-calibrated
     void set_tuning(float cents);                  // nearest precomputed set
@@ -34,6 +38,13 @@ public:
     int min_midi() const { return minMidi_; }
     double octave_delay_seconds(int octave) const { return delay_[size_t(octave)]; }   // 0 = top
     double lowest_window_seconds() const;                     // T_low of the current set
+    // Octave o (0 = top) signal, newest sample last, and its rate.
+    const float* octave_samples(int o, uint32_t& length) const { length = bufLen_; return buf_[size_t(o)].data(); }
+    double octave_rate(int o) const { return liveRate_ / double(1u << o); }
+    int octave_of(int bin) const { return octaves_ - 1 - bin / bpo_; }
+    double bin_window_seconds(int bin) const {
+        return kernels_[size_t(tuningSet_ * bpo_ + bin % bpo_)].length / octave_rate(octave_of(bin));
+    }
     // Magnitude a bin shows for a tone centred on its neighbour bin (window main lobe), measured at init.
     float neighbour_leakage() const { return leakage_; }
 
@@ -61,10 +72,17 @@ public:
         float magnitude[ANA_MAX_CQT_BINS];
         ChromaVector chroma;
         TuningEstimate tuning;
+        BassEstimate bass;
+        bool onset;
+        double lastOnset;              // sample clock (hop start of the onset hop), < 0 = none
+        float flux;
+        uint16_t gatedBins;            // low bins still holding pre-onset signal (excluded)
     };
 
+    // bassMin/Max = 0: no bass tracker. settleSeconds: computed T_low (§4).
     ChromaFrontEnd(const SessionConfig& s, uint32_t decimation, double nativeRate, float fMin, float fMax, int bpo, uint32_t maxHop,
-                   bool autoTune = true);
+                   float bassMin = 0, float bassMax = 0, double settleSeconds = 0, bool autoTune = true);
+    ~ChromaFrontEnd();
     void process(const float* x, uint32_t n, uint64_t endFrame, Output& out);
     const Cqt& cqt() const { return cqt_; }
 
@@ -82,6 +100,10 @@ private:
     std::vector<float> deviations_, sorted_;
     uint32_t devCount_ = 0, hopsSinceTuning_ = 0;
     TuningEstimate tuning_{};
+    std::unique_ptr<OnsetDetector> onsets_;   // forward-declared: keeps cqt.hpp free of bass.hpp
+    std::unique_ptr<BassTracker> bass_;
+    std::vector<uint8_t> gated_;
+    double lastOnset_ = -1, hopSeconds_ = 0.02;
 };
 
 }  // namespace dz

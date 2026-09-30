@@ -1,5 +1,7 @@
 #include "cqt.hpp"
 
+#include "bass.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -68,6 +70,7 @@ void Cqt::init(double liveRate, float fMin, float fMax, int bpo, float a4, uint3
         leakage_ = float(resp(f * std::pow(2.0, 1.0 / bpo_)) / resp(f));
     }
 
+
     auto coefs = design_halfband(6, 0.08);
     dec_.assign(size_t(octaves_ - 1), HalfbandDecimator{});
     for (auto& d : dec_) d.init(coefs);
@@ -87,6 +90,12 @@ void Cqt::init(double liveRate, float fMin, float fMax, int bpo, float a4, uint3
         if (o + 1 < octaves_) cascade += dec_[size_t(o)].group_delay(2 * kPi * centreNorm) / fs;
     }
     tuningSet_ = kTuningSets / 2;
+}
+
+void Cqt::ensure_history(uint32_t samples) {
+    if (samples <= bufLen_) return;
+    bufLen_ = samples;
+    for (auto& b : buf_) b.assign(bufLen_, 0.f);
 }
 
 void Cqt::push(const float* x, uint32_t n) {
@@ -129,7 +138,7 @@ double Cqt::lowest_window_seconds() const {
 // ---------------------------------------------------------------- chroma + tuning
 
 ChromaFrontEnd::ChromaFrontEnd(const SessionConfig& s, uint32_t decimation, double nativeRate, float fMin, float fMax, int bpo,
-                               uint32_t maxHop, bool autoTune)
+                               uint32_t maxHop, float bassMin, float bassMax, double settleSeconds, bool autoTune)
     : session_(s), nativeRate_(nativeRate), decimate_(decimation == 2), autoTune_(autoTune) {
     toLive_.init(design_halfband(6, 0.08));
     cqt_.init(nativeRate / (decimate_ ? 2 : 1), fMin, fMax, bpo, s.referenceA4, maxHop);
@@ -137,7 +146,17 @@ ChromaFrontEnd::ChromaFrontEnd(const SessionConfig& s, uint32_t decimation, doub
     deviations_.assign(512, 0.f);
     sorted_.assign(512, 0.f);
     tuning_.referenceA4 = s.referenceA4;
+    hopSeconds_ = double(maxHop) / nativeRate;
+    onsets_ = std::make_unique<OnsetDetector>();
+    onsets_->init(cqt_, hopSeconds_);
+    if (bassMax > 0) {
+        bass_ = std::make_unique<BassTracker>(s, cqt_, bassMin, bassMax, settleSeconds);
+        cqt_.ensure_history(bass_->history_samples());
+    }
+    gated_.assign(ANA_MAX_CQT_BINS, 0);
 }
+
+ChromaFrontEnd::~ChromaFrontEnd() = default;
 
 void ChromaFrontEnd::process(const float* x, uint32_t n, uint64_t endFrame, Output& out) {
     double sumSq = 0;
@@ -156,6 +175,18 @@ void ChromaFrontEnd::process(const float* x, uint32_t n, uint64_t endFrame, Outp
     cqt_.compute(out.magnitude);
     std::fill(out.magnitude + bins, out.magnitude + ANA_MAX_CQT_BINS, 0.f);
 
+    // Onset -> low bins whose window still reaches back before it are excluded from chroma and
+    // bass, so the previous chord's bass cannot contaminate the new chord (§4 onset gating).
+    const double hopStart = double(endFrame - n) / nativeRate_, now = double(endFrame) / nativeRate_;
+    out.onset = onsets_->process(out.magnitude, silent, out.flux);
+    if (out.onset) lastOnset_ = hopStart;
+    out.lastOnset = lastOnset_;
+    out.gatedBins = 0;
+    for (int k = 0; k < bins; k++) {
+        gated_[size_t(k)] = lastOnset_ >= 0 && now - lastOnset_ < cqt_.bin_window_seconds(k);
+        out.gatedBins += gated_[size_t(k)];
+    }
+
     // Chroma: inter-octave aggregation of energy; a bin between two semitones (24 bpo) is shared.
     // Main-lobe leakage into neighbour bins is removed first: a lone D must not light C# and D#,
     // while two real adjacent tones (B + C) both survive.
@@ -165,6 +196,7 @@ void ChromaFrontEnd::process(const float* x, uint32_t n, uint64_t endFrame, Outp
     const float leak = 0.95f * cqt_.neighbour_leakage();
     if (!silent) {
         for (int k = 0; k < bins; k++) {
+            if (gated_[size_t(k)]) continue;
             float left = k > 0 ? out.magnitude[k - 1] : 0, right = k + 1 < bins ? out.magnitude[k + 1] : 0;
             float clean = std::max(0.f, out.magnitude[k] - leak * std::max(left, right));
             double s = k * 12.0 / bpo;
@@ -192,6 +224,11 @@ void ChromaFrontEnd::process(const float* x, uint32_t n, uint64_t endFrame, Outp
     }
     c.timestampSeconds = double(endFrame) / nativeRate_ - cqt_.octave_delay_seconds(0);
     if (!silent) update_tuning(out.magnitude, bins, out);
+    out.bass = {};
+    if (bass_ && !silent) {
+        bass_->process(cqt_, out.magnitude, gated_.data(), now, lastOnset_, out.bass);
+        if (out.bass.valid && out.bass.settled) c.bass[out.bass.pitchClass] = out.bass.confidence;   // bass chroma (§9)
+    }
     c.tuningOffsetCents = cqt_.tuning();
     out.tuning = tuning_;
 }

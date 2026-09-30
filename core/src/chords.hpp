@@ -29,12 +29,15 @@ public:
     explicit ChordMatcher(const SessionConfig& s);
     // chromaEnergy: 12 energies (ChromaVector.raw), already leakage-cleaned; all zero = silence.
     // history: confirmed chords so far, for the backward-looking context prior.
-    void match(const float* chromaEnergy, const ChordHistory& history, ChordRecognitionResult& out) const;
+    // bassPc: SETTLED bass pitch class, -1 = unknown (then no inversion is ever reported, §11).
+    void match(const float* chromaEnergy, const ChordHistory& history, int bassPc, ChordRecognitionResult& out) const;
 
     // Tonal context prior in [0, 1] (spec §12 tonalScore): function of the chord in the key
     // (major or minor mode) + cadence from the previous chord. Causal: no look-ahead.
     float context(int root, ChordQuality q, int previousRoot, ChordQuality previousQuality, const char** why) const;
     void symbol(int root, ChordQuality q, char (&out)[16]) const;
+    // Appends "/bass": a chord tone is spelled from the root's letter (E/G#, not E/Ab), others by key.
+    void slash(int root, ChordQuality q, int bassPc, char (&out)[16]) const;
 
     static constexpr int kQualities = 15;
 
@@ -63,7 +66,9 @@ public:
     ChordTracker(const SessionConfig& s, double hopSeconds, double latencyCompensation);
     // timestamp: chroma frame time on the sample clock (ChromaVector.timestampSeconds);
     // frameEnd: sample-clock time of the newest sample in this hop.
-    void process(const ChromaVector& chroma, double timestamp, double frameEnd, Output& out);
+    // bass: bass estimate of this hop; lastOnset: sample-clock onset time (< 0 = none) used to
+    // backdate a new candidate to its attack.
+    void process(const ChromaVector& chroma, double timestamp, double frameEnd, const BassEstimate& bass, double lastOnset, Output& out);
     void flush(Output& out);
 
 private:
@@ -84,6 +89,8 @@ private:
     double candStart_ = 0, candTime_ = 0, lastSound_ = 0, silentSince_ = -1;
     float candLatencyMs_ = 0, curLatencyMs_ = 0;
     ChordHistory history_;
+    float acc_[12]{};                // arpeggio accumulator (decaying max-hold of chroma energy)
+    bool bassSettledNow_ = false;
 };
 
 }  // namespace dz

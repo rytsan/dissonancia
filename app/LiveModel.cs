@@ -40,6 +40,7 @@ public sealed class LiveFrame
     public float ChordLatencyMs, ChordConfirmElapsedMs;
     public Pitch Bass;
     public bool BassSettled, BassValid;
+    public float BassSettleRemainingMs;
     public int[] ChordPitchClasses = [];
     public int[] Frets = [];               // per string (low E first), -1 = muted
 

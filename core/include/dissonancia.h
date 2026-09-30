@@ -167,6 +167,22 @@ struct ChromaVector {
     float tuningOffsetCents;           // kernel set in use
 };
 
+// ---------------------------------------------------------------- bass (§11)
+
+struct BassEstimate {
+    uint8_t valid;                     // bool
+    int8_t midi;
+    int8_t pitchClass;
+    uint8_t settled;                   // bool: settleSeconds elapsed since the onset AND CQT confirmed
+    float frequencyHz;
+    float confidence;
+    int8_t letter, alter, writtenOctave;   // spelled like NoteEstimate (§22.2)
+    char writtenName[8];
+    uint8_t fromPreview;               // bool: value comes from the periodicity preview, not the CQT
+    float previewHz;                   // periodicity preview, 0 = unvoiced
+    float settleRemainingMs;           // until the lowest window has refilled after the last onset
+};
+
 // ---------------------------------------------------------------- chords (§12)
 
 struct ChordCandidate {
@@ -237,6 +253,8 @@ struct LiveSnapshot {
     uint8_t _pad2[3];
     float chordLatencyMs;              // estimated onset -> first preview of the current candidate
     float chordConfirmElapsedMs;       // time since onset while provisional, 0 once confirmed
+    BassEstimate bass;
+    double lastOnsetSeconds;           // sample clock, delay-compensated; < 0 = none yet
     float waveMin[ANA_WAVE_COLUMNS];
     float waveMax[ANA_WAVE_COLUMNS];
     float scope[ANA_SCOPE_SAMPLES];    // last samples, oldest first
@@ -247,7 +265,7 @@ struct AbiLayout {
     uint32_t sessionConfigSize, audioDeviceConfigSize, liveSnapshotSize, analyzerEventSize;
     uint32_t snapshotWaveMinOffset, snapshotScopeOffset, snapshotBeatInBarOffset, eventDataOffset;
     uint32_t chordEventSize, noteEventSize;
-    uint32_t snapshotPitchOffset, snapshotNoteOffset, snapshotChromaOffset, snapshotCqtOffset, snapshotChordOffset, chordResultSize;
+    uint32_t snapshotPitchOffset, snapshotNoteOffset, snapshotChromaOffset, snapshotCqtOffset, snapshotChordOffset, chordResultSize, snapshotBassOffset;
 };
 
 // ---------------------------------------------------------------- functions

@@ -102,7 +102,8 @@ int Engine::start(const SessionConfig& s, const AudioDeviceConfig& d, ma_context
     chords_.reset();
     if (!is_chord_mode(s.mode)) voice_ = std::make_unique<VoicePipeline>(s, live_, rate_, hopFrames_, compensationMs() / 1000.0);
     else {
-        chroma_ = std::make_unique<ChromaFrontEnd>(s, live_.decimation, rate_, live_.fMin, live_.fMax, live_.binsPerOctave, hopFrames_);
+        chroma_ = std::make_unique<ChromaFrontEnd>(s, live_.decimation, rate_, live_.fMin, live_.fMax, live_.binsPerOctave, hopFrames_,
+                                                   live_.bassMin, live_.bassMax, live_.windowSeconds);
         chords_ = std::make_unique<ChordTracker>(s, live_.hopSeconds, compensationMs() / 1000.0);
     }
     chout_ = {};
@@ -315,7 +316,15 @@ void Engine::process_hop(const float* x, uint32_t n) {
     }
     if (chroma_) {
         chroma_->process(x, n, anFrames_, cout_);
-        chords_->process(cout_.chroma, cout_.chroma.timestampSeconds, double(anFrames_) / rate_, chout_);
+        if (cout_.onset) {   // display only (§3): the score uses complete note/chord events
+            AnalyzerEvent e{};
+            e.type = AnalyzerEventType::Onset;
+            e.data.onset.timestampSeconds = cout_.lastOnset - compensationMs() / 1000.0;
+            e.data.onset.strength = cout_.flux;
+            e.data.onset.type = OnsetType::ChordAttack;
+            publish_event(e);
+        }
+        chords_->process(cout_.chroma, cout_.chroma.timestampSeconds, double(anFrames_) / rate_, cout_.bass, cout_.lastOnset, chout_);
         for (uint32_t i = 0; i < chout_.eventCount; i++) publish_event(chout_.events[i]);
     }
 
@@ -375,6 +384,8 @@ void Engine::process_hop(const float* x, uint32_t n) {
     std::memset(s._pad2, 0, sizeof s._pad2);
     s.chordLatencyMs = chout_.preview.best.symbol[0] ? chout_.latencyMs + s.latencyProcessingMs : 0.f;
     s.chordConfirmElapsedMs = chout_.confirmElapsedMs;
+    s.bass = cout_.bass;
+    s.lastOnsetSeconds = chroma_ && cout_.lastOnset >= 0 ? cout_.lastOnset - compensationMs() / 1000.0 : -1;
     snapshots_.publish();
 }
 

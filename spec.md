@@ -720,6 +720,27 @@ Ranges: guitar 70–500 Hz; piano 27.5–600 Hz (POST). Hard rule: uncertain
 bass → do NOT report an inversion; display the root-position chord with
 reduced confidence.
 
+Implemented in M4 (`core/src/bass.cpp`):
+- Preview: YIN (threshold 0.25) on the CQT cascade's own decimated octave
+  (the lowest one with rate ≥ 4 × bass max, 3 kHz for guitar), window = 3
+  periods of the lowest bass. No extra filter bank.
+- Confirmation: lowest strong peak in the bass range among bins whose window
+  has refilled since the last onset. Settled = settleSeconds elapsed AND the
+  preview agrees (±50 cents, or exactly one octave below: the chord
+  sub-harmonic case) or is unvoiced.
+- Measured (G major after silence): first bass estimate 60 ms, settled
+  220 ms after the onset (T_low 210 ms).
+- A settled bass adds 0.05 to templates with that root (0.025 if it is
+  another chord tone). This resolves C6/Am7 and aug/dim7 roots (audio + bass:
+  59/60 exact over 15 qualities × 4 roots) and gives inversions. Slash bass
+  notes that are chord tones are spelled from the root's letter (E/G♯,
+  D/F♯, C/G); other basses follow the key. ChordEvent carries
+  `bassPitchClass`, `inversion` (0 root, 1 third, 2 fifth, 3 seventh/added,
+  −1 outside the chord) and `bassSettled`.
+- Tracker identity = root + quality + bass when both know it: a preview with
+  no settled bass yet never splits a chord, while a real bass walk
+  (C → C/B) is a new chord.
+
 ## 12. CHORDS — TEMPLATES, MATCHING, AMBIGUITY
 
 Templates (pre-transposed: 15 qualities × 12 roots = 180 vectors; matching ≈
@@ -834,6 +855,11 @@ no string constraints.
 Arpeggios: accumulation window 300–600 ms live / 500–900 ms balanced /
 adaptive POST. Notes of the same chord close in time accumulate evidence.
 `arpeggiated` flag. Never require simultaneous notes.
+Implemented: decaying max-hold of chroma energy (τ 0.25 s ≈ 0.6 s above the
+0.3 amplitude threshold), used only when the current frame shows ≤ 2 notes
+and the recent past ≥ 3, so strummed changes are never smeared. Arpeggio
+notes faster than the lowest window (133 ms at C3) cannot be identified by
+the CQT at all — physics, not tuning.
 
 ## 13. CHORD TRACKER
 
@@ -906,6 +932,16 @@ previous one at its own onset).
 
 Spectral flux over CQT magnitudes (reused, marginal cost), chroma flux, RMS
 attack, pitch change. Onsets also gate the low-octave CQT windows (section 4).
+
+Implemented in M4: positive log-magnitude flux over the top 3 CQT octaves
+(windows ≤ ~30 ms, so fast), adaptive mean + 3σ threshold, 80 ms refractory
+period; silence → sound is always an onset. Measured: one onset per chord
+change within ±25 ms, none while sustained. Onset gating is a per-bin mask:
+a bin whose window still reaches before the last onset is excluded from
+chroma and bass until it refills, so the old chord's bass never shows as a
+slash bass of the new one. New chord candidates are backdated to the onset
+(measured ±30 ms). The progressive short kernels are not built: their only
+use (energy/flux) is already covered by the upper octaves.
 
 ```cpp
 enum class OnsetType : uint8_t {

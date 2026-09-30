@@ -96,6 +96,19 @@ unsafe struct ChordRecognitionNative
     public fixed byte Explanation[64];
 }
 
+[StructLayout(LayoutKind.Sequential)]
+unsafe struct BassEstimateNative
+{
+    public byte Valid;
+    public sbyte Midi, PitchClass;
+    public byte Settled;
+    public float FrequencyHz, Confidence;
+    public sbyte Letter, Alter, WrittenOctave;
+    public fixed byte WrittenName[8];
+    public byte FromPreview;
+    public float PreviewHz, SettleRemainingMs;
+}
+
 public enum AnalyzerEventType : byte { Onset, NoteStart, NoteEnd, ChordConfirmed, ChordEnded }
 
 /// Event header + raw payload; payload fields are read by offset (ChordEvent.symbol at data + 24).
@@ -136,6 +149,8 @@ unsafe struct LiveSnapshotNative
     public byte ChordConfirmed;
     byte _pad2a, _pad2b, _pad2c;
     public float ChordLatencyMs, ChordConfirmElapsedMs;
+    public BassEstimateNative Bass;
+    public double LastOnsetSeconds;
     public fixed float WaveMin[WaveColumns];
     public fixed float WaveMax[WaveColumns];
     public fixed float Scope[ScopeSamples];
@@ -150,7 +165,7 @@ struct AbiLayout
     public uint SessionConfigSize, AudioDeviceConfigSize, LiveSnapshotSize, AnalyzerEventSize;
     public uint SnapshotWaveMinOffset, SnapshotScopeOffset, SnapshotBeatInBarOffset, EventDataOffset;
     public uint ChordEventSize, NoteEventSize;
-    public uint SnapshotPitchOffset, SnapshotNoteOffset, SnapshotChromaOffset, SnapshotCqtOffset, SnapshotChordOffset, ChordResultSize;
+    public uint SnapshotPitchOffset, SnapshotNoteOffset, SnapshotChromaOffset, SnapshotCqtOffset, SnapshotChordOffset, ChordResultSize, SnapshotBassOffset;
 }
 
 static partial class Ana
@@ -195,6 +210,7 @@ static partial class Ana
         Eq("LiveSnapshot.cqtMagnitude", l.SnapshotCqtOffset, Marshal.OffsetOf<LiveSnapshotNative>(nameof(LiveSnapshotNative.CqtMagnitude)));
         Eq("LiveSnapshot.chord", l.SnapshotChordOffset, Marshal.OffsetOf<LiveSnapshotNative>(nameof(LiveSnapshotNative.Chord)));
         Eq("ChordRecognitionResult", l.ChordResultSize, Unsafe.SizeOf<ChordRecognitionNative>());
+        Eq("LiveSnapshot.bass", l.SnapshotBassOffset, Marshal.OffsetOf<LiveSnapshotNative>(nameof(LiveSnapshotNative.Bass)));
         Eq("AnalyzerEvent", l.AnalyzerEventSize, Unsafe.SizeOf<AnalyzerEventNative>());
     }
 }
@@ -335,8 +351,12 @@ public sealed class NativeLiveSource : ILiveSource
         var pcs = _pcSets[detected];
         for (int i = 0; i < detected; i++) pcs[i] = ch.Best.Detected[i];
         f.ChordPitchClasses = pcs;
-        f.BassValid = false;
-        f.BassSettled = false;
+        // Bass (M4): spelled like the note; the GUI holds the sounding pitch.
+        ref readonly var b = ref _snap.Bass;
+        f.BassValid = b.Valid != 0;
+        f.BassSettled = b.Settled != 0;
+        f.BassSettleRemainingMs = b.SettleRemainingMs;
+        if (f.BassValid) f.Bass = new Pitch(b.Letter, b.Alter, b.WrittenOctave - _session.Clef.OctaveShift());
         f.ProvisionalChord = !f.ChordConfirmed && f.ChordSymbol.Length > 0 ? f.ChordSymbol : "";
         fixed (float* chroma = _snap.Chroma.Normalized) new ReadOnlySpan<float>(chroma, 12).CopyTo(f.Chroma);
         f.TuningValid = _snap.Tuning.Valid != 0;

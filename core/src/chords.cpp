@@ -37,6 +37,7 @@ const QualityDef& def(ChordQuality q) {
 
 // Amplitude a single note puts on pitch classes relative to itself (partials 1..6, 1/h).
 constexpr float kContextWeight = 0.06f;
+constexpr float kBassWeight = 0.05f;   // settled bass: decides identical sets, never a clear chord
 
 constexpr float kPartialPc[12] = {1.0f + 0.5f + 0.25f, 0, 0, 0, 0.2f, 0, 0, 0.33f + 0.17f, 0, 0, 0, 0};
 
@@ -154,7 +155,32 @@ float ChordMatcher::context(int root, ChordQuality q, int prevRoot, ChordQuality
     return std::min(prior, 1.f);
 }
 
-void ChordMatcher::match(const float* energy, const ChordHistory& h, ChordRecognitionResult& out) const {
+void ChordMatcher::slash(int root, ChordQuality q, int bassPc, char (&out)[16]) const {
+    static const char* acc[5] = {"bb", "b", "", "#", "x"};
+    const QualityDef& d = def(q);
+    int interval = (bassPc - root + 12) % 12;
+    bool chordTone = false;
+    for (int i = 0; i < d.n; i++) chordTone |= d.iv[i] % 12 == interval;
+    int letter, alter;
+    if (chordTone) {
+        // Letter steps of each interval above the root (third -> 2 letters, fifth -> 4, ...).
+        static constexpr int steps[12] = {0, 1, 1, 2, 2, 3, 4, 4, 4, 5, 6, 6};
+        speller_.reset_phrase();
+        Spelled r = speller_.spell(60 + root, 61 + root);
+        letter = (r.letter + steps[interval]) % 7;
+        alter = ((bassPc - Speller::kLetterSemis[letter]) % 12 + 12) % 12;
+        if (alter > 6) alter -= 12;
+    } else {
+        speller_.reset_phrase();
+        Spelled b = speller_.spell(60 + bassPc, 61 + bassPc);
+        letter = b.letter;
+        alter = b.alter;
+    }
+    size_t n = std::strlen(out);
+    if (alter >= -2 && alter <= 2) std::snprintf(out + n, sizeof out - n, "/%c%s", "CDEFGAB"[letter], acc[alter + 2]);
+}
+
+void ChordMatcher::match(const float* energy, const ChordHistory& h, int bassPc, ChordRecognitionResult& out) const {
     auto previous = [&](int root, ChordQuality q, ChordQuality& pq) {
         bool isCurrent = root == h.currentRoot && q == h.currentQuality;
         pq = isCurrent ? h.beforeQuality : h.currentQuality;
@@ -194,6 +220,8 @@ void ChordMatcher::match(const float* energy, const ChordHistory& h, ChordRecogn
         // Context (key function + cadence) weighs less than one Occam penalty: it decides only
         // what the audio leaves open (identical sets, C+E dyad), never overrides a clear chord.
         score += kContextWeight * ctx(t % 12, kDefs[t / 12].q, nullptr);
+        // Settled bass (§11): the bass as root scores most, as another chord tone half.
+        if (bassPc >= 0) score += kBassWeight * (t % 12 == bassPc ? 1.f : (masks_[t] >> bassPc & 1) ? 0.5f : 0.f);
         for (int i = 0; i < 4; i++)
             if (score > top[i].score) {
                 for (int j = 3; j > i; j--) top[j] = top[j - 1];
@@ -231,6 +259,12 @@ void ChordMatcher::match(const float* energy, const ChordHistory& h, ChordRecogn
         c.tonalScore = ctx(root, d.q, nullptr);
         c.chromaScore = s.score - kContextWeight * c.tonalScore;   // acoustic part only
         c.incomplete = c.missingCount > 0;
+        if (bassPc >= 0) {
+            c.hasBass = 1;
+            c.bassPitchClass = int8_t(bassPc);
+            c.bassScore = root == bassPc ? 1.f : (masks_[s.t] >> bassPc & 1) ? 0.5f : 0.f;
+            if (bassPc != root) slash(root, d.q, bassPc, c.symbol);   // inversion only with a settled bass
+        }
     };
 
     fill(top[0], out.best);
@@ -247,8 +281,10 @@ void ChordMatcher::match(const float* energy, const ChordHistory& h, ChordRecogn
     float quality = std::clamp((top[0].score - 0.75f) / 0.25f, 0.f, 1.f);
     float separation = std::clamp(margin / 0.05f, 0.f, 1.f);
     out.best.confidence = quality * (0.5f + 0.5f * separation);
-    if (sameSet || symmetric) out.best.confidence = std::min(out.best.confidence, 0.5f);
-    out.ambiguous = sameSet || symmetric || margin < 0.01f;
+    // A settled bass on the root resolves identical sets (C6 vs Am7, aug/dim7 roots).
+    const bool resolvedByBass = bassPc >= 0 && out.best.rootPitchClass == bassPc;
+    if ((sameSet || symmetric) && !resolvedByBass) out.best.confidence = std::min(out.best.confidence, 0.5f);
+    out.ambiguous = ((sameSet || symmetric) && !resolvedByBass) || margin < 0.01f;
 
     ChordQuality q = out.best.quality;
     const ChordCandidate& alt = out.alternatives[0];
@@ -256,6 +292,10 @@ void ChordMatcher::match(const float* energy, const ChordHistory& h, ChordRecogn
     const char* function = nullptr;
     ctx(out.best.rootPitchClass, q, &function);
     bool contextDecided = out.alternativeCount && alt.chromaScore >= out.best.chromaScore - 0.005f && function;
+    if (resolvedByBass && (sameSet || symmetric)) {
+        std::snprintf(out.explanation, sizeof out.explanation, "bass decides: %s, not %s", out.best.symbol, alt.symbol);
+        return;
+    }
     if (contextDecided && (sameSet || margin < 0.02f)) {
         std::snprintf(out.explanation, sizeof out.explanation, sameSet ? "%s = %s: %s in key, bass decides" : "%s over %s: %s in key",
                       out.best.symbol, alt.symbol, function);
@@ -286,9 +326,14 @@ void ChordTracker::emit(Output& out, AnalyzerEventType type, const Chord& ch, do
     c.durationSeconds = c.endTimeSeconds - c.startTimeSeconds;
     std::memcpy(c.symbol, ch.c.symbol, sizeof c.symbol);
     c.rootPitchClass = ch.c.rootPitchClass;
-    c.bassPitchClass = -1;
+    c.bassPitchClass = ch.c.hasBass ? ch.c.bassPitchClass : int8_t(-1);
     c.quality = ch.c.quality;
-    c.inversion = 0;
+    c.inversion = 0;   // 0 root position, 1 third, 2 fifth, 3 seventh/added, -1 bass outside the chord
+    if (ch.c.hasBass && ch.c.bassPitchClass != ch.c.rootPitchClass) {
+        c.inversion = -1;
+        for (int i = 0; i < ch.c.expectedCount; i++)
+            if (ch.c.expected[i] == ch.c.bassPitchClass) c.inversion = int8_t(i);
+    }
     c.detectedCount = ch.c.detectedCount;
     c.missingCount = ch.c.missingCount;
     std::memcpy(c.detectedNotes, ch.c.detected, sizeof c.detectedNotes);
@@ -296,12 +341,43 @@ void ChordTracker::emit(Output& out, AnalyzerEventType type, const Chord& ch, do
     c.confidence = float(ch.sumConfidence / std::max<uint32_t>(1, ch.frames));
     c.incomplete = ch.c.incomplete;
     c.provisional = 0;
-    c.bassSettled = 0;
+    c.bassSettled = ch.c.hasBass;
+    c.arpeggiated = ch.c.arpeggiated;
 }
 
-void ChordTracker::process(const ChromaVector& chroma, double t, double frameEnd, Output& out) {
+namespace {
+// Same chord: root and quality equal, and the bass equal when both know it. A preview without a
+// settled bass (right after an onset) never splits a chord; two different settled basses do.
+bool same_chord(const ChordCandidate& a, const ChordCandidate& b) {
+    return a.rootPitchClass == b.rootPitchClass && a.quality == b.quality && (!a.hasBass || !b.hasBass || a.bassPitchClass == b.bassPitchClass);
+}
+int strong(const float* e, float mx) {
+    int n = 0;
+    for (int i = 0; i < 12; i++) n += std::sqrt(e[i]) >= 0.3f * std::sqrt(mx) && e[i] > 0;
+    return n;
+}
+}  // namespace
+
+void ChordTracker::process(const ChromaVector& chroma, double t, double frameEnd, const BassEstimate& bass, double lastOnset, Output& out) {
     out.eventCount = 0;
-    matcher_.match(chroma.raw, history_, out.preview);
+
+    // Arpeggio accumulator (§12): a decaying max-hold of chroma energy. tau 0.25 s keeps a note
+    // above the 0.3 amplitude threshold for ~0.6 s (the live 300-600 ms window). Used only when the
+    // frame alone shows <= 2 notes but the recent past shows a chord: never smears strummed changes.
+    const float decay = float(std::exp(-hop_ / 0.25));
+    float mxNow = 0, mxAcc = 0;
+    bool silentFrame = true;
+    for (int i = 0; i < 12; i++) {
+        silentFrame &= chroma.raw[i] <= 0;
+        acc_[i] = std::max(acc_[i] * decay, chroma.raw[i]);
+        mxNow = std::max(mxNow, chroma.raw[i]);
+        mxAcc = std::max(mxAcc, acc_[i]);
+    }
+    if (silentFrame) std::fill(acc_, acc_ + 12, 0.f);
+    const bool arpeggio = !silentFrame && strong(chroma.raw, mxNow) <= 2 && strong(acc_, mxAcc) >= 3;
+    const int bassPc = bass.valid && bass.settled ? bass.pitchClass : -1;
+    matcher_.match(arpeggio ? acc_ : chroma.raw, history_, bassPc, out.preview);
+    out.preview.best.arpeggiated = arpeggio;
     const ChordCandidate& best = out.preview.best;
     const bool sound = best.symbol[0] != 0;
 
@@ -315,21 +391,28 @@ void ChordTracker::process(const ChromaVector& chroma, double t, double frameEnd
     } else {
         silentSince_ = -1;
         lastSound_ = t;
-        const bool same = active_ && std::strcmp(best.symbol, cur_.c.symbol) == 0;
+        const bool same = active_ && same_chord(best, cur_.c);
         if (same) {
             // The confirmed chord is still best: a passing tone never accumulated enough.
             candidateOn_ = false;
             cur_.sumConfidence += best.confidence;
             cur_.frames++;
+            if (best.hasBass && !cur_.c.hasBass) {   // bass settled after confirmation: now it has one
+                cur_.c.hasBass = 1;
+                cur_.c.bassPitchClass = best.bassPitchClass;
+                std::memcpy(cur_.c.symbol, best.symbol, sizeof cur_.c.symbol);
+            }
         } else {
-            if (!candidateOn_ || std::strcmp(best.symbol, cand_.symbol) != 0) {
+            if (!candidateOn_ || !same_chord(best, cand_)) {
                 candidateOn_ = true;
                 cand_ = best;
-                candStart_ = t;
+                // Backdate to the detected attack when it is recent; else to this frame.
+                candStart_ = lastOnset >= 0 && t - lastOnset < 0.25 ? std::min(t, lastOnset) : t;
                 candTime_ = 0;
                 candLatencyMs_ = float((frameEnd - t) * 1000);   // onset estimate -> first preview
             }
             candTime_ = frameEnd - candStart_;   // measured from the onset estimate
+            if (best.hasBass && !cand_.hasBass) cand_ = best;   // keep the settled bass once known
             if (candTime_ + 1e-9 >= confirmSeconds_ && best.confidence >= 0.2f) {
                 // Confirmed: the previous chord ends exactly at the new chord's backdated onset.
                 if (active_) emit(out, AnalyzerEventType::ChordEnded, cur_, candStart_);
@@ -345,7 +428,7 @@ void ChordTracker::process(const ChromaVector& chroma, double t, double frameEnd
 
     if (active_) std::memcpy(out.confirmedSymbol, cur_.c.symbol, sizeof out.confirmedSymbol);
     else std::memset(out.confirmedSymbol, 0, sizeof out.confirmedSymbol);
-    out.confirmed = active_ && std::strcmp(best.symbol, cur_.c.symbol) == 0;
+    out.confirmed = active_ && same_chord(best, cur_.c);
     out.latencyMs = candidateOn_ ? candLatencyMs_ : curLatencyMs_;
     out.confirmElapsedMs = candidateOn_ ? float(candTime_ * 1000) : 0.f;
 }

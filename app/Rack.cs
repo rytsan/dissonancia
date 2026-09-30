@@ -312,7 +312,8 @@ public sealed class LcdModule : RackModule
         Plasma.DotText(ctx, valid ? written.Name : "", inner.X, y + 16, noteDot, cells: 4);
         double infoX = inner.X + Plasma.CellWidth(noteDot) * 4 + 14;
         Plasma.Lamp(ctx, new Point(infoX + 5, y + 26), 4.5, f.BassSettled);
-        Plasma.Text(ctx, f.BassSettled ? "settled" : "settling", infoX + 18, y + 18, 13, f.BassSettled, Ui.Mono);
+        Plasma.Text(ctx, f.BassSettled ? "settled" : f.BassSettleRemainingMs > 0 ? $"settling {f.BassSettleRemainingMs:0} ms" : "settling",
+            infoX + 18, y + 18, 13, f.BassSettled, Ui.Mono);
         Plasma.Text(ctx, valid ? $"{f.Bass.Hz():0.0} Hz" : "— Hz", infoX, y + 40, 13, false);
         if (Session.Clef == Clef.Treble8vb) Plasma.Text(ctx, "written 8vb", inner.X, y + 22 + noteDot * 1.3 * 7, 10, false);
         DrawStaff(ctx, new Rect(inner.Right - 160, y + 10, 160, 56), written, valid);
