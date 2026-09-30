@@ -13,7 +13,7 @@ The target design is [`spec.md`](spec.md); this file describes only what is buil
 | M4 | Onsets, onset gating, bass, inversions, arpeggios | Done |
 | M5 | Music theory: chord spelling, Roman numerals, cadences, LCD staff | Done (live cadences use harmonic evidence only) |
 | M5b | Rack modules: fretboard/keyboard, waterfall, tuner, edit mode, stage mode | Partly (GUI prototype) |
-| M6 | LIVE → SCORE fast path, MusicXML/MIDI, Verovio | Not started (event log + sidecar ready) |
+| M6 | LIVE → SCORE fast path, MusicXML/MIDI, Verovio | Done except the Verovio view (SCORE shows text) |
 | M7+ | STUDIO (import, editor, separation, choir, VST3) | Not started |
 
 ## Architecture as built
@@ -155,6 +155,31 @@ Only the pipeline chosen on START exists in a session (`voice_` for mono modes,
   each timeline cell; a `ChordEnded` replaces the timeline cell, so a bass
   that settles after the confirmation still shows its inversion.
 
+### M6 — LIVE → SCORE (`app/Score.cs`)
+- Source: the REC take's JSON sidecar. Event times are seconds from the
+  first downbeat, round-trip compensated; bar lines come from the session
+  meter and BPM, never from the audio.
+- Quantization: 12 divisions per quarter. Each quarter takes the sixteenth
+  grid, or the eighth-triplet grid when its note boundaries fit it clearly
+  better. Chords snap to eighths. A melody note is cut by the next one; one
+  that snaps onto another replaces it. Notes held before the first downbeat
+  start at the downbeat.
+- Notation (§19): a note crossing a bar line or a chord change is split and
+  tied. Sub-beat values stay inside their beat; longer values start on a
+  beat; 4/4 and 12/8 never hide the middle of the bar (beat 2 → 4 is quarter
+  + tied quarter); compound meters group in dotted beats; empty bars are
+  measure rests.
+- Two timelines: every item keeps its observed start/end next to its
+  quantized position (in the JSON export).
+- Writers: MusicXML 4.0 (key, meter, clef incl. 8vb, tempo, ties, tuplets,
+  `<harmony>` with root/kind/bass/add9), MIDI type 1 (tempo/meter/key track,
+  melody channel 1, chords channel 2 as bass + close voicing), JSON
+  (`dissonancia-score/1`), text chord chart (`| C | G7/B Bbm7 | % |`) plus the
+  Roman numeral line.
+- SCORE tab: loads the newest take, shows key/meter/BPM, the chord chart,
+  numerals, cadences and melody notes; EXPORT writes the four files next to
+  the take. With no take yet it shows the LIVE timeline (fast path).
+
 ### GUI (prototype, C# / Avalonia 12.1, .NET 10)
 - START: mode, quality, key cascade, clef, meter, BPM, count-in, audio
   device/rate/period/exclusive/click output.
@@ -204,6 +229,12 @@ allocation in the callback or the analysis steady state fails the run.
   microbench.
 - Chords: all qualities, ambiguities, key spelling, tracker timing, key/cadence
   context, bass inversions, settle timing, onsets and gating, arpeggio.
+- `dotnet run --project tests/score`: SCORE checks — bar-line ties, beat
+  2 → 4 rule, long notes, triplets, dotted eighth + sixteenth, harmony
+  placement and chart, symbol parsing, MusicXML well-formed with ties,
+  tuplets, harmony and 8vb clef, every measure full, MIDI tracks and tempo,
+  sidecar loading in 3/4. A sidecar written by the core's REC test loads
+  and exports end to end.
 - Theory: 31 Roman numeral cases (major, minor, flat and sharp keys, applied,
   borrowed, figured bass); cadences from the tracker (authentic, plagal,
   deceptive, half, none without a key).
@@ -219,7 +250,11 @@ allocation in the callback or the analysis steady state fails the run.
 - Chords: NNLS chroma (M7c); guitar voicing tie-break; fretboard dots from real
   data.
 - GUI: text rendering still allocates per frame outside the cached strings
-  (spec §22.7); rack edit mode; waterfall; SCORE tab is a text chord chart.
+  (spec §22.7); rack edit mode; waterfall.
+- SCORE: Verovio view (LGPL, separate dynamic library) not integrated, the tab
+  shows text; MusicXML not yet validated against the XSD in CI or opened in
+  MuseScore; triplets only as eighth triplets; no tempo detection (the
+  session BPM is used).
 - Windows build and run not yet verified (developed on WSL2).
 
 ## Knowledge graph

@@ -401,8 +401,7 @@ public sealed class NativeLiveSource : ILiveSource
     public void ToggleRec(double now)
     {
         if (_snap.Recording != 0 || _snap.CountingIn != 0) { Check(Ana.RecStop(_h)); return; }
-        var music = Environment.GetFolderPath(Environment.SpecialFolder.MyMusic);   // "" when the folder does not exist
-        var dir = Path.Combine(music.Length > 0 ? music : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Dissonancia");
+        var dir = Take.Folder;
         Directory.CreateDirectory(dir);
         Check(Ana.RecStart(_h, Path.Combine(dir, $"take-{DateTime.Now:yyyyMMdd-HHmmss}.wav")));
     }

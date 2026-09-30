@@ -29,7 +29,7 @@ measured, and [`docs/spec.md`](docs/spec.md) for the full design.
 | M4 onsets, bass, inversions, arpeggios | done |
 | M5 music theory (Roman numerals, cadences) | done |
 | M5b rack modules | partly |
-| M6 LIVE → score / MusicXML / MIDI | next |
+| M6 LIVE → score / MusicXML / MIDI / JSON | done, Verovio view pending |
 | M7+ STUDIO | planned |
 
 ## Build
@@ -43,6 +43,9 @@ cmake -S core -B core/build -G Ninja
 cmake --build core/build
 core/build/dz_tests
 
+# SCORE checks (quantization, ties, MusicXML/MIDI writers)
+dotnet run --project tests/score
+
 # app (copies the native library from core/build)
 cd app
 dotnet run
@@ -53,7 +56,8 @@ development, but it is not valid for latency acceptance (see the spec).
 If the native library is missing, the app runs on simulated data and says so.
 
 Takes are saved to `~/Music/Dissonancia/` (or `~/Dissonancia/`) as WAV plus a
-JSON sidecar.
+JSON sidecar. The SCORE tab reads the newest take and exports MusicXML, MIDI,
+JSON and a text chord chart next to it.
 
 ## Keys (LIVE)
 
@@ -63,7 +67,8 @@ JSON sidecar.
 
 ```
 core/   C++ engine: include/dissonancia.h (C ABI), src/, tests/, third_party/miniaudio
-app/    C# Avalonia desktop app
+app/    C# Avalonia desktop app (Score.cs: take -> score, MusicXML/MIDI/JSON/text)
+tests/  score/: runnable checks for the SCORE layer
 docs/   IMPLEMENTATION.md, spec.md, spec.v2.1.md, graph/ (knowledge graph)
 ```
 

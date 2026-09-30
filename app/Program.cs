@@ -48,6 +48,9 @@ public sealed class MainWindow : Window
     readonly Control _rack;
     readonly StageView _stage = new();
     readonly TimelineModule _timeline = new() { Height = 84 };
+    readonly TextBlock _scoreTitle = new() { FontWeight = FontWeight.Bold, Foreground = Ui.Label };
+    readonly TextBlock _scoreStatus = new() { Foreground = Ui.Label, VerticalAlignment = VerticalAlignment.Center };
+    Score? _score;
     readonly TextBlock _scoreText = new() { FontFamily = new FontFamily("Cascadia Mono, Consolas, DejaVu Sans Mono, monospace"), FontSize = 22, TextWrapping = TextWrapping.Wrap };
     readonly Stopwatch _clock = Stopwatch.StartNew();
     double _lastFrame;
@@ -166,11 +169,54 @@ public sealed class MainWindow : Window
 
     void ShowScore()
     {
-        // Fast path LIVE → SCORE (spec §20 entry A): confirmed chords of the take, one per bar.
-        var bars = _frame.RecordedBars.Count > 0 ? _frame.RecordedBars : _frame.TimelineBars;
-        var lines = bars.Chunk(4).Select(c => "| " + string.Join(" | ", c) + " |");
-        _scoreText.Text = $"{_session.Key.Label}   ·   {_session.BeatsPerBar}/{_session.BeatUnit}   ·   ♩ = {_session.Bpm:0}\n\n" + string.Join("\n", lines);
         _tabs.SelectedItem = _scoreTab;
+        _score = null;
+        _scoreStatus.Text = "";
+        var path = Take.Latest();
+        if (path is not null)
+        {
+            try
+            {
+                _score = Score.Build(Take.Load(path));
+                var t = _score.Take;
+                var key = new KeyOption(t.KeyFifths, t.Minor);
+                string cadences = string.Join("\n", t.Cadences.Select(c => $"  {Display(c.From, true)} → {Display(c.To, true)}   {c.Evidence}   {c.Confidence:0.00}"));
+                _scoreTitle.Text = $"{Path.GetFileNameWithoutExtension(path)}  ·  {_score.Measures.Count} bars · {_score.QuantizedNotes.Count} notes · " +
+                                   $"{_score.QuantizedChords.Count} chords{(t.EventLogComplete ? "" : "  ·  EVENT LOG INCOMPLETE")}";
+                _scoreText.Text = $"{(t.KeySet ? key.Label : "no key")}   ·   {t.BeatsPerBar}/{t.BeatUnit}   ·   ♩ = {t.Bpm:0}\n\n" +
+                                  Display(_score.ChordChart()) + (_score.RomanLine().Length > 0 ? "\n\n" + Display(_score.RomanLine(), roman: true) : "") +
+                                  (cadences.Length > 0 ? "\n\ncadences\n" + cadences : "") +
+                                  (_score.QuantizedNotes.Count > 0 ? "\n\n" + string.Join("  ", _score.QuantizedNotes.Select(n => n.Note.Sounding.Name)) : "");
+                return;
+            }
+            catch (Exception e) { _scoreStatus.Text = $"could not read {Path.GetFileName(path)}: {e.Message}"; }
+        }
+        // No take yet: fast path from the LIVE timeline (spec §20 entry A).
+        var bars = _frame.RecordedBars.Count > 0 ? _frame.RecordedBars : _frame.TimelineBars;
+        _scoreTitle.Text = "no REC take yet  ·  LIVE timeline";
+        _scoreText.Text = $"{_session.Key.Label}   ·   {_session.BeatsPerBar}/{_session.BeatUnit}   ·   ♩ = {_session.Bpm:0}\n\n" +
+                          string.Join("\n", bars.Chunk(4).Select(c => "| " + string.Join(" | ", c) + " |"));
+    }
+
+    Button ExportButton()
+    {
+        var b = new Button { Content = "EXPORT  MusicXML · MIDI · JSON · TXT", Height = 40 };
+        b.Click += (_, _) => ExportScore();
+        return b;
+    }
+
+    void ExportScore()
+    {
+        if (_score is null) { _scoreStatus.Text = "record a take first (Space in LIVE)"; return; }
+        try { _scoreStatus.Text = "exported: " + string.Join("  ", _score.Export().Select(Path.GetFileName)); }
+        catch (Exception e) { _scoreStatus.Text = "export failed: " + e.Message; }
+    }
+
+    /// ASCII from the take -> display: chord and numeral text has no letter b other than flats.
+    static string Display(string s, bool roman = false)
+    {
+        s = s.Replace('#', '♯').Replace('b', '♭');
+        return roman ? s.Replace('o', '°').Replace('h', 'ø') : s;
     }
 
     Control BuildScoreTab() => new Border
@@ -181,9 +227,14 @@ public sealed class MainWindow : Window
             Spacing = 16,
             Children =
             {
-                new TextBlock { Text = "CHORD CHART  ·  fast path from LIVE events", FontWeight = FontWeight.Bold, Foreground = Ui.Label },
+                _scoreTitle,
                 _scoreText,
-                new TextBlock { Text = "Next (M6): melody score with ties across bar lines, Verovio view, MusicXML / MIDI / JSON export.", Foreground = Ui.Label },
+                new StackPanel
+                {
+                    Orientation = Orientation.Horizontal, Spacing = 12,
+                    Children = { ExportButton(), _scoreStatus },
+                },
+                new TextBlock { Text = "Exports next to the take: MusicXML (open in MuseScore), MIDI type 1, JSON (both timelines), text chart.", Foreground = Ui.Label },
             },
         },
     };
