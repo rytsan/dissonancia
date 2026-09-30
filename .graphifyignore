@@ -1,7 +1,5 @@
 core/build/
+core/third_party/
 app/bin/
 app/obj/
-*.user
-.vs/
-.vscode/
 graphify-out/
