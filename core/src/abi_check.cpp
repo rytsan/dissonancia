@@ -10,7 +10,8 @@ static_assert(sizeof(AnalyzerEvent) == 80 && offsetof(AnalyzerEvent, data) == 8)
 static_assert(sizeof(PitchEstimate) == 32);
 static_assert(sizeof(NoteEstimate) == 36);
 static_assert(sizeof(TuningEstimate) == 16 && sizeof(ChromaVector) == 208);
-static_assert(sizeof(LiveSnapshot) == 17432);
+static_assert(sizeof(ChordCandidate) == 96 && sizeof(ChordRecognitionResult) == 452);
+static_assert(sizeof(LiveSnapshot) == 17912 && offsetof(LiveSnapshot, chord) == 1048);
 static_assert(offsetof(LiveSnapshot, beatInBar) == 96 && offsetof(LiveSnapshot, pitch) == 104);
 static_assert(offsetof(LiveSnapshot, note) == 136 && offsetof(LiveSnapshot, chroma) == 200);
-static_assert(offsetof(LiveSnapshot, cqtMagnitude) == 408 && offsetof(LiveSnapshot, waveMin) == 1048);
+static_assert(offsetof(LiveSnapshot, cqtMagnitude) == 408 && offsetof(LiveSnapshot, waveMin) == 1528);

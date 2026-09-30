@@ -99,8 +99,13 @@ int Engine::start(const SessionConfig& s, const AudioDeviceConfig& d, ma_context
     scope_.assign(ANA_SCOPE_SAMPLES, 0.f);
     voice_.reset();
     chroma_.reset();
+    chords_.reset();
     if (!is_chord_mode(s.mode)) voice_ = std::make_unique<VoicePipeline>(s, live_, rate_, hopFrames_, compensationMs() / 1000.0);
-    else chroma_ = std::make_unique<ChromaFrontEnd>(s, live_.decimation, rate_, live_.fMin, live_.fMax, live_.binsPerOctave, hopFrames_);
+    else {
+        chroma_ = std::make_unique<ChromaFrontEnd>(s, live_.decimation, rate_, live_.fMin, live_.fMax, live_.binsPerOctave, hopFrames_);
+        chords_ = std::make_unique<ChordTracker>(s, live_.hopSeconds, compensationMs() / 1000.0);
+    }
+    chout_ = {};
     vout_ = {};
     cout_ = {};
     takeLog_.clear();
@@ -308,7 +313,11 @@ void Engine::process_hop(const float* x, uint32_t n) {
         voice_->process(x, n, anFrames_, vout_);
         for (uint32_t i = 0; i < vout_.eventCount; i++) publish_event(vout_.events[i]);
     }
-    if (chroma_) chroma_->process(x, n, anFrames_, cout_);
+    if (chroma_) {
+        chroma_->process(x, n, anFrames_, cout_);
+        chords_->process(cout_.chroma, cout_.chroma.timestampSeconds, double(anFrames_) / rate_, chout_);
+        for (uint32_t i = 0; i < chout_.eventCount; i++) publish_event(chout_.events[i]);
+    }
 
     LiveSnapshot& s = snapshots_.write_slot();
     double now = now_seconds();
@@ -360,6 +369,12 @@ void Engine::process_hop(const float* x, uint32_t n) {
     s.tuning = cout_.tuning;
     s.chroma = cout_.chroma;
     std::memcpy(s.cqtMagnitude, cout_.magnitude, sizeof s.cqtMagnitude);
+    s.chord = chout_.preview;
+    std::memcpy(s.confirmedSymbol, chout_.confirmedSymbol, sizeof s.confirmedSymbol);
+    s.chordConfirmed = chout_.confirmed;
+    std::memset(s._pad2, 0, sizeof s._pad2);
+    s.chordLatencyMs = chout_.preview.best.symbol[0] ? chout_.latencyMs + s.latencyProcessingMs : 0.f;
+    s.chordConfirmElapsedMs = chout_.confirmElapsedMs;
     snapshots_.publish();
 }
 
@@ -388,6 +403,11 @@ void Engine::flush_pipeline() {
         voice_->flush(vout_);
         for (uint32_t i = 0; i < vout_.eventCount; i++) publish_event(vout_.events[i]);
         vout_.eventCount = 0;
+    }
+    if (chords_) {
+        chords_->flush(chout_);
+        for (uint32_t i = 0; i < chout_.eventCount; i++) publish_event(chout_.events[i]);
+        chout_.eventCount = 0;
     }
     takeLogOpen_.store(false, std::memory_order_release);
     flushRequest_.store(false, std::memory_order_relaxed);
@@ -543,7 +563,15 @@ void Engine::write_sidecar(uint64_t frames, uint64_t dropped) {
     const double t0 = double(recStart_.load()) / rate_;
     for (size_t i = 0; i < takeLog_.size(); i++) {
         const AnalyzerEvent& e = takeLog_[i];
-        if (e.type != AnalyzerEventType::NoteEnd) continue;   // chords: M3
+        if (e.type == AnalyzerEventType::ChordEnded) {
+            const ChordEvent& c = e.data.chord;
+            std::fprintf(f, "%s\n    {\"type\": \"chord\", \"seq\": %u, \"start\": %.4f, \"end\": %.4f, \"symbol\": \"%s\", \"root\": %d,"
+                            " \"bass\": %d, \"quality\": %d, \"confidence\": %.3f, \"incomplete\": %s, \"bassSettled\": %s}",
+                         i ? "," : "", e.sequence, c.startTimeSeconds - t0, c.endTimeSeconds - t0, c.symbol, c.rootPitchClass, c.bassPitchClass,
+                         int(c.quality), c.confidence, c.incomplete ? "true" : "false", c.bassSettled ? "true" : "false");
+            continue;
+        }
+        if (e.type != AnalyzerEventType::NoteEnd) continue;
         const MusicalNoteEvent& n = e.data.note;
         std::fprintf(f,
                      "%s\n    {\"type\": \"note\", \"seq\": %u, \"start\": %.4f, \"end\": %.4f, \"midi\": %d, \"name\": \"%s\","

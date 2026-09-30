@@ -167,6 +167,35 @@ struct ChromaVector {
     float tuningOffsetCents;           // kernel set in use
 };
 
+// ---------------------------------------------------------------- chords (§12)
+
+struct ChordCandidate {
+    int8_t rootPitchClass;
+    int8_t bassPitchClass;             // -1 = unknown (no inversion reported, §11 hard rule)
+    ChordQuality quality;
+    char symbol[16];                   // ASCII, e.g. "Cmaj7", "F#m", "Bbsus4"
+    uint8_t expectedCount, detectedCount, missingCount, extraCount;
+    int8_t expected[8];
+    int8_t detected[8];
+    int8_t missing[8];
+    int8_t extra[8];
+    uint8_t _pad0;
+    float rootScore, thirdScore, fifthScore, chromaScore, bassScore, temporalScore, tonalScore, totalScore;
+    float confidence;
+    uint8_t hasBass, incomplete, arpeggiated;   // bool
+    uint8_t _pad1;
+};
+
+constexpr size_t ANA_MAX_CHORD_ALTERNATIVES = 3;
+struct ChordRecognitionResult {        // per-hop preview
+    ChordCandidate best;
+    uint8_t alternativeCount;
+    uint8_t ambiguous;                 // bool
+    uint8_t _pad0[2];
+    ChordCandidate alternatives[ANA_MAX_CHORD_ALTERNATIVES];
+    char explanation[64];              // e.g. "C6 = Am7 - bass decides", "missing third"
+};
+
 // ---------------------------------------------------------------- snapshot (§22)
 // Meters, scope, transport, latency, pitch (M1). Chord blocks are added by M3+
 // (the layout test keeps C# in sync).
@@ -202,6 +231,12 @@ struct LiveSnapshot {
     uint8_t _pad1[4];
     ChromaVector chroma;
     float cqtMagnitude[ANA_MAX_CQT_BINS];   // inline copy, no pointers
+    ChordRecognitionResult chord;      // preview, every hop (chord modes)
+    char confirmedSymbol[16];          // tracker's confirmed chord, "" = none
+    uint8_t chordConfirmed;            // bool: preview == confirmed chord
+    uint8_t _pad2[3];
+    float chordLatencyMs;              // estimated onset -> first preview of the current candidate
+    float chordConfirmElapsedMs;       // time since onset while provisional, 0 once confirmed
     float waveMin[ANA_WAVE_COLUMNS];
     float waveMax[ANA_WAVE_COLUMNS];
     float scope[ANA_SCOPE_SAMPLES];    // last samples, oldest first
@@ -212,7 +247,7 @@ struct AbiLayout {
     uint32_t sessionConfigSize, audioDeviceConfigSize, liveSnapshotSize, analyzerEventSize;
     uint32_t snapshotWaveMinOffset, snapshotScopeOffset, snapshotBeatInBarOffset, eventDataOffset;
     uint32_t chordEventSize, noteEventSize;
-    uint32_t snapshotPitchOffset, snapshotNoteOffset, snapshotChromaOffset, snapshotCqtOffset;
+    uint32_t snapshotPitchOffset, snapshotNoteOffset, snapshotChromaOffset, snapshotCqtOffset, snapshotChordOffset, chordResultSize;
 };
 
 // ---------------------------------------------------------------- functions

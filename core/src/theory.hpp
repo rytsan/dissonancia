@@ -3,6 +3,7 @@
 #pragma once
 #include <cstdint>
 #include <cstdio>
+#include <initializer_list>
 
 #include "dissonancia.h"
 

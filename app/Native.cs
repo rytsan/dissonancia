@@ -69,13 +69,43 @@ unsafe struct ChromaVectorNative
     public float Confidence, TuningOffsetCents;
 }
 
-/// Opaque event (type + sequence); payload decoded when SCORE consumes events (M6).
-[StructLayout(LayoutKind.Sequential, Size = 80)]
-struct AnalyzerEventNative
+[StructLayout(LayoutKind.Sequential)]
+unsafe struct ChordCandidateNative
 {
-    public byte Type;
+    public sbyte RootPitchClass, BassPitchClass;
+    public byte Quality;
+    public fixed byte Symbol[16];
+    public byte ExpectedCount, DetectedCount, MissingCount, ExtraCount;
+    public fixed sbyte Expected[8];
+    public fixed sbyte Detected[8];
+    public fixed sbyte Missing[8];
+    public fixed sbyte Extra[8];
+    byte _pad0;
+    public float RootScore, ThirdScore, FifthScore, ChromaScore, BassScore, TemporalScore, TonalScore, TotalScore, Confidence;
+    public byte HasBass, Incomplete, Arpeggiated;
+    byte _pad1;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+unsafe struct ChordRecognitionNative
+{
+    public ChordCandidateNative Best;
+    public byte AlternativeCount, Ambiguous;
+    byte _p0, _p1;
+    public ChordCandidateNative Alt0, Alt1, Alt2;
+    public fixed byte Explanation[64];
+}
+
+public enum AnalyzerEventType : byte { Onset, NoteStart, NoteEnd, ChordConfirmed, ChordEnded }
+
+/// Event header + raw payload; payload fields are read by offset (ChordEvent.symbol at data + 24).
+[StructLayout(LayoutKind.Sequential)]
+unsafe struct AnalyzerEventNative
+{
+    public AnalyzerEventType Type;
     byte _p0, _p1, _p2;
     public uint Sequence;
+    public fixed byte Data[72];
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -101,6 +131,11 @@ unsafe struct LiveSnapshotNative
     fixed byte _pad1[4];
     public ChromaVectorNative Chroma;
     public fixed float CqtMagnitude[MaxCqtBins];
+    public ChordRecognitionNative Chord;
+    public fixed byte ConfirmedSymbol[16];
+    public byte ChordConfirmed;
+    byte _pad2a, _pad2b, _pad2c;
+    public float ChordLatencyMs, ChordConfirmElapsedMs;
     public fixed float WaveMin[WaveColumns];
     public fixed float WaveMax[WaveColumns];
     public fixed float Scope[ScopeSamples];
@@ -115,7 +150,7 @@ struct AbiLayout
     public uint SessionConfigSize, AudioDeviceConfigSize, LiveSnapshotSize, AnalyzerEventSize;
     public uint SnapshotWaveMinOffset, SnapshotScopeOffset, SnapshotBeatInBarOffset, EventDataOffset;
     public uint ChordEventSize, NoteEventSize;
-    public uint SnapshotPitchOffset, SnapshotNoteOffset, SnapshotChromaOffset, SnapshotCqtOffset;
+    public uint SnapshotPitchOffset, SnapshotNoteOffset, SnapshotChromaOffset, SnapshotCqtOffset, SnapshotChordOffset, ChordResultSize;
 }
 
 static partial class Ana
@@ -158,6 +193,8 @@ static partial class Ana
         Eq("LiveSnapshot.note", l.SnapshotNoteOffset, Marshal.OffsetOf<LiveSnapshotNative>(nameof(LiveSnapshotNative.Note)));
         Eq("LiveSnapshot.chroma", l.SnapshotChromaOffset, Marshal.OffsetOf<LiveSnapshotNative>(nameof(LiveSnapshotNative.Chroma)));
         Eq("LiveSnapshot.cqtMagnitude", l.SnapshotCqtOffset, Marshal.OffsetOf<LiveSnapshotNative>(nameof(LiveSnapshotNative.CqtMagnitude)));
+        Eq("LiveSnapshot.chord", l.SnapshotChordOffset, Marshal.OffsetOf<LiveSnapshotNative>(nameof(LiveSnapshotNative.Chord)));
+        Eq("ChordRecognitionResult", l.ChordResultSize, Unsafe.SizeOf<ChordRecognitionNative>());
         Eq("AnalyzerEvent", l.AnalyzerEventSize, Unsafe.SizeOf<AnalyzerEventNative>());
     }
 }
@@ -230,6 +267,9 @@ public sealed class NativeLiveSource : ILiveSource
     LiveSnapshotNative _snap;   // held in a field: ana_read_snapshot copies into it in place
     readonly AnalyzerEventNative[] _events = new AnalyzerEventNative[256];
     uint _nextSequence;
+    readonly TextCache _symbol = new(), _alt0 = new(), _alt1 = new(), _alt2 = new(), _reason = new(), _event = new();
+    string _alternatives = "";
+    readonly int[][] _pcSets = Enumerable.Range(0, 9).Select(n => new int[n]).ToArray();
     bool _metronome = true;
 
     /// Events lost between core and GUI (sequence gaps), shown as incomplete event log.
@@ -277,8 +317,27 @@ public sealed class NativeLiveSource : ILiveSource
         f.Hz = _snap.Pitch.Voiced != 0 ? _snap.Pitch.FrequencyHz : 0;
         f.Cents = f.NoteValid ? n.Cents : 0;
         f.NoteLatencyMs = _snap.NoteLatencyMs;
-        f.ChordSymbol = "";
-        f.ChordConfirmed = false;
+        // Chords (M3): preview every hop; confirmed state from the tracker. No bass yet (M4).
+        ref readonly var ch = ref _snap.Chord;
+        fixed (byte* sym = ch.Best.Symbol) f.ChordSymbol = _symbol.Get(sym, 16, Display);
+        f.ChordConfirmed = _snap.ChordConfirmed != 0;
+        f.ChordConfidence = ch.Best.Confidence;
+        f.ChordLatencyMs = _snap.ChordLatencyMs;
+        f.ChordConfirmElapsedMs = _snap.ChordConfirmElapsedMs;
+        fixed (byte* why = ch.Explanation) f.ChordReason = _reason.Get(why, 64, s => s.Replace(" = ", " ≡ ").Replace(" - ", " — "));
+        bool altChanged = false;
+        fixed (byte* a0 = ch.Alt0.Symbol) altChanged |= _alt0.Changed(a0, 16, Display);
+        fixed (byte* a1 = ch.Alt1.Symbol) altChanged |= _alt1.Changed(a1, 16, Display);
+        fixed (byte* a2 = ch.Alt2.Symbol) altChanged |= _alt2.Changed(a2, 16, Display);
+        if (altChanged) _alternatives = string.Join(" · ", new[] { _alt0.Value, _alt1.Value, _alt2.Value }.Take(ch.AlternativeCount).Where(s => s.Length > 0));
+        f.ChordAlternatives = _alternatives;
+        int detected = Math.Min((int)ch.Best.DetectedCount, 8);
+        var pcs = _pcSets[detected];
+        for (int i = 0; i < detected; i++) pcs[i] = ch.Best.Detected[i];
+        f.ChordPitchClasses = pcs;
+        f.BassValid = false;
+        f.BassSettled = false;
+        f.ProvisionalChord = !f.ChordConfirmed && f.ChordSymbol.Length > 0 ? f.ChordSymbol : "";
         fixed (float* chroma = _snap.Chroma.Normalized) new ReadOnlySpan<float>(chroma, 12).CopyTo(f.Chroma);
         f.TuningValid = _snap.Tuning.Valid != 0;
         f.TuningCents = _snap.Tuning.OffsetCents;
@@ -292,6 +351,11 @@ public sealed class NativeLiveSource : ILiveSource
                 {
                     if (ev[i].Sequence != _nextSequence) EventGaps++;
                     _nextSequence = ev[i].Sequence + 1;
+                    if (ev[i].Type != AnalyzerEventType.ChordConfirmed) continue;
+                    // Chord timeline: one cell per confirmed chord change, newest last.
+                    string sym = _event.Get(ev[i].Data + 24, 16, Display);
+                    f.TimelineBars.Add(sym);
+                    if (f.TimelineBars.Count > 8) f.TimelineBars.RemoveAt(0);
                 }
         }
     }
@@ -311,4 +375,30 @@ public sealed class NativeLiveSource : ILiveSource
     public void ClearClip() => Ana.ClearClip(_h);
 
     void Check(int r) => LastError = r == 0 ? null : Ana.Error(_h);
+
+    /// ASCII chord symbol from the core -> display ("F#m7b5" -> "F♯m7♭5"; letters are upper case, so 'b' is a flat).
+    static string Display(string s) => s.Replace('#', '♯').Replace('b', '♭');
+}
+
+/// Rebuilds a managed string only when the native bytes change (no per-frame allocation, spec §22.7).
+sealed unsafe class TextCache
+{
+    readonly byte[] _last = new byte[64];
+    int _len = -1;
+    public string Value { get; private set; } = "";
+
+    public bool Changed(byte* p, int max, Func<string, string>? map = null)
+    {
+        int n = 0;
+        while (n < max && p[n] != 0) n++;
+        var bytes = new ReadOnlySpan<byte>(p, n);
+        if (n == _len && bytes.SequenceEqual(_last.AsSpan(0, n))) return false;
+        bytes.CopyTo(_last);
+        _len = n;
+        string s = System.Text.Encoding.UTF8.GetString(bytes);
+        Value = map is null ? s : map(s);
+        return true;
+    }
+
+    public string Get(byte* p, int max, Func<string, string>? map = null) { Changed(p, max, map); return Value; }
 }

@@ -781,6 +781,26 @@ struct ChordRecognitionResult {
 };
 ```
 
+Implemented in M3 (`core/src/chords.cpp`):
+- Matching = cosine similarity between the chroma AMPLITUDE vector and
+  harmonic-aware templates (each chord note also feeds its own partials:
+  octaves → same pitch class, 3rd/6th harmonic → fifth, 5th → major third),
+  plus Occam penalties (−0.04 per strong pitch class the template lacks and
+  per template note that is absent). This stops Cm6 reading as Adim + a
+  harmonic and a triad growing a phantom seventh.
+- Confidence = match quality × margin over the runner-up. Identical
+  pitch-class sets cap it at 0.5 and are always flagged.
+- Chord roots follow the key: diatonic roots take the key spelling; chromatic
+  roots take the lowered form (♭III, ♭VI, ♭VII, ♭II), except the raised 4th
+  (F♯dim in C). So B♭, not A♯, in C major.
+- Tracker: a candidate must stay best for 0.4 s (HighPrecision 0.6 s),
+  measured from its backdated onset. A return of the confirmed chord cancels
+  the candidate, so passing tones never confirm. Silence of 0.15 s closes
+  the chord at the last sounding frame.
+- Measured on synthetic chords (15 qualities × 4 roots): 44/60 exact; the
+  other 16 are identical pitch-class sets (6 ≡ m7, m6 ≡ ø7, aug, dim7), all
+  flagged ambiguous with the reason. Confirmation lands 402 ms after the onset.
+
 Ambiguities that must NEVER be forced: C6 ≡ Am7; missing third → do not report
 major/minor; power chord carries no third; symmetric chords (aug: 3 equivalent
 roots, dim7: 4 equivalent roots) have no root without bass evidence; an

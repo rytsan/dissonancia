@@ -71,6 +71,8 @@ void ana_struct_layout(AbiLayout* out) {
     out->snapshotNoteOffset = offsetof(LiveSnapshot, note);
     out->snapshotChromaOffset = offsetof(LiveSnapshot, chroma);
     out->snapshotCqtOffset = offsetof(LiveSnapshot, cqtMagnitude);
+    out->snapshotChordOffset = offsetof(LiveSnapshot, chord);
+    out->chordResultSize = sizeof(ChordRecognitionResult);
 }
 
 int32_t ana_capture_device_count(AnalyzerHandle* h) {

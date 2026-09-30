@@ -305,7 +305,7 @@ public sealed class LcdModule : RackModule
         if (!chords) { DrawNoteScreen(ctx, inner, f); return; }
 
         // Lower line (chord modes): bass, spelled and clef-shifted.
-        bool valid = f.ChordSymbol.Length > 0;
+        bool valid = f.BassValid;
         var written = f.Bass.WithOctaveShift(Session.Clef.OctaveShift());
         double y = split + 2, noteDot = 4.2;
         Plasma.Text(ctx, "BASS", inner.X, y, 10, false, Ui.SansBold);

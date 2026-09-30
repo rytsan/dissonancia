@@ -12,6 +12,7 @@
 #include "live_config.hpp"
 #include "lockfree.hpp"
 #include "miniaudio.h"
+#include "chords.hpp"
 #include "cqt.hpp"
 #include "voice.hpp"
 
@@ -120,6 +121,8 @@ private:
     std::unique_ptr<VoicePipeline> voice_;
     std::unique_ptr<ChromaFrontEnd> chroma_;
     ChromaFrontEnd::Output cout_{};
+    std::unique_ptr<ChordTracker> chords_;
+    ChordTracker::Output chout_{};
     VoiceOutput vout_{};
 
     // confirmed event log of the take (sidecar, fast path LIVE -> SCORE)

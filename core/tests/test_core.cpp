@@ -7,6 +7,7 @@
 #include <cstring>
 #include <fstream>
 #include <sstream>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -227,5 +228,8 @@ TEST_CASE("chord mode: CQT and chroma reach the snapshot") {
     CHECK((best == 2 || best == 6 || best == 9));
     CHECK(s.chroma.normalized[1] == 0);   // C# absent
     CHECK(s.cqtMagnitude[50 - 40] > 0.05f);   // D3 bin
+    CHECK(std::string(s.chord.best.symbol) == "D");
+    CHECK(std::string(s.confirmedSymbol) == "D");   // held 1 s > 0.4 s confirmation
+    CHECK(s.chordConfirmed);
     e.stop();
 }

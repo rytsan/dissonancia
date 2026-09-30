@@ -39,7 +39,7 @@ public sealed class LiveFrame
     public string ChordReason = "";
     public float ChordLatencyMs, ChordConfirmElapsedMs;
     public Pitch Bass;
-    public bool BassSettled;
+    public bool BassSettled, BassValid;
     public int[] ChordPitchClasses = [];
     public int[] Frets = [];               // per string (low E first), -1 = muted
 
@@ -135,6 +135,7 @@ public sealed class FakeLiveSource(Session session) : ILiveSource
         f.Bass = chord.Bass;
         f.ChordConfirmed = age > 0.6;
         f.BassSettled = age > 0.21;
+        f.BassValid = true;
         f.ChordConfidence = (float)Math.Min(0.9, 0.35 + age * 0.9);
         f.ChordAlternatives = chord.Alternatives;
         f.ChordReason = f.BassSettled ? chord.Reason : "bass not settled";
