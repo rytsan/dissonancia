@@ -1,0 +1,185 @@
+// Dissonancia core — C ABI (spec §22).
+// Every struct here crosses the ABI: POD, fixed-size inline arrays, no alignas,
+// every padding hole written as an explicit _padN field (checked with -Wpadded).
+#pragma once
+#include <cstddef>
+#include <cstdint>
+
+#if defined(_WIN32)
+#  define ANA_API __declspec(dllexport)
+#else
+#  define ANA_API __attribute__((visibility("default")))
+#endif
+
+constexpr size_t ANA_WAVE_COLUMNS = 1024;
+constexpr size_t ANA_SCOPE_SAMPLES = 2048;
+constexpr size_t ANA_EVENT_QUEUE_CAPACITY = 4096;
+
+// ---------------------------------------------------------------- session (§5)
+
+enum class AnalysisMode : uint8_t { VoiceMono, InstrumentMono, GuitarChords, PianoChords, GeneralChords };
+enum class AudioQuality : uint8_t { LowLatency, Balanced, HighPrecision };
+enum class KeyMode : uint8_t { Major, NaturalMinor, HarmonicMinor, MelodicMinor, Dorian, Phrygian, Mixolydian };
+enum class Clef : uint8_t { Treble, Treble8vb, Bass, Alto, Tenor };
+
+struct TimeSignature { uint8_t numerator, denominator; };
+
+struct GuitarTuning {
+    uint8_t stringCount;
+    int8_t openMidi[8];                // standard: 40 45 50 55 59 64
+    int8_t capoFret;
+};
+
+struct SessionConfig {                 // passed to ana_start(), immutable after
+    AnalysisMode mode;
+    AudioQuality quality;
+    uint8_t keySet;                    // bool
+    int8_t keyFifths;                  // -7..+7, MusicXML <fifths>
+    float referenceA4;                 // default 440
+    KeyMode keyMode;
+    Clef clef;
+    TimeSignature meter;
+    float bpm;
+    uint8_t metronome;                 // bool; forced on while REC
+    uint8_t countInBars;
+    GuitarTuning guitarTuning;         // GuitarChords only
+};
+
+struct AudioDeviceConfig {
+    int32_t captureDevice;             // index from ana_capture_device_name, -1 = system default
+    uint32_t sampleRate;               // 0 = device native; the real rate is read back
+    uint32_t periodFrames;             // 0 = 5 ms request; the real period is read back
+    uint8_t exclusive;                 // bool: WASAPI exclusive capture
+    uint8_t clickOutput;               // bool: duplex device, click on the same device's output
+    uint8_t _pad0[2];
+};
+
+// ---------------------------------------------------------------- events (§3, §13, §14)
+
+enum class OnsetType : uint8_t { VocalAttack, InstrumentAttack, ChordAttack, NoteChange, Unknown };
+enum class ChordQuality : uint8_t {
+    Major, Minor, Diminished, Augmented, Sus2, Sus4,
+    Power, Dom7, Maj7, Min7, HalfDim7, Dim7, Maj6, Min6, Add9, Unknown
+};
+
+struct OnsetEvent {
+    double timestampSeconds;
+    float strength;
+    OnsetType type;
+    uint8_t _pad0[3];
+};
+
+struct MusicalNoteEvent {
+    double startTimeSeconds;           // backdated to the onset (§13)
+    double endTimeSeconds;
+    double durationSeconds;
+    float avgHz, medianHz, avgCents;
+    int8_t midi;
+    char writtenName[8];
+    uint8_t _pad0[3];
+    float confidence;
+    uint8_t rest, tie, chromatic, vibrato;   // bool
+};
+
+struct ChordEvent {
+    double startTimeSeconds;           // backdated to the onset (§13)
+    double endTimeSeconds;
+    double durationSeconds;
+    char symbol[16];
+    int8_t rootPitchClass;
+    int8_t bassPitchClass;
+    ChordQuality quality;
+    int8_t inversion;
+    uint8_t detectedCount, missingCount;
+    int8_t detectedNotes[8];
+    int8_t missingNotes[8];
+    uint8_t _pad0[2];
+    float confidence;
+    uint8_t incomplete, arpeggiated, provisional, bassSettled;   // bool
+};
+
+enum class AnalyzerEventType : uint8_t {
+    Onset,          // display only
+    NoteStart,      // display only (provisional)
+    NoteEnd,        // COMPLETE MusicalNoteEvent (start + end)
+    ChordConfirmed, // display only (end not yet known)
+    ChordEnded      // COMPLETE ChordEvent (start + end)
+};
+
+struct AnalyzerEvent {
+    AnalyzerEventType type;
+    uint8_t _pad0[3];
+    uint32_t sequence;                 // +1 per event; a gap = dropped events
+    union {
+        OnsetEvent onset;
+        MusicalNoteEvent note;
+        ChordEvent chord;
+    } data;
+};
+
+// ---------------------------------------------------------------- snapshot (§22)
+// M0 subset: meters, scope, transport, latency. Pitch/chord blocks are added by
+// M1+ (the layout test keeps C# in sync).
+
+struct LiveSnapshot {
+    uint64_t sequence;
+    double publishTimeSeconds;         // ana_now() clock, for GUI latency
+    double recordedSeconds;
+    uint64_t analyzedFrames;           // input sample clock position of this snapshot
+    uint32_t sampleRate;               // real device rate (read back)
+    uint32_t liveRate;                 // analysis rate after integer decimation (§5)
+    float hopSeconds;
+    float settleSeconds;               // computed Q / f_min (chord modes) or window (mono modes)
+    float latencyCaptureMs;            // backend-REPORTED device latency (not a loopback measurement)
+    float latencyProcessingMs;         // measured: last sample delivered -> publish
+    uint32_t xruns;                    // capture frames lost (analysis ring full)
+    uint32_t droppedEvents;
+    uint32_t recorderGaps;
+    float metronomeBpm;                // 0 = off
+    float vuLevel;                     // VU units (0 VU = -18 dBFS), 300 ms ballistics
+    float peakDbfs, peakHoldDbfs;
+    uint32_t waveWriteIndex;
+    float waveColumnSeconds;
+    float cpuPercent;                  // analysis thread busy time / wall time
+    uint8_t beatInBar;                 // 1-based, 0 = metronome off
+    uint8_t recording, countingIn, clipLatched;   // bool
+    float waveMin[ANA_WAVE_COLUMNS];
+    float waveMax[ANA_WAVE_COLUMNS];
+    float scope[ANA_SCOPE_SAMPLES];    // last samples, oldest first
+    uint8_t _pad0[4];
+};
+
+// Layout exported for the C# layout test (§22).
+struct AbiLayout {
+    uint32_t sessionConfigSize, audioDeviceConfigSize, liveSnapshotSize, analyzerEventSize;
+    uint32_t snapshotWaveMinOffset, snapshotScopeOffset, snapshotBeatInBarOffset, eventDataOffset;
+    uint32_t chordEventSize, noteEventSize;
+};
+
+// ---------------------------------------------------------------- functions
+
+enum AnaResult : int32_t { ANA_OK = 0, ANA_ERR_STATE = -1, ANA_ERR_DEVICE = -2, ANA_ERR_ARG = -3, ANA_ERR_IO = -4 };
+
+struct AnalyzerHandle;
+
+extern "C" {
+ANA_API AnalyzerHandle* ana_create(void);
+ANA_API void ana_destroy(AnalyzerHandle* h);
+ANA_API const char* ana_last_error(AnalyzerHandle* h);
+ANA_API double ana_now(void);                        // monotonic seconds, same clock as publishTimeSeconds
+ANA_API void ana_struct_layout(AbiLayout* out);
+
+ANA_API int32_t ana_capture_device_count(AnalyzerHandle* h);
+ANA_API int32_t ana_capture_device_name(AnalyzerHandle* h, int32_t index, char* utf8, int32_t cap);
+
+ANA_API int32_t ana_start(AnalyzerHandle* h, const SessionConfig* session, const AudioDeviceConfig* device);
+ANA_API int32_t ana_stop(AnalyzerHandle* h);         // flushes REC and open events
+
+ANA_API void ana_read_snapshot(AnalyzerHandle* h, LiveSnapshot* out);   // single reader (UI thread)
+ANA_API int32_t ana_drain_events(AnalyzerHandle* h, AnalyzerEvent* out, int32_t cap);
+
+ANA_API int32_t ana_rec_start(AnalyzerHandle* h, const char* wavPathUtf8);  // arms at next bar + count-in
+ANA_API int32_t ana_rec_stop(AnalyzerHandle* h);     // finalizes WAV + JSON sidecar
+ANA_API int32_t ana_set_metronome(AnalyzerHandle* h, uint8_t on, float bpm, TimeSignature meter);  // refused while REC
+ANA_API void ana_clear_clip(AnalyzerHandle* h);
+}

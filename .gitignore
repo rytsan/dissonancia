@@ -1,0 +1,6 @@
+core/build/
+app/bin/
+app/obj/
+*.user
+.vs/
+.vscode/
