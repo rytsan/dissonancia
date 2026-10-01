@@ -28,7 +28,7 @@ measured, and [`docs/spec.md`](docs/spec.md) for the full design.
 | M3 chords (templates, tracker, ambiguity, key/cadence context) | done |
 | M4 onsets, bass, inversions, arpeggios | done |
 | M5 music theory (Roman numerals, cadences) | done |
-| M5b rack modules | partly |
+| M5b rack modules (tuner, waterfall, fretboard shapes, edit mode, presets) | done |
 | M6 LIVE → score (Verovio), MusicXML / MIDI / JSON | done |
 | M7+ STUDIO | planned |
 
@@ -62,14 +62,18 @@ JSON and a text chord chart next to it.
 
 ## Keys (LIVE)
 
-`Space` REC · `M` metronome · `S` stage mode · `Esc` leave stage mode
+`Space` REC · `M` metronome · `T` tap tempo · `S` stage mode · `Esc` leave stage mode
+
+The LIVE rack is modular: EDIT RACK reorders, resizes, adds and removes
+modules; the layout is saved per mode.
 
 ## Layout
 
 ```
 core/   C++ engine: include/dissonancia.h (C ABI), src/, tests/, third_party/miniaudio
 app/    C# Avalonia desktop app (Score.cs: take -> score, MusicXML/MIDI/JSON/text)
-tests/  score/: runnable checks for the SCORE layer
+tests/  score/: runnable checks for the SCORE layer, rack presets, fretboard shapes
+tools/  shot/: headless screenshots of the app
 docs/   IMPLEMENTATION.md, spec.md, spec.v2.1.md, graph/ (knowledge graph)
 ```
 

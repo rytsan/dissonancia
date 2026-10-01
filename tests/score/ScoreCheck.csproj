@@ -9,7 +9,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../../app/Score.cs;../../app/Theory.cs;../../app/Verovio.cs" />
+    <Compile Include="../../app/Score.cs;../../app/Theory.cs;../../app/Verovio.cs;../../app/RackCatalog.cs" />
   </ItemGroup>
   <!-- Verovio import check runs when the core was built with DZ_WITH_VEROVIO (skipped otherwise). -->
   <ItemGroup>

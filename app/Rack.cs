@@ -225,9 +225,15 @@ public sealed class InputModule : RackModule
 }
 
 /// Live waveform line: min/max envelope, scrolling, phosphor look.
+/// Scrolling min/max envelope (~5 s). Mono modes: click toggles a triggered oscilloscope that uses
+/// the detected period, so the waveform stands still while a note is held (spec §22.3).
 public sealed class ScopeModule : RackModule
 {
-    public ScopeModule() { Title = "SCOPE"; }
+    bool _triggered;
+    public ScopeModule() { Title = "SCOPE  ·  click: envelope / triggered"; }
+
+    protected override void OnPointerPressed(PointerPressedEventArgs e) => ToggleTrigger();
+    public void ToggleTrigger() { _triggered = !_triggered; InvalidateVisual(); }
 
     protected override void DrawContent(DrawingContext ctx, Rect r)
     {
@@ -235,7 +241,11 @@ public sealed class ScopeModule : RackModule
         ctx.DrawRectangle(Ui.Scope, Ui.LcdEdge, r, 3, 3);
         for (int i = 1; i < 10; i++) ctx.DrawLine(Ui.ScopeGrid, new Point(r.X + r.Width * i / 10, r.Y), new Point(r.X + r.Width * i / 10, r.Bottom));
         for (int i = 1; i < 4; i++) ctx.DrawLine(Ui.ScopeGrid, new Point(r.X, r.Y + r.Height * i / 4), new Point(r.Right, r.Y + r.Height * i / 4));
+        if (_triggered && !Session.IsChordMode) DrawTriggered(ctx, r, f); else DrawEnvelope(ctx, r, f);
+    }
 
+    static void DrawEnvelope(DrawingContext ctx, Rect r, LiveFrame f)
+    {
         int cols = (int)r.Width;
         double mid = r.Center.Y, amp = r.Height * 0.45;
         var env = new StreamGeometry();
@@ -257,6 +267,36 @@ public sealed class ScopeModule : RackModule
         double span = LiveFrame.WaveColumns * f.WaveColumnSeconds;
         Ui.Text(ctx, $"{span:0.0} s", r.X + 6, r.Bottom - 16, 10, Ui.LcdDim, Ui.Mono);
         Ui.Text(ctx, "now", r.Right - 6, r.Bottom - 16, 10, Ui.LcdDim, Ui.Mono, Ui.Align.Right);
+    }
+
+    // Three periods of the detected pitch, starting at the newest rising zero crossing that leaves
+    // room for them; free-running (newest samples) while unvoiced.
+    static void DrawTriggered(DrawingContext ctx, Rect r, LiveFrame f)
+    {
+        var x = f.Scope;
+        int n = x.Length;
+        double period = f.NoteValid && f.Hz > 0 ? f.SampleRate / f.Hz : 0;
+        int window = period > 0 ? (int)Math.Min(n - 1, 3 * period) : n / 4;
+        int start = n - window;
+        if (period > 0)
+            for (int i = n - window - 1; i > Math.Max(1, n - window - 2 * (int)period); i--)
+                if (x[i - 1] < 0 && x[i] >= 0) { start = i; break; }
+        double mid = r.Center.Y, amp = r.Height * 0.45, peak = 1e-4;
+        for (int i = start; i < start + window; i++) peak = Math.Max(peak, Math.Abs(x[i]));
+        var line = new StreamGeometry();
+        using (var g = line.Open())
+        {
+            for (int i = 0; i < window; i++)
+            {
+                var p = new Point(r.X + r.Width * i / (window - 1), mid - x[start + i] / peak * amp * 0.9);
+                if (i == 0) g.BeginFigure(p, false); else g.LineTo(p);
+            }
+            g.EndFigure(false);
+        }
+        ctx.DrawGeometry(null, Ui.ScopeGlow, line);
+        ctx.DrawGeometry(null, Ui.ScopeTrace, line);
+        Ui.Text(ctx, period > 0 ? $"triggered · 3 periods · {window / f.SampleRate * 1000:0.0} ms" : "triggered · no pitch (free run)",
+            r.X + 6, r.Bottom - 16, 10, Ui.LcdDim, Ui.Mono);
     }
 }
 
@@ -408,76 +448,6 @@ public sealed class LcdModule : RackModule
 }
 
 /// Instrument view: guitar fretboard or piano keyboard (click to switch).
-public sealed class InstrumentModule : RackModule
-{
-    bool _keyboard;
-    public InstrumentModule() { Title = "INSTRUMENT  ·  click to switch"; }
-
-    protected override void OnPointerPressed(PointerPressedEventArgs e) { _keyboard = !_keyboard; InvalidateVisual(); }
-
-    protected override void DrawContent(DrawingContext ctx, Rect r)
-    {
-        if (_keyboard || Session.Mode != AppMode.GuitarChords) DrawKeyboard(ctx, r); else DrawFretboard(ctx, r);
-    }
-
-    void DrawFretboard(DrawingContext ctx, Rect r)
-    {
-        var f = Frame!;
-        const int frets = 12;
-        var board = new Rect(r.X + 44, r.Y + 8, r.Width - 54, r.Height - 30);
-        ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF3A2A1C)), null, board, 3, 3);
-        double fw = board.Width / frets;
-        for (int i = 0; i <= frets; i++)
-            ctx.DrawLine(new ImmutablePen(new ImmutableSolidColorBrush(i == 0 ? Color.FromUInt32(0xFFE8E0D0) : Color.FromUInt32(0xFF9A948A)), i == 0 ? 4 : 1.5),
-                new Point(board.X + i * fw, board.Y), new Point(board.X + i * fw, board.Bottom));
-        foreach (var m in new[] { 3, 5, 7, 9, 12 })
-            ctx.DrawEllipse(Ui.Label, null, new Point(board.X + (m - 0.5) * fw, board.Bottom + 10), 3, 3);
-        string[] names = ["E", "A", "D", "G", "B", "e"];
-        for (int s = 0; s < 6; s++)
-        {
-            double y = board.Bottom - (s + 0.5) * board.Height / 6;
-            ctx.DrawLine(new ImmutablePen(new ImmutableSolidColorBrush(Color.FromUInt32(0xFFCFC7B8)), 2.2 - s * 0.25), new Point(board.X, y), new Point(board.Right, y));
-            Ui.Text(ctx, names[s], r.X + 6, y - 8, 12, Ui.LabelBright, Ui.SansBold, Ui.Align.Center);
-            int fret = s < f.Frets.Length ? f.Frets[s] : -1;
-            if (fret < 0) Ui.Text(ctx, "×", board.X - 14, y - 9, 14, Ui.Red, Ui.SansBold, Ui.Align.Center);
-            else if (fret == 0) ctx.DrawEllipse(null, new ImmutablePen(Ui.Green as IImmutableBrush, 2), new Point(board.X - 13, y), 6, 6);
-            else ctx.DrawEllipse(s == LowestString(f.Frets) ? Ui.Amber : Ui.Green, null, new Point(board.X + (fret - 0.5) * fw, y), 9, 9);
-        }
-        Ui.Text(ctx, "likely shape", board.Right, r.Bottom - 14, 10, Ui.Label, null, Ui.Align.Right);
-    }
-
-    static int LowestString(int[] frets) { for (int i = 0; i < frets.Length; i++) if (frets[i] >= 0) return i; return -1; }
-
-    void DrawKeyboard(DrawingContext ctx, Rect r)
-    {
-        var f = Frame!;
-        const int firstMidi = 36, octaves = 4;           // C2..B5
-        int whiteCount = octaves * 7;
-        double ww = r.Width / whiteCount;
-        int[] whiteSemis = [0, 2, 4, 5, 7, 9, 11];
-        bool chords = Session.IsChordMode;
-        // Chord modes: chord pitch classes lit, bass in amber. Mono modes: the sung/played note only.
-        bool Lit(int midi) => chords ? f.ChordPitchClasses.Contains(midi % 12) : f.NoteValid && midi == f.Note.Midi;
-        for (int i = 0; i < whiteCount; i++)
-        {
-            int midi = firstMidi + 12 * (i / 7) + whiteSemis[i % 7];
-            bool bass = chords && midi == f.Bass.Midi, lit = Lit(midi);
-            ctx.DrawRectangle(bass ? Ui.Amber : lit ? Ui.Green : new ImmutableSolidColorBrush(Color.FromUInt32(0xFFE9E6DF)),
-                new ImmutablePen(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF1A1A1A)), 1), new Rect(r.X + i * ww, r.Y, ww, r.Height - 6), 2, 2);
-            if (i % 7 == 0) Ui.Text(ctx, $"C{midi / 12 - 1}", r.X + i * ww + ww / 2, r.Bottom - 24, 9, Ui.Label, null, Ui.Align.Center);
-        }
-        for (int i = 0; i < whiteCount; i++)
-        {
-            int semi = whiteSemis[i % 7];
-            if (semi is 4 or 11) continue;
-            int midi = firstMidi + 12 * (i / 7) + semi + 1;
-            bool bass = chords && midi == f.Bass.Midi, lit = Lit(midi);
-            ctx.DrawRectangle(bass ? Ui.Amber : lit ? Ui.Green : new ImmutableSolidColorBrush(Color.FromUInt32(0xFF141414)), null,
-                new Rect(r.X + (i + 1) * ww - ww * 0.3, r.Y, ww * 0.6, (r.Height - 6) * 0.62), 2, 2);
-        }
-    }
-}
-
 /// Chord timeline: confirmed bars solid, current provisional outlined, playhead inside the bar.
 public sealed class TimelineModule : RackModule
 {
@@ -513,8 +483,8 @@ public sealed class TransportModule : RackModule
 {
     public TransportModule() { Title = "TRANSPORT"; }
 
-    public event Action? RecPressed, MetronomePressed, ScorePressed;
-    Rect _rec, _metro, _score;
+    public event Action? RecPressed, MetronomePressed, ScorePressed, TapPressed;
+    Rect _rec, _metro, _score, _tap;
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
@@ -522,6 +492,7 @@ public sealed class TransportModule : RackModule
         if (_rec.Contains(p)) RecPressed?.Invoke();
         else if (_metro.Contains(p)) MetronomePressed?.Invoke();
         else if (_score.Contains(p)) ScorePressed?.Invoke();
+        else if (_tap.Contains(p)) TapPressed?.Invoke();
     }
 
     protected override void DrawContent(DrawingContext ctx, Rect r)
@@ -560,6 +531,12 @@ public sealed class TransportModule : RackModule
         _metro = new Rect(sx, cy - 22, 60, 44);
         DrawSwitch(ctx, _metro, f.Metronome, "METRO");
         DrawSwitch(ctx, new Rect(sx + 70, cy - 22, 60, 44), Session.CountInBars > 0, $"COUNT-IN {Session.CountInBars}");
+
+        // Tap tempo (T), refused during REC
+        _tap = new Rect(sx + 150, cy - 18, 64, 36);
+        bool canTap = !f.Recording && !f.CountingIn;
+        ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF24272C)), Ui.FaceEdge, _tap, 4, 4);
+        Ui.Text(ctx, "TAP", _tap.Center.X, _tap.Center.Y - 9, 14, canTap ? Ui.LabelBright : Ui.Label, Ui.SansBold, Ui.Align.Center);
 
         // → SCORE
         _score = new Rect(r.Right - 110, cy - 18, 110, 36);

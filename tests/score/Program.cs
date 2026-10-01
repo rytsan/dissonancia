@@ -89,6 +89,37 @@ var take = Take.Load(path);
 Check(take.Notes[0].Sounding == new Pitch(4, 0, 3) && take.BeatsPerBar == 3 && take.Chords[0].Roman == "I" && take.Cadences.Count == 1, "sidecar load");
 Check(Score.Build(take).Measures[0].Items.Sum(i => i.Duration) == 36, "3/4 measure");
 
+// Likely guitar shapes: the common open and barre chords.
+string Shape(int[] pcs, int bass) => string.Join(" ", Theory.LikelyShape(pcs, bass).Select(f => f < 0 ? "x" : f.ToString()));
+Check(Shape([0, 4, 7], 0) == "x 3 2 0 1 0", $"shape C: {Shape([0, 4, 7], 0)}");
+Check(Shape([7, 11, 2], 7) == "3 2 0 0 0 3", $"shape G: {Shape([7, 11, 2], 7)}");
+Check(Shape([4, 7, 11], 4) == "0 2 2 0 0 0", $"shape Em: {Shape([4, 7, 11], 4)}");
+Check(Shape([2, 6, 9], 2) == "x x 0 2 3 2", $"shape D: {Shape([2, 6, 9], 2)}");
+Check(Shape([5, 9, 0], 5) == "1 3 3 2 1 1", $"shape F barre: {Shape([5, 9, 0], 5)}");
+Check(Shape([9, 0, 4, 7], 7) == "3 0 2 0 1 0", $"shape Am7/G: {Shape([9, 0, 4, 7], 7)}");
+Check(Shape([2, 6, 9], 6).StartsWith("2 "), $"shape D/F#: {Shape([2, 6, 9], 6)}");
+
+var watch = System.Diagnostics.Stopwatch.StartNew();
+for (int i = 0; i < 20; i++) Theory.LikelyShape([i % 12, (i + 4) % 12, (i + 7) % 12, (i + 10) % 12], i % 12);
+Console.WriteLine($"[measure] LikelyShape (4-note chord): {watch.Elapsed.TotalMilliseconds / 20:0.000} ms per chord change");
+
+// Rack presets: a hand-edited file is cleaned on load (duplicates, inapplicable modules, missing
+// pinned modules, heights out of range).
+string config = Path.Combine(Path.GetTempPath(), "dz-rack-check");
+Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", config);
+Directory.CreateDirectory(Path.Combine(config, "Dissonancia"));
+File.WriteAllText(Path.Combine(config, "Dissonancia", "rack-VoiceMono.json"), """
+[{"module": "Scope", "width": "half", "heightU": 9}, {"module": "Scope", "width": "full", "heightU": 2},
+ {"module": "Fretboard", "width": "full", "heightU": 2}, {"module": "Bogus", "width": "full", "heightU": 1},
+ {"module": "Status", "width": "half", "heightU": 1}]
+""");
+var rack = RackCatalog.Load(AppMode.VoiceMono);
+Check(string.Join(",", rack.Select(e => $"{e.Module}{(e.Half ? "/2" : "")}:{e.HeightU}")) == "Scope/2:4,Status:1,Transport:1", "rack preset cleaned: " + string.Join(",", rack.Select(e => $"{e.Module}{(e.Half ? "/2" : "")}:{e.HeightU}")));
+RackCatalog.Save(AppMode.VoiceMono, RackCatalog.Default(AppMode.VoiceMono));
+Check(RackCatalog.Load(AppMode.VoiceMono).SequenceEqual(RackCatalog.Default(AppMode.VoiceMono)), "rack preset round trip");
+Check(RackCatalog.Default(AppMode.GuitarChords).Any(e => e.Module == ModuleKind.Fretboard) && !RackCatalog.Default(AppMode.VoiceMono).Any(e => e.Module == ModuleKind.Timeline), "per-mode defaults");
+Directory.Delete(config, true);
+
 // Every MusicXML we write validates against the MusicXML 4.0 XSD (downloaded once, cached next to the binary).
 var samples = new[] { s1, s2, s4, s5, s6, s7, Score.Build(t8), Score.Build(take) }.Select(x => x.MusicXml()).ToArray();
 if (Schema() is { } schema)

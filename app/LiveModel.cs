@@ -22,7 +22,7 @@ public sealed class Session
 /// View-side mirror of the core's LiveSnapshot (spec §22). Preallocated; the source fills it in place.
 public sealed class LiveFrame
 {
-    public const int WaveColumns = 1024;
+    public const int WaveColumns = 1024, ScopeSamples = 2048, MaxCqtBins = 160;
     public readonly float[] WaveMin = new float[WaveColumns];
     public readonly float[] WaveMax = new float[WaveColumns];
     public int WaveWriteIndex;
@@ -54,6 +54,13 @@ public sealed class LiveFrame
     public Pitch Note;
     public float Cents, Hz, NoteLatencyMs;
 
+    public readonly float[] Scope = new float[ScopeSamples];   // newest samples, oldest first
+    public float SampleRate = 48000;
+    public readonly float[] Cqt = new float[MaxCqtBins];       // magnitude per CQT bin, lowest first
+    public int CqtBins, CqtBinsPerOctave = 12;
+    public float CqtMinHz;
+    public ulong AnalysisSequence;                             // +1 per analysis hop (one waterfall column)
+
     public float Bpm;
     public int BeatInBar;                  // 1-based, 0 = metronome off
     public bool Metronome = true, Recording, CountingIn;
@@ -76,6 +83,7 @@ public interface ILiveSource
     void Read(LiveFrame frame, double nowSeconds);
     void ToggleRec(double nowSeconds);
     void ToggleMetronome();
+    void SetTempo(float bpm);   // tap tempo; refused by the core during REC
 }
 
 /// Simulated data so the GUI can be designed before the DSP core exists.
@@ -106,12 +114,16 @@ public sealed class FakeLiveSource(Session session) : ILiveSource
     const int Rate = 48000, SamplesPerColumn = 256;
 
     double _lastT = -1, _peakHoldT, _recStart = double.NaN;
+    readonly float[] _scope = new float[LiveFrame.ScopeSamples];
+    double _phase;
+    int _scopeWrite;
     readonly float[] _columnBuf = new float[SamplesPerColumn];
     int _columnFill;
     float _vu = -20;
     bool _metronome = true;
 
     public void ToggleMetronome() { if (double.IsNaN(_recStart)) _metronome = !_metronome; }
+    public void SetTempo(float bpm) { }   // reads session.Bpm every frame
 
     public void ToggleRec(double now)
     {
@@ -198,7 +210,8 @@ public sealed class FakeLiveSource(Session session) : ILiveSource
             if (voice)
             {
                 double hz = note.Hz() * Math.Pow(2, 14 * Math.Sin(2 * Math.PI * 5.5 * ts) / 1200.0);
-                double ph = 2 * Math.PI * hz * ts, env = Math.Min(1, (ts - noteStart) * 20);
+                _phase = (_phase + 2 * Math.PI * hz / Rate) % (2 * Math.PI);   // integrated: vibrato bends the pitch, not the time base
+                double ph = _phase, env = Math.Min(1, (ts - noteStart) * 20);
                 s = 0.14 * env * (Math.Sin(ph) + 0.5 * Math.Sin(2 * ph) + 0.25 * Math.Sin(3 * ph));
             }
             else
@@ -214,6 +227,8 @@ public sealed class FakeLiveSource(Session session) : ILiveSource
             }
             sumSq += s * s;
             peak = Math.Max(peak, Math.Abs(s));
+            _scope[_scopeWrite] = (float)s;
+            _scopeWrite = (_scopeWrite + 1) % LiveFrame.ScopeSamples;
             _columnBuf[_columnFill++] = (float)s;
             if (_columnFill == SamplesPerColumn)
             {
@@ -226,6 +241,11 @@ public sealed class FakeLiveSource(Session session) : ILiveSource
             }
         }
         f.WaveColumnSeconds = (float)SamplesPerColumn / Rate;
+        f.SampleRate = Rate;
+        int tail = LiveFrame.ScopeSamples - _scopeWrite;
+        Array.Copy(_scope, _scopeWrite, f.Scope, 0, tail);
+        Array.Copy(_scope, 0, f.Scope, tail, _scopeWrite);
+        SynthesizeCqt(f, t, chord, barStart, note, voice);
         if (n == 0) return;
 
         double dt = t - _lastT;
@@ -236,5 +256,31 @@ public sealed class FakeLiveSource(Session session) : ILiveSource
         f.PeakDbfs = (float)(20 * Math.Log10(peak + 1e-9));
         if (f.PeakDbfs >= f.PeakHoldDbfs || t - _peakHoldT > 1.5) { f.PeakHoldDbfs = f.PeakDbfs; _peakHoldT = t; }
         if (peak >= 1) f.ClipLatched = true;
+    }
+
+    // CQT magnitudes of the sounding notes: 4 harmonics (1/h), 0.5-bin wide peaks, on a noise floor.
+    void SynthesizeCqt(LiveFrame f, double t, Chord chord, double barStart, Pitch note, bool voice)
+    {
+        const float minHz = 82.41f;
+        const int bins = 72;
+        f.CqtBins = bins;
+        f.CqtBinsPerOctave = 12;
+        f.CqtMinHz = minHz;
+        f.AnalysisSequence = (ulong)(t / 0.02);
+        Array.Clear(f.Cqt);
+        void Note(double hz, double amp)
+        {
+            for (int h = 1; h <= 4; h++)
+            {
+                double bin = 12 * Math.Log2(h * hz / minHz);
+                for (int k = Math.Max(0, (int)bin - 2); k < Math.Min(bins, (int)bin + 3); k++)
+                    f.Cqt[k] += (float)(amp / h * Math.Exp(-Math.Pow((k - bin) / 0.5, 2)));
+            }
+        }
+        if (voice) Note(note.Hz(), 0.3);
+        else
+            for (int k = 0; k < 6; k++)
+                if (chord.Frets[k] >= 0) Note(440 * Math.Pow(2, (OpenStrings[k] + chord.Frets[k] - 69) / 12.0), 0.2 * Math.Exp(-(t - barStart) * 1.6));
+        for (int k = 0; k < bins; k++) f.Cqt[k] += 0.002f * (1 + (float)Math.Sin(k * 12.9898 + t * 78.233));
     }
 }

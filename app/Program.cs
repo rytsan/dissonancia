@@ -43,11 +43,16 @@ public sealed class MainWindow : Window
     readonly string _coreError;
     readonly TextBlock _startStatus = new() { Foreground = Ui.Label, TextWrapping = TextWrapping.Wrap };
     readonly RackModule[] _modules;
+    readonly Dictionary<string, Action> _actions;
+    readonly Dictionary<Key, string> _keys = new()
+    {
+        [Key.Space] = "Rec", [Key.M] = "Metronome", [Key.T] = "TapTempo", [Key.S] = "StageMode", [Key.Escape] = "LeaveStage",
+    };
+    readonly List<double> _taps = [];
     readonly TabControl _tabs = new();
     readonly TabItem _liveTab, _scoreTab;
-    readonly Control _rack;
+    readonly RackView _rack;
     readonly StageView _stage = new();
-    readonly TimelineModule _timeline = new() { Height = 84 };
     readonly TextBlock _scoreTitle = new() { FontWeight = FontWeight.Bold, Foreground = Ui.Label };
     readonly TextBlock _scoreStatus = new() { Foreground = Ui.Label, VerticalAlignment = VerticalAlignment.Center };
     Score? _score;
@@ -72,27 +77,35 @@ public sealed class MainWindow : Window
         _core = NativeCore.TryLoad(out _coreError);
         Closed += (_, _) => { _core?.Dispose(); _verovio?.Dispose(); };
 
-        var input = new InputModule { Height = 150 };
-        var scope = new ScopeModule { Height = 170 };
-        var lcd = new LcdModule { Height = 320 };
-        var instrument = new InstrumentModule { Height = 170 };
-        var timeline = _timeline;
-        var transport = new TransportModule { Height = 96 };
-        var status = new StatusModule { Height = 38 };
-        _modules = [input, scope, lcd, instrument, timeline, transport, status, _stage];
+        var transport = new TransportModule();
+        var catalog = new Dictionary<ModuleKind, RackModule>
+        {
+            [ModuleKind.Input] = new InputModule(), [ModuleKind.Scope] = new ScopeModule(), [ModuleKind.Analyzer] = new LcdModule(),
+            [ModuleKind.Tuner] = new TunerModule(), [ModuleKind.Fretboard] = new FretboardModule(), [ModuleKind.Keyboard] = new KeyboardModule(),
+            [ModuleKind.Waterfall] = new WaterfallModule(), [ModuleKind.Timeline] = new TimelineModule(),
+            [ModuleKind.Transport] = transport, [ModuleKind.Status] = new StatusModule(),
+        };
+        _modules = [.. catalog.Values, _stage];
         foreach (var m in _modules) { m.Frame = _frame; m.Session = _session; }
+        _rack = new RackView(catalog);
+        _rack.Load(_session.Mode);
 
-        transport.RecPressed += () => _source.ToggleRec(Clock());
-        transport.MetronomePressed += () => _source.ToggleMetronome();
-        transport.ScorePressed += ShowScore;
-
-        // Default preset (spec §22.3): [INPUT / SCOPE] | LCD, then instrument, timeline, transport, status.
-        var top = new Grid { ColumnDefinitions = new ColumnDefinitions("*,*") };
-        var left = new StackPanel { Children = { input, scope } };
-        top.Children.Add(left);
-        Grid.SetColumn(lcd, 1);
-        top.Children.Add(lcd);
-        _rack = new StackPanel { Margin = new Thickness(8), Children = { top, instrument, timeline, transport, status } };
+        // One action table (spec §22.6): keys, transport buttons (and later MIDI) all bind to it.
+        _actions = new()
+        {
+            ["Rec"] = () => _source.ToggleRec(Clock()),
+            ["Metronome"] = () => _source.ToggleMetronome(),
+            ["TapTempo"] = TapTempo,
+            ["StageMode"] = () => SetStage(!_stageMode),
+            ["LeaveStage"] = () => SetStage(false),
+            ["EditRack"] = _rack.ToggleEdit,
+            ["Score"] = ShowScore,
+            ["ScopeTrigger"] = ((ScopeModule)catalog[ModuleKind.Scope]).ToggleTrigger,
+        };
+        transport.RecPressed += _actions["Rec"];
+        transport.MetronomePressed += _actions["Metronome"];
+        transport.TapPressed += _actions["TapTempo"];
+        transport.ScorePressed += _actions["Score"];
 
         _liveTab = new TabItem { Header = "LIVE", Content = _rack };
         _scoreTab = new TabItem { Header = "SCORE", Content = BuildScoreTab() };
@@ -114,9 +127,12 @@ public sealed class MainWindow : Window
         if (_lastFrame > 0) _frame.DisplayMs = (float)((now - _lastFrame) * 1000);   // measured frame interval
         _lastFrame = now;
         _source.Read(_frame, now);
-        ApplyPreset();
+        SyncRack();
         if (_tabs.SelectedItem == _liveTab)
-            foreach (var m in _modules) m.InvalidateVisual();
+        {
+            if (_stageMode) _stage.InvalidateVisual();
+            else foreach (var m in _rack.Visible) m.InvalidateVisual();   // hidden modules are not rendered
+        }
         RequestAnimationFrame(OnFrame);
     }
 
@@ -141,10 +157,29 @@ public sealed class MainWindow : Window
     }
 
     /// Default rack preset per mode (spec §22.4): the chord timeline only makes sense in chord modes.
-    void ApplyPreset() => _timeline.IsVisible = _session.IsChordMode;
+    /// Preset follows the session mode; editing is locked while REC is armed or running.
+    void SyncRack()
+    {
+        if (_rack.Mode != _session.Mode) _rack.Load(_session.Mode);
+        _rack.SetLocked(_frame.Recording || _frame.CountingIn);
+    }
+
+    /// Tap tempo (spec §22.6): mean interval of the last taps (up to 5, reset after a 2 s pause); not during REC.
+    void TapTempo()
+    {
+        if (_frame.Recording || _frame.CountingIn) return;
+        double now = Clock();
+        if (_taps.Count > 0 && now - _taps[^1] > 2) _taps.Clear();
+        _taps.Add(now);
+        if (_taps.Count > 5) _taps.RemoveAt(0);
+        if (_taps.Count < 2) return;
+        _session.Bpm = MathF.Round((float)Math.Clamp(60 * (_taps.Count - 1) / (_taps[^1] - _taps[0]), 30, 300));
+        _source.SetTempo(_session.Bpm);
+    }
 
     /// Screenshot tool entry: fill the frame at a fixed time without the animation loop.
-    public void Step(double now) { _source.Read(_frame, now); ApplyPreset(); foreach (var m in _modules) m.InvalidateVisual(); }
+    public void Step(double now) { _source.Read(_frame, now); SyncRack(); foreach (var m in _modules) m.InvalidateVisual(); }
+    public void Action(string name) => _actions[name]();
     public void SelectTab(int index) => _tabs.SelectedIndex = index;
     public void SetMode(AppMode mode, Clef clef) { _session.Mode = mode; _session.Clef = clef; }
     public void ToggleRec(double now) => _source.ToggleRec(now);
@@ -152,14 +187,8 @@ public sealed class MainWindow : Window
     protected override void OnKeyDown(KeyEventArgs e)
     {
         if (_tabs.SelectedItem != _liveTab) { base.OnKeyDown(e); return; }
-        switch (e.Key)
-        {
-            case Key.Space: _source.ToggleRec(Clock()); break;
-            case Key.M: _source.ToggleMetronome(); break;
-            case Key.S: SetStage(!_stageMode); break;
-            case Key.Escape: SetStage(false); break;
-            default: base.OnKeyDown(e); return;
-        }
+        if (!_keys.TryGetValue(e.Key, out var action)) { base.OnKeyDown(e); return; }
+        _actions[action]();
         e.Handled = true;
     }
 

@@ -289,6 +289,8 @@ public sealed class NativeLiveSource : ILiveSource
     string _alternatives = "";
     readonly int[][] _pcSets = Enumerable.Range(0, 9).Select(n => new int[n]).ToArray();
     bool _metronome = true;
+    int _shapeKey = -1;
+    int[] _frets = [];
 
     /// Events lost between core and GUI (sequence gaps), shown as incomplete event log.
     public int EventGaps { get; private set; }
@@ -364,6 +366,18 @@ public sealed class NativeLiveSource : ILiveSource
         fixed (float* chroma = _snap.Chroma.Normalized) new ReadOnlySpan<float>(chroma, 12).CopyTo(f.Chroma);
         f.TuningValid = _snap.Tuning.Valid != 0;
         f.TuningCents = _snap.Tuning.OffsetCents;
+        f.AnalysisSequence = _snap.Sequence;
+        f.SampleRate = _snap.SampleRate;
+        f.CqtBins = Math.Min((int)_snap.CqtBinCount, LiveFrame.MaxCqtBins);
+        f.CqtBinsPerOctave = Math.Max(1, (int)_snap.CqtBinsPerOctave);
+        f.CqtMinHz = _snap.CqtMinHz;
+        fixed (float* cqt = _snap.CqtMagnitude) new ReadOnlySpan<float>(cqt, LiveFrame.MaxCqtBins).CopyTo(f.Cqt);
+        fixed (float* scope = _snap.Scope) new ReadOnlySpan<float>(scope, LiveFrame.ScopeSamples).CopyTo(f.Scope);
+        // Likely guitar shape, recomputed only when the detected set or the settled bass changes.
+        int shapeKey = f.BassSettled ? f.Bass.Midi % 12 + 1 : 0;
+        foreach (int pc in pcs) shapeKey |= 1 << (pc + 4);
+        if (shapeKey != _shapeKey) { _shapeKey = shapeKey; _frets = pcs.Length >= 2 ? Theory.LikelyShape(pcs, f.BassSettled ? f.Bass.Midi % 12 : -1) : []; }
+        f.Frets = _frets;
 
         // Drain every frame so the queue never overflows; SCORE (M6) will consume the payloads.
         fixed (AnalyzerEventNative* ev = _events)
@@ -405,6 +419,9 @@ public sealed class NativeLiveSource : ILiveSource
         Directory.CreateDirectory(dir);
         Check(Ana.RecStart(_h, Path.Combine(dir, $"take-{DateTime.Now:yyyyMMdd-HHmmss}.wav")));
     }
+
+    public void SetTempo(float bpm) =>
+        Check(Ana.SetMetronome(_h, (byte)(_metronome ? 1 : 0), bpm, new TimeSignatureNative { Numerator = (byte)_session.BeatsPerBar, Denominator = (byte)_session.BeatUnit }));
 
     public void ToggleMetronome() =>
         Check(Ana.SetMetronome(_h, (byte)(_metronome ? 0 : 1), _session.Bpm, new TimeSignatureNative { Numerator = (byte)_session.BeatsPerBar, Denominator = (byte)_session.BeatUnit }));

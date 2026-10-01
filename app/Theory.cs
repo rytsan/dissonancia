@@ -75,4 +75,59 @@ public static class Theory
         var src = fifths >= 0 ? TrebleSharps : TrebleFlats;
         return [.. src.Take(Math.Abs(fifths)).Select(p => p + offset)];
     }
+
+    /// Standard guitar tuning, low E first (MIDI).
+    public static readonly int[] StandardTuning = [40, 45, 50, 55, 59, 64];
+
+    /// Most likely guitar shape for a chord (spec §22.3, labelled "likely shape": positions are
+    /// ambiguous). One hand position (a 4-fret window plus open strings), frets 0-12, muted strings
+    /// only below the lowest sounding one, lowest sounding note = the bass when known, every chord
+    /// tone present. Cost prefers more strings, a small span, low positions and open strings.
+    /// Returns frets per string (low E first), -1 = muted; all -1 when nothing fits.
+    public static int[] LikelyShape(ReadOnlySpan<int> pitchClasses, int bassPc, int[]? tuning = null)
+    {
+        tuning ??= StandardTuning;
+        int strings = tuning.Length, mask = 0;
+        foreach (int pc in pitchClasses) mask |= 1 << (pc % 12);
+        if (mask == 0) return [.. Enumerable.Repeat(-1, strings)];
+        int[] best = [.. Enumerable.Repeat(-1, strings)], cur = new int[strings];
+        double bestCost = double.MaxValue;
+        for (int pos = 0; pos <= 8; pos++) Search(0, pos, false);
+        return best;
+
+        void Search(int s, int pos, bool sounding)
+        {
+            if (s == strings) { Score(); return; }
+            if (!sounding) { cur[s] = -1; Search(s + 1, pos, false); }   // mute only below the lowest sounding string
+            for (int k = -1; k < 4; k++)                                  // -1: open string, else fret pos+1+k
+            {
+                int fret = k < 0 ? 0 : pos + 1 + k;
+                int pc = (tuning[s] + fret) % 12;
+                if ((mask >> pc & 1) == 0) continue;
+                if (!sounding && bassPc >= 0 && pc != bassPc) continue;  // the lowest sounding note is the bass
+                cur[s] = fret;
+                Search(s + 1, pos, true);
+            }
+        }
+
+        void Score()
+        {
+            int covered = 0, count = 0, opens = 0, lo = 99, hi = 0;
+            for (int s = 0; s < strings; s++)
+            {
+                int fret = cur[s];
+                if (fret < 0) continue;
+                count++;
+                covered |= 1 << ((tuning[s] + fret) % 12);
+                if (fret == 0) opens++; else { lo = Math.Min(lo, fret); hi = Math.Max(hi, fret); }
+            }
+            if (count < Math.Min(3, BitCount(mask))) return;
+            int first = Array.FindIndex(cur, f => f >= 0), last = Array.FindLastIndex(cur, f => f >= 0);
+            if (opens > 0 && lo != 99 && cur[first] == lo && cur[last] == lo) return;   // barre implied: no open string under it
+            double cost = (lo == 99 ? 0 : hi - lo + 0.35 * (lo - 1)) - 0.6 * count - 0.15 * opens + 1.5 * BitCount(mask & ~covered);
+            if (cost < bestCost) { bestCost = cost; cur.CopyTo(best, 0); }
+        }
+
+        static int BitCount(int v) => System.Numerics.BitOperations.PopCount((uint)v);
+    }
 }

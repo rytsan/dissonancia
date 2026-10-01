@@ -12,7 +12,7 @@ The target design is [`spec.md`](spec.md); this file describes only what is buil
 | M3 | Chord templates, matching, tracker, ambiguity reasons | Done |
 | M4 | Onsets, onset gating, bass, inversions, arpeggios | Done |
 | M5 | Music theory: chord spelling, Roman numerals, cadences, LCD staff | Done (live cadences use harmonic evidence only) |
-| M5b | Rack modules: fretboard/keyboard, waterfall, tuner, edit mode, stage mode | Partly (GUI prototype) |
+| M5b | Rack modules: fretboard/keyboard, waterfall, tuner, edit mode, stage mode | Done (reorder by buttons, not drag) |
 | M6 | LIVE → SCORE fast path, MusicXML/MIDI, Verovio | Done (MuseScore round trip still to check by hand) |
 | M7+ | STUDIO (import, editor, separation, choir, VST3) | Not started |
 
@@ -201,6 +201,37 @@ Only the pipeline chosen on START exists in a session (`voice_` for mono modes,
 - If the native library is missing or its layout does not match, the GUI
   runs on `FakeLiveSource` and says "SIMULATED DATA".
 
+### M5b — rack modules (`app/Modules.cs`, `app/RackCatalog.cs`, `app/RackLayout.cs`)
+- Catalog: Analog VU + peak LEDs, Scope, Analyzer display, Tuner, Fretboard,
+  Keyboard, CQT waterfall, Chord timeline, Transport, Status. Each module is
+  full or half width with a height in rack units; half modules fill two
+  columns, each going to the shorter one.
+- Edit mode ("EDIT RACK"): move up/down, half/full width, U−/U+, remove, add
+  from the catalog (modules not valid for the mode are greyed out), reset to
+  the default. Locked while REC is armed or running. Transport and Status are
+  pinned: they cannot be removed and sit in a bottom dock that never scrolls.
+- Presets: a default per mode (Voice: Input + Analyzer, Scope, Tuner; Guitar:
+  + Fretboard, Timeline; Piano: + Keyboard, Waterfall, Timeline), and the
+  user's edits saved per mode as JSON (`rack-<Mode>.json` in the app config
+  folder, `[{ "module": "Scope", "width": "half", "heightU": 2 }, …]`). A
+  hand-edited file is cleaned on load.
+- Fretboard: the likely shape computed from the detected pitch classes and
+  the settled bass (`Theory.LikelyShape`, one hand position, bass on the
+  lowest sounding string, no open string under an implied barre; 0.04 ms per
+  chord change, only when the set changes).
+- Waterfall: one column per analysis hop from the snapshot's CQT, 10 s, slow
+  auto-gain, C lines labelled. Tuner: big plasma needle, ±5 ¢ lamp; chord
+  modes show the estimated A4 offset. Scope: click (or the action) toggles a
+  triggered view of three detected periods in mono modes.
+- One action table (spec §22.6): Rec, Metronome, TapTempo, StageMode,
+  LeaveStage, EditRack, Score, ScopeTrigger. Keys and transport buttons bind
+  to it (MIDI later). Tap tempo (`T` or TAP) averages up to 5 taps, refused
+  during REC.
+- `tools/shot`: headless screenshots of any tab and mode, optionally after
+  running actions (`dotnet run --project tools/shot -- out.png 1 VoiceMono 4.2 EditRack`).
+- Fixed on the way: the simulated voice computed its phase as 2π·f(t)·t with
+  vibrato inside f, so its pitch drifted with time; the phase is integrated now.
+
 ## Measurements
 
 From the test suite (synthetic signals, sample clock) and loopback runs on
@@ -247,6 +278,8 @@ allocation in the callback or the analysis steady state fails the run.
   sidecar loading in 3/4; every sample validates against the MusicXML 4.0
   XSD (downloaded once, cached) and imports into Verovio. A sidecar written
   by the core's REC test loads and exports end to end.
+- Rack and fretboard (in `tests/score`): common open and barre shapes, preset
+  cleaning and round trip, per-mode defaults, shape search timing.
 - Theory: 31 Roman numeral cases (major, minor, flat and sharp keys, applied,
   borrowed, figured bass); cadences from the tracker (authentic, plagal,
   deceptive, half, none without a key).
@@ -262,7 +295,9 @@ allocation in the callback or the analysis steady state fails the run.
 - Chords: NNLS chroma (M7c); guitar voicing tie-break; fretboard dots from real
   data.
 - GUI: text rendering still allocates per frame outside the cached strings
-  (spec §22.7); rack edit mode; waterfall.
+  (spec §22.7); rack reorder is by buttons, not drag and drop; one user preset
+  per mode (no named presets / NextPreset yet); capo and alternate tunings for
+  the fretboard; piano mode staff is treble only (split at C4 pending).
 - SCORE: open an exported take in MuseScore once (manual acceptance); no
   CI yet for the XSD/Verovio checks; triplets only as eighth triplets; no
   tempo detection (the session BPM is used); the page is re-engraved only
