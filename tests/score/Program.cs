@@ -66,6 +66,18 @@ foreach (XmlNode m in doc.SelectNodes("//measure")!)
     Check(sum == 48, $"measure {m.Attributes!["number"]!.Value} sums to 48 ({sum})");
 }
 
+// Accidentals: printed against the key and earlier accidentals in the bar, not repeated on ties.
+var t9 = T((0, 0.5, "Db5"), (0.5, 1.0, "C5"), (1.0, 1.5, "Db5"), (1.5, 2.5, "F#4"));   // C major
+var acc = new XmlDocument { XmlResolver = null };
+acc.Load(new XmlTextReader(new StringReader(Score.Build(t9).MusicXml())) { DtdProcessing = DtdProcessing.Ignore });
+string Accs(XmlDocument d) => string.Join(" ", d.SelectNodes("//note[pitch]")!.Cast<XmlNode>().Select(n => n.SelectSingleNode("accidental")?.InnerText ?? "-"));
+Check(Accs(acc) == "flat - - sharp -", $"accidentals C major: {Accs(acc)}");
+var t10 = T((0, 0.5, "F4"), (0.5, 1.0, "F#4"));
+t10.KeyFifths = 1;   // G major: F needs a natural, F# none
+var acc2 = new XmlDocument { XmlResolver = null };
+acc2.Load(new XmlTextReader(new StringReader(Score.Build(t10).MusicXml())) { DtdProcessing = DtdProcessing.Ignore });
+Check(Accs(acc2) == "natural sharp", $"accidentals G major: {Accs(acc2)}");
+
 // MIDI: header, three tracks, tempo 500000 us/quarter.
 byte[] mid = s7.Midi();
 int tracks = 0;

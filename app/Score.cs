@@ -306,13 +306,14 @@ public sealed class Score
             w.WriteAttributeString("id", "P1");
             foreach (var m in Measures)
             {
+                var shown = KeyAlters();   // accidentals in force in this bar, per letter and octave
                 w.WriteStartElement("measure");
                 w.WriteAttributeString("number", m.Number.ToString());
                 if (m.Number == 1) WriteAttributes(w);
                 foreach (var item in m.Items)
                 {
                     if (item.Harmony is not null) WriteHarmony(w, item.Harmony);
-                    WriteNote(w, item);
+                    WriteNote(w, item, shown);
                 }
                 w.WriteEndElement();
             }
@@ -411,7 +412,30 @@ public sealed class Score
         8 => ("quarter", 0), 6 => ("eighth", 0), 4 => ("eighth", 0), _ => ("16th", 0),
     };
 
-    static void WriteNote(XmlWriter w, ScoreItem item)
+    /// Alteration the key signature gives each letter: sharps F C G D A E B, flats B E A D G C F.
+    Dictionary<(int Letter, int Octave), int> KeyAlters() => new();
+
+    int KeyAlter(int letter)
+    {
+        int[] sharps = [3, 0, 4, 1, 5, 2, 6], flats = [6, 2, 5, 1, 4, 0, 3];
+        int f = Take.KeyFifths;
+        return f > 0 && sharps.Take(f).Contains(letter) ? 1 : f < 0 && flats.Take(-f).Contains(letter) ? -1 : 0;
+    }
+
+    /// Printed accidental (§22.2): when the note's alteration differs from what is in force in the
+    /// bar (key signature, or an earlier accidental on the same letter and octave). A tied
+    /// continuation never repeats it.
+    string? Accidental(ScoreItem item, Dictionary<(int, int), int> shown)
+    {
+        if (item.Pitch is not { } p) return null;
+        var key = (p.Letter, p.Octave);
+        int inForce = shown.TryGetValue(key, out var a) ? a : KeyAlter(p.Letter);
+        shown[key] = p.Alter;
+        if (item.TieStop || p.Alter == inForce) return null;
+        return p.Alter switch { -2 => "flat-flat", -1 => "flat", 1 => "sharp", 2 => "double-sharp", _ => "natural" };
+    }
+
+    void WriteNote(XmlWriter w, ScoreItem item, Dictionary<(int, int), int> shown)
     {
         w.WriteStartElement("note");
         if (item.Pitch is { } p)
@@ -437,6 +461,7 @@ public sealed class Score
             w.WriteElementString("type", type);
             for (int i = 0; i < dots; i++) w.WriteElementString("dot", "");
         }
+        if (Accidental(item, shown) is { } accidental) w.WriteElementString("accidental", accidental);
         if (item.Tuplet)
         {
             w.WriteStartElement("time-modification");

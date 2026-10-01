@@ -73,7 +73,7 @@ modules; the layout is saved per mode.
 core/   C++ engine: include/dissonancia.h (C ABI), src/, tests/, third_party/miniaudio
 app/    C# Avalonia desktop app (Score.cs: take -> score, MusicXML/MIDI/JSON/text)
 tests/  score/: runnable checks for the SCORE layer, rack presets, fretboard shapes
-tools/  shot/: headless screenshots of the app
+tools/  shot/: headless screenshots of the app · loopback/: live test through PulseAudio
 docs/   IMPLEMENTATION.md, spec.md, spec.v2.1.md, graph/ (knowledge graph)
 ```
 

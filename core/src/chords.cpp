@@ -559,8 +559,10 @@ void ChordTracker::process(const ChromaVector& chroma, double t, double frameEnd
             if (!candidateOn_ || !same_chord(best, cand_)) {
                 candidateOn_ = true;
                 cand_ = best;
-                // Backdate to the detected attack when it is recent; else to this frame.
-                candStart_ = lastOnset >= 0 && t - lastOnset < 0.25 ? std::min(t, lastOnset) : t;
+                // Backdate to the attack that started this change: the newest onset after the current
+                // chord began (a candidate can restart while the bass settles), within 1 s; else this frame.
+                const bool changeOnset = lastOnset >= 0 && t - lastOnset < 1.0 && (!active_ || lastOnset > cur_.start + 0.05);
+                candStart_ = changeOnset ? std::min(t, lastOnset) : t;
                 candTime_ = 0;
                 candLatencyMs_ = float((frameEnd - t) * 1000);   // onset estimate -> first preview
             }
@@ -581,6 +583,15 @@ void ChordTracker::process(const ChromaVector& chroma, double t, double frameEnd
         }
     }
 
+    // Re-strum of the confirmed chord: its bass is re-settling (§11), but the chord keeps the inversion it
+    // was confirmed with, so the preview shows it instead of flickering to root position.
+    if (active_ && sound && same_chord(best, cur_.c) && !best.hasBass && cur_.c.hasBass) {
+        ChordCandidate& b = out.preview.best;
+        b.hasBass = 1;
+        b.bassPitchClass = cur_.c.bassPitchClass;
+        std::memcpy(b.symbol, cur_.c.symbol, sizeof b.symbol);
+        std::memcpy(b.roman, cur_.c.roman, sizeof b.roman);
+    }
     if (active_) std::memcpy(out.confirmedSymbol, cur_.c.symbol, sizeof out.confirmedSymbol);
     else std::memset(out.confirmedSymbol, 0, sizeof out.confirmedSymbol);
     out.confirmed = active_ && same_chord(best, cur_.c);

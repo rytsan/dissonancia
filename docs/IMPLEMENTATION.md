@@ -227,6 +227,14 @@ Only the pipeline chosen on START exists in a session (`voice_` for mono modes,
   LeaveStage, EditRack, Score, ScopeTrigger. Keys and transport buttons bind
   to it (MIDI later). Tap tempo (`T` or TAP) averages up to 5 taps, refused
   during REC.
+- Found by the live loopback run and fixed: a chord candidate that restarted
+  while its bass was settling lost its backdating (D7 started 0.36 s late);
+  it now backdates to the onset that began the change. A re-strum of a
+  confirmed slash chord no longer flickers to root position while the bass
+  re-settles. MusicXML now writes `<accidental>` (D♭5 had none in Verovio).
+- `tools/loopback`: live test through PulseAudio — `gen.py` writes the test
+  WAVs, the console plays one, captures the sink monitor with the real core,
+  records a take and engraves it.
 - `tools/shot`: headless screenshots of any tab and mode, optionally after
   running actions (`dotnet run --project tools/shot -- out.png 1 VoiceMono 4.2 EditRack`).
 - Piano: the analyzer shows a grand staff (treble + bass joined by a system
@@ -257,6 +265,9 @@ item).
 | Onsets | one per chord change, ±25 ms; chords backdated ±30 ms |
 | Notify rule | ≈ 1 wake-up per hop, not per callback (≤ 110 for 100 hops / 750 callbacks) |
 | Loopback (WSLg) | voice A3 → A♯3 → B3 at +0 ¢, 46–69 ms; CPU ≈ 2 % (voice), 0.16 % (chords) |
+| Live loopback, guitar (`tools/loopback`, 8 bars G Em C D7 G/B Am7 D G, 92 bpm, plucked strings) | 8/8 chords with inversions (Guitar and Piano pipelines), starts within ±20 ms of the strums, confirmed 0.40 s after the attack, V7→I6 imperfect and V→I perfect authentic cadences, chart and numerals exact, 8 bars engraved |
+| Live loopback, voice (13 notes, vibrato ±15 ¢, chromatic passing tone) | 13/13 pitches at +2…+3 ¢, D–D♭–C spelled by direction, stable-note latency median 50 ms; legato note changes start ≈ 28 ms late (first note after silence exact); score rhythm exact after quantization |
+| Live loopback, pipeline | capture 15 ms (reported), processing median 4.8–5.1 ms, CPU ≤ 2.5 %, 0 xruns, 0 recorder gaps, 0 event gaps |
 
 ## Tests
 
@@ -307,6 +318,10 @@ allocation in the callback or the analysis steady state fails the run.
   tempo detection (the session BPM is used); the page is re-engraved only
   when the tab opens (no reflow on resize).
 - Windows build and run not yet verified (developed on WSL2).
+- Voice: legato pitch changes are dated where the tracker settles (≈ 28 ms late);
+  backdating them to the pitch crossing would remove it.
+- The loopback runs use synthetic instruments; a real guitar and voice through
+  a microphone are still to be measured.
 
 ## Knowledge graph
 
