@@ -358,7 +358,8 @@ public sealed class LcdModule : RackModule
             infoX + 18, y + 18, 13, f.BassSettled, Ui.Mono);
         Plasma.Text(ctx, valid ? $"{f.Bass.Hz():0.0} Hz" : "— Hz", infoX, y + 40, 13, false);
         if (Session.Clef == Clef.Treble8vb) Plasma.Text(ctx, "written 8vb", inner.X, y + 22 + noteDot * 1.3 * 7, 10, false);
-        DrawStaff(ctx, new Rect(inner.Right - 160, y + 10, 160, 56), written, valid);
+        if (Session.GrandStaff) DrawGrandStaff(ctx, new Rect(inner.Right - 170, y + 2, 170, Math.Max(80, inner.Bottom - y - 4)), f.Bass, valid);
+        else DrawStaff(ctx, new Rect(inner.Right - 160, y + 10, 160, 56), Session.Clef, written, valid);
     }
 
     /// Mono modes: the whole display is the note — big spelled name, staff, full-width cents meter.
@@ -370,7 +371,7 @@ public sealed class LcdModule : RackModule
         double noteH = dot * 1.3 * 7;
         Plasma.Text(ctx, "NOTE", inner.X, inner.Y, 10, false, Ui.SansBold);
         Plasma.DotText(ctx, f.NoteValid ? written.Name : "", inner.X, inner.Y + 16, dot, cells: 4);
-        DrawStaff(ctx, new Rect(inner.Right - staffW, inner.Y + 10, staffW, noteH + 6), written, f.NoteValid);
+        DrawStaff(ctx, new Rect(inner.Right - staffW, inner.Y + 10, staffW, noteH + 6), Session.Clef, written, f.NoteValid);
 
         double y = inner.Y + 16 + noteH + 22;
         var meter = new Rect(inner.X, y, inner.Width, 34);
@@ -402,13 +403,25 @@ public sealed class LcdModule : RackModule
         ctx.DrawRectangle(Math.Abs(cents) < 5 ? Plasma.Hot : Plasma.Lit, null, bar, 1.5, 1.5);   // in tune = white-hot
     }
 
-    void DrawStaff(DrawingContext ctx, Rect r, Pitch written, bool valid)
+    /// Piano: treble and bass staves joined by a brace line; the note goes on the bass staff below C4.
+    void DrawGrandStaff(DrawingContext ctx, Rect r, Pitch sounding, bool valid)
+    {
+        // Each staff takes 6 gaps (lines + one gap of margin each side); 2 more gaps between them for C4 ledgers.
+        double gap = r.Height / 14, h = 6 * gap;
+        bool low = sounding.Midi < 60;
+        var top = new Rect(r.X, r.Y, r.Width, h);
+        var bottom = new Rect(r.X, r.Y + 8 * gap, r.Width, h);
+        DrawStaff(ctx, top, Clef.Treble, sounding, valid && !low);
+        DrawStaff(ctx, bottom, Clef.Bass, sounding, valid && low);
+        Plasma.GlowLine(ctx, new Point(r.X, top.Bottom - 5 * gap), new Point(r.X, bottom.Bottom - gap));   // system line
+    }
+
+    void DrawStaff(DrawingContext ctx, Rect r, Clef clef, Pitch written, bool valid)
     {
         double gap = r.Height / 6, bottom = r.Bottom - gap;   // 5 lines, 4 spaces
         double Y(int pos) => bottom - pos * gap / 2;
         for (int i = 0; i < 5; i++) Plasma.GlowLine(ctx, new Point(r.X, Y(i * 2)), new Point(r.Right, Y(i * 2)));
 
-        var clef = Session.Clef;
         string glyph = clef switch { Clef.Bass => "𝄢", Clef.Alto or Clef.Tenor => "𝄡", _ => "𝄞" };
         double clefSize = gap * 4.2;
         Plasma.Glyph(ctx, glyph, r.X + 2, Y(clef is Clef.Bass ? 8 : clef is Clef.Alto ? 6 : clef is Clef.Tenor ? 8 : 6) - clefSize * 0.55, clefSize, Ui.Music);

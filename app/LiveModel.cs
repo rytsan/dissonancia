@@ -16,6 +16,9 @@ public sealed class Session
     public uint SampleRate, PeriodFrames;
     public bool Exclusive, ClickOutput = true;
 
+    /// Piano: grand staff (treble + bass, split at C4); the clef setting does not apply (spec §22.2).
+    public bool GrandStaff => Mode == AppMode.PianoChords;
+
     public bool IsChordMode => Mode is AppMode.GuitarChords or AppMode.PianoChords or AppMode.GeneralChords;
 }
 

@@ -318,6 +318,9 @@ public sealed class MainWindow : Window
             (AppMode.GeneralChords, "🎼  General chords", Clef.Treble),
         };
         var clefBox = new ComboBox { ItemsSource = Enum.GetValues<Clef>().Select(c => c.Name()).ToArray(), SelectedIndex = (int)_session.Clef, Width = 180 };
+        var clefNote = new TextBlock { Text = "piano: grand staff (split at C4)", Foreground = Ui.Label, VerticalAlignment = VerticalAlignment.Center };
+        void ClefForMode() { clefBox.IsEnabled = !_session.GrandStaff; clefNote.IsVisible = _session.GrandStaff; }
+        ClefForMode();
         var modeRow = new WrapPanel();
         var modeButtons = new List<ToggleButton>();
         foreach (var (mode, label, clef) in modes)
@@ -327,7 +330,8 @@ public sealed class MainWindow : Window
             {
                 _session.Mode = mode;
                 foreach (var o in modeButtons) o.IsChecked = o == b;
-                clefBox.SelectedIndex = (int)clef;           // default clef per mode, user can change
+                clefBox.SelectedIndex = (int)clef;           // default clef per mode, user can change (not on piano)
+                ClefForMode();
             };
             modeButtons.Add(b);
             modeRow.Children.Add(b);
@@ -357,7 +361,7 @@ public sealed class MainWindow : Window
         };
         keyBox.SelectionChanged += (_, _) => { if (keyBox.SelectedItem is KeyOption k) _session.Key = k; };
         clefBox.SelectionChanged += (_, _) => _session.Clef = (Clef)Math.Max(0, clefBox.SelectedIndex);
-        root.Children.Add(Section("KEY SIGNATURE  ·  CLEF", Row(Labeled("Mode", modeBox), Labeled("Key (circle of fifths)", keyBox), Labeled("Clef", clefBox))));
+        root.Children.Add(Section("KEY SIGNATURE  ·  CLEF", Row(Labeled("Mode", modeBox), Labeled("Key (circle of fifths)", keyBox), Labeled("Clef", clefBox), clefNote)));
 
         // Meter, tempo, metronome
         var meterBox = new ComboBox { ItemsSource = new[] { "4/4", "3/4", "2/4", "6/8", "12/8" }, SelectedIndex = 0, Width = 100 };

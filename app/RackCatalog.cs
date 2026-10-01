@@ -45,7 +45,9 @@ public static class RackCatalog
 
     public static List<RackEntry> Default(AppMode mode)
     {
-        List<RackEntry> top = [new(ModuleKind.Input, true, 2), new(ModuleKind.Analyzer, true, 4), new(ModuleKind.Scope, true, 2)];
+        // Piano: a taller analyzer for the grand staff.
+        bool piano = mode == AppMode.PianoChords;
+        List<RackEntry> top = [new(ModuleKind.Input, true, 2), new(ModuleKind.Analyzer, true, piano ? 5 : 4), new(ModuleKind.Scope, true, piano ? 3 : 2)];
         List<RackEntry> middle = mode switch
         {
             AppMode.VoiceMono or AppMode.InstrumentMono => [new(ModuleKind.Tuner, false, 2)],

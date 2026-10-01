@@ -229,6 +229,10 @@ Only the pipeline chosen on START exists in a session (`voice_` for mono modes,
   during REC.
 - `tools/shot`: headless screenshots of any tab and mode, optionally after
   running actions (`dotnet run --project tools/shot -- out.png 1 VoiceMono 4.2 EditRack`).
+- Piano: the analyzer shows a grand staff (treble + bass joined by a system
+  line); a note below C4 goes on the bass staff, C4 and above on the treble
+  staff. The clef selector is disabled for piano, and the piano preset gives
+  the analyzer 5U for it.
 - Fixed on the way: the simulated voice computed its phase as 2π·f(t)·t with
   vibrato inside f, so its pitch drifted with time; the phase is integrated now.
 
@@ -297,7 +301,7 @@ allocation in the callback or the analysis steady state fails the run.
 - GUI: text rendering still allocates per frame outside the cached strings
   (spec §22.7); rack reorder is by buttons, not drag and drop; one user preset
   per mode (no named presets / NextPreset yet); capo and alternate tunings for
-  the fretboard; piano mode staff is treble only (split at C4 pending).
+  the fretboard.
 - SCORE: open an exported take in MuseScore once (manual acceptance); no
   CI yet for the XSD/Verovio checks; triplets only as eighth triplets; no
   tempo detection (the session BPM is used); the page is re-engraved only
