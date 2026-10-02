@@ -69,6 +69,7 @@ static class Ui
     public static readonly IPen ScopeGrid = P(0xFF10261A, 1);
     public static readonly IPen ScopeTrace = P(0xFF7CFFB2, 1.2);
     public static readonly IPen ScopeGlow = P(0x337CFFB2, 4);
+    public static readonly IPen BeatMark = P(0x66FFB000, 1);   // tempo heard: beat marks on the scope
     public static readonly IBrush ScopeFill = B(0x557CFFB2);
 
     public static readonly IBrush SevenSeg = B(0xFFFF5A3C);
@@ -265,6 +266,17 @@ public sealed class ScopeModule : RackModule
         ctx.DrawGeometry(Ui.ScopeFill, Ui.ScopeGlow, env);
         ctx.DrawGeometry(null, Ui.ScopeTrace, env);
         double span = LiveFrame.WaveColumns * f.WaveColumnSeconds;
+        // Beat marks of the tempo heard (display only), extrapolated from the latest beat to "now".
+        if (f.DetectedBpm > 0 && span > 0)
+        {
+            double period = 60 / f.DetectedBpm, now = f.AnalyzedSeconds;
+            double first = f.LastBeatSeconds + Math.Floor((now - f.LastBeatSeconds) / period) * period;   // newest beat <= now
+            for (double tb = first; tb > now - span; tb -= period)
+            {
+                double x = r.Right - (now - tb) / span * r.Width;
+                ctx.DrawLine(Ui.BeatMark, new Point(x, r.Y + 2), new Point(x, r.Bottom - 2));
+            }
+        }
         Ui.Text(ctx, $"{span:0.0} s", r.X + 6, r.Bottom - 16, 10, Ui.LcdDim, Ui.Mono);
         Ui.Text(ctx, "now", r.Right - 6, r.Bottom - 16, 10, Ui.LcdDim, Ui.Mono, Ui.Align.Right);
     }
@@ -555,12 +567,9 @@ public sealed class TransportModule : RackModule
         ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF24272C)), Ui.FaceEdge, _tap, 4, 4);
         Ui.Text(ctx, "TAP", _tap.Center.X, _tap.Center.Y - 9, 14, canTap ? Ui.LabelBright : Ui.Label, Ui.SansBold, Ui.Align.Center);
 
-        // Dynamic session: what is heard, and whether it drives the session key / tempo.
-        string key = f.DetectedKeyValid ? $"{new KeyOption(f.DetectedKeyFifths, f.DetectedKeyMinor).Label} {f.KeyConfidence:0.00}" : "listening…";
-        string tempo = f.DetectedBpm > 0 ? $"♩≈{f.DetectedBpm:0} {f.TempoConfidence:0.00}" : "listening…";
-        bool locked = f.Recording || f.CountingIn;
-        Ui.Text(ctx, $"HEARD  key {key}{(Session.AutoKey ? " (auto)" : "")}   ·   tempo {tempo}{(Session.AutoTempo ? " (auto)" : "")}{(locked ? "   ·   locked by REC" : "")}",
-            r.X + 90, r.Y - 16, 10, Session.AutoKey || Session.AutoTempo ? Ui.Amber : Ui.Label, Ui.SansBold);
+        // Tempo heard: beat marks on the scope; the BPM above is the session's, set by hand or TAP.
+        string heard = f.DetectedBpm > 0 ? $"♩≈{f.DetectedBpm:0}  ({f.TempoConfidence:0.00})  ·  beat marks on the scope" : "listening…";
+        Ui.Text(ctx, $"HEARD TEMPO  {heard}", r.X + 90, r.Y - 16, 10, Ui.Label, Ui.SansBold);
 
         // → SCORE
         _score = new Rect(r.Right - 110, cy - 18, 110, 36);

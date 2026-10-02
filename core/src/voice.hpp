@@ -68,7 +68,6 @@ public:
     void process(const float* x, uint32_t n, uint64_t endFrame, VoiceOutput& out);
     // Closes an open note (REC stop / ana_stop), emitting its complete NoteEnd.
     void flush(VoiceOutput& out);
-    void set_key(int8_t fifths, KeyMode mode) { session_.keySet = 1; session_.keyFifths = fifths; session_.keyMode = mode; speller_.configure(fifths, mode); }
 
 private:
     enum class State { Silence, Candidate, Stable };

@@ -5,13 +5,14 @@ public sealed class Session
 {
     public AppMode Mode = AppMode.GuitarChords;
     public Quality Quality = Quality.Balanced;
-    public KeyOption Key = new(1, false);
+    // No key signature by default: chord names stay plain (no roman numerals, no cadences). A key
+    // is chosen by hand on START by whoever knows the piece; it never changes by itself.
+    public bool KeySet;
+    public KeyOption Key = new(0, false);
     public Clef Clef = Clef.Treble8vb;
     public int BeatsPerBar = 4, BeatUnit = 4;
     public float Bpm = 92;
     public int CountInBars = 1;
-    // Dynamic session: before REC the key and the tempo follow what is played; REC locks them.
-    public bool AutoKey = true, AutoTempo = true;
 
     // Audio device (START tab). 0 = let the device choose; the core reads back the real values.
     public int CaptureDevice = -1;
@@ -76,9 +77,9 @@ public sealed class LiveFrame
     public float Bpm;
     public int BeatInBar;                  // 1-based, 0 = metronome off
     public bool Metronome = true, Recording, CountingIn;
-    public float DetectedBpm, TempoConfidence, KeyConfidence;   // core ContextEstimate; 0 bpm = none yet
-    public bool DetectedKeyValid, DetectedKeyMinor;
-    public int DetectedKeyFifths;
+    // Tempo heard (core ContextEstimate): beat marks on the scope only, never the session BPM.
+    public float DetectedBpm, TempoConfidence;   // 0 bpm = none yet
+    public double LastBeatSeconds, AnalyzedSeconds;   // sample clock; AnalyzedSeconds = the scope's "now"
     public double RecordedSeconds;         // negative while counting in: seconds until REC
     public float CaptureMs, ProcessingMs, DisplayMs, CpuPercent;
     public int Xruns, RecorderGaps;
@@ -99,7 +100,6 @@ public interface ILiveSource
     void ToggleRec(double nowSeconds);
     void ToggleMetronome();
     void SetTempo(float bpm);   // tap tempo; refused by the core during REC
-    void SetKey(int fifths, bool minor);   // dynamic session key; refused by the core during REC
 }
 
 /// Simulated data so the GUI can be designed before the DSP core exists.
@@ -136,11 +136,10 @@ public sealed class FakeLiveSource(Session session) : ILiveSource
     readonly float[] _columnBuf = new float[SamplesPerColumn];
     int _columnFill;
     float _vu = -20;
-    bool _metronome = !session.AutoTempo;
+    bool _metronome = true;
 
     public void ToggleMetronome() { if (double.IsNaN(_recStart)) _metronome = !_metronome; }
     public void SetTempo(float bpm) { }   // reads session.Bpm every frame
-    public void SetKey(int fifths, bool minor) { }
 
     public void ToggleRec(double now)
     {
@@ -204,10 +203,8 @@ public sealed class FakeLiveSource(Session session) : ILiveSource
         f.RecordedSeconds = armed ? t - _recStart : 0;   // negative while counting in
         f.DetectedBpm = t > 4 ? session.Bpm : 0;   // simulated: what is played = the session
         f.TempoConfidence = 0.62f;
-        f.DetectedKeyValid = t > 3;
-        f.DetectedKeyFifths = session.Key.Fifths;
-        f.DetectedKeyMinor = session.Key.Minor;
-        f.KeyConfidence = 0.8f;
+        f.AnalyzedSeconds = t;
+        f.LastBeatSeconds = beatIndex * BeatSeconds;
         if (f.Recording && f.ChordConfirmed)
         {
             int recordedBar = (int)Math.Floor((t - _recStart) / bar);

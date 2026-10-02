@@ -163,10 +163,8 @@ TEST_CASE("REC: count-in, bar-aligned start, WAV + sidecar, metronome locked") {
 
     REQUIRE(wait_until([&] { return e.callback_frames() > 30000; }));
     std::string wav = "dz_test_take.wav", json = "dz_test_take.json";
-    REQUIRE(e.set_key(2, KeyMode::Major) == ANA_OK);   // dynamic session: D major heard before REC
     REQUIRE(e.rec_start(wav.c_str()) == ANA_OK);
     CHECK(e.set_metronome(true, 90, {3, 4}) == ANA_ERR_STATE);
-    CHECK(e.set_key(0, KeyMode::Major) == ANA_ERR_STATE);
 
     const uint64_t bar = 96000;   // 4 beats at 120 bpm, 48 kHz
     LiveSnapshot s{};
@@ -196,7 +194,6 @@ TEST_CASE("REC: count-in, bar-aligned start, WAV + sidecar, metronome locked") {
     CHECK(blocks(start - bar, start) > 0.01);
     CHECK(blocks(start, start + 48000) == 0);
     CHECK(field("\"recorderGaps\": ") == 0);
-    CHECK(side.find("\"keyFifths\": 2,") != std::string::npos);
     CHECK(frames > 48000);
     // The sustained A4 was open at REC stop: flushed as one complete note into the take log.
     CHECK(side.find("\"eventLogComplete\": true") != std::string::npos);

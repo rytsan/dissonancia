@@ -1,4 +1,4 @@
-#include "context.hpp"
+#include "tempo.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -6,94 +6,28 @@
 namespace dz {
 
 namespace {
-// Temperley (1999) key profiles, tonic first. Chosen over Krumhansl-Kessler on a stress set of 14
-// progressions and melodies (secondary dominants, passing diminished chords, borrowed chords,
-// Neapolitan, harmonic/melodic minor, chromatic neighbours): KK read C major with V/V and a
-// passing dim7 as G major, Temperley none wrong (docs/IMPLEMENTATION.md, dynamic session).
-constexpr double kMajor[12] = {5, 2, 3.5, 2, 4.5, 4, 2, 4.5, 2, 3.5, 1.5, 4};
-constexpr double kMinor[12] = {5, 2, 3.5, 4.5, 2, 4, 2, 4.5, 3.5, 2, 1.5, 4};
-constexpr double kEnvSeconds = 8, kMinEnvSeconds = 4, kMinKeySeconds = 3;
-constexpr double kNewSongSilence = 3;   // seconds without pitch: the key histogram starts over
+constexpr double kEnvSeconds = 8, kMinEnvSeconds = 4;
 constexpr double kMinBpm = 40, kMaxBpm = 200, kPriorBpm = 110, kPriorOctaves = 1.0;
-
-double pearson(const double* x, const double* p, int rot) {
-    double mx = 0, mp = 0;
-    for (int i = 0; i < 12; i++) { mx += x[(i + rot) % 12]; mp += p[i]; }
-    mx /= 12; mp /= 12;
-    double sxy = 0, sxx = 0, spp = 0;
-    for (int i = 0; i < 12; i++) {
-        double a = x[(i + rot) % 12] - mx, b = p[i] - mp;
-        sxy += a * b; sxx += a * a; spp += b * b;
-    }
-    return sxx > 0 ? sxy / std::sqrt(sxx * spp) : 0;
-}
-
-// Key signature of a major tonic pitch class: -5 (Db) .. +6 (F#).
-int8_t fifths_of(int majorTonicPc) {
-    for (int f = -5; f <= 6; f++)
-        if (((7 * f) % 12 + 12) % 12 == majorTonicPc) return int8_t(f);
-    return 0;
-}
 }  // namespace
 
-ContextTracker::ContextTracker(double hopSeconds)
-    : hop_(hopSeconds), decay_(float(std::exp(-hopSeconds / 30.0))),
-      env_(size_t(std::lround(kEnvSeconds / hopSeconds)), 0.f),
-      updateHops_(std::max<uint32_t>(1, uint32_t(std::lround(0.5 / hopSeconds)))),
-      lin_(env_.size(), 0.f) {}
+TempoTracker::TempoTracker(double hopSeconds)
+    : hop_(hopSeconds), env_(size_t(std::lround(kEnvSeconds / hopSeconds)), 0.f),
+      updateHops_(std::max<uint32_t>(1, uint32_t(std::lround(0.5 / hopSeconds)))), lin_(env_.size(), 0.f) {}
 
-void ContextTracker::process(const float* pcWeights, float onsetStrength, ContextEstimate& out) {
-    for (double& v : pc_) v *= decay_;
-    mass_ *= decay_;
-    double sum = 0;
-    if (pcWeights)
-        for (int i = 0; i < 12; i++) sum += pcWeights[i];
-    if (sum > 0) {
-        for (int i = 0; i < 12; i++) pc_[i] += pcWeights[i] / sum;
-        mass_ += 1;
-        silentHops_ = 0;
-    } else if (++silentHops_ * hop_ >= kNewSongSilence) {   // a pause long enough to be another song
-        for (double& v : pc_) v = 0;
-        mass_ = 0;
-    }
+void TempoTracker::process(float onsetStrength, double now, ContextEstimate& out) {
     env_[envWrite_] = std::max(0.f, onsetStrength);
     envWrite_ = (envWrite_ + 1) % uint32_t(env_.size());
     envFill_ = std::min<uint32_t>(envFill_ + 1, uint32_t(env_.size()));
-
+    now_ = now;
     if (++sinceUpdate_ >= updateHops_) {   // ~2 estimates per second; the rest of the time: the last one
         sinceUpdate_ = 0;
-        estimate_key(last_);
-        estimate_tempo(last_);
+        estimate(last_);
     }
     out = last_;
 }
 
-void ContextTracker::estimate_key(ContextEstimate& out) const {
-    out.keyValid = 0;
-    out.keyConfidence = 0;
-    if (mass_ * hop_ < kMinKeySeconds) return;
-    double r[24];
-    int best = 0;
-    for (int k = 0; k < 24; k++) {
-        r[k] = pearson(pc_, k >= 12 ? kMinor : kMajor, k % 12);
-        if (r[k] > r[best]) best = k;
-    }
-    if (r[best] <= 0) return;
-    auto sig = [](int k) { return fifths_of(k >= 12 ? (k % 12 + 3) % 12 : k); };
-    // Confidence is about the key SIGNATURE: the relative key (same signature) is often within a
-    // hair of the winner and must not make the estimate look unsure. Runner-up = best other signature.
-    double other = -1;
-    for (int k = 0; k < 24; k++)
-        if (sig(k) != sig(best)) other = std::max(other, r[k]);
-    out.keyValid = 1;
-    out.keyFifths = sig(best);
-    out.keyMode = best >= 12 ? KeyMode::NaturalMinor : KeyMode::Major;
-    out.keyConfidence = float(std::clamp((r[best] - other) / 0.15, 0.0, 1.0) * std::clamp(r[best], 0.0, 1.0));
-}
-
-void ContextTracker::estimate_tempo(ContextEstimate& out) const {
-    out.bpm = 0;
-    out.tempoConfidence = 0;
+void TempoTracker::estimate(ContextEstimate& out) const {
+    out = {};
     if (envFill_ * hop_ < kMinEnvSeconds) return;
     const uint32_t n = envFill_, size = uint32_t(env_.size());
     // Unrolled oldest first and smoothed over ~50 ms (triangle): attacks played a few ms off the
@@ -167,6 +101,22 @@ void ContextTracker::estimate_tempo(ContextEstimate& out) const {
     while (bpm < 60) bpm *= 2;
     while (bpm > 180) bpm /= 2;
     out.bpm = float(bpm);
+
+    // Phase: the beat grid offset that collects the most envelope, newest sample = now. The marks
+    // extrapolate from the last beat until the next estimate (0.5 s).
+    const double period = 60 / bpm / hop_;
+    double bestSum = -1e30;
+    uint32_t bestPhase = 0;
+    for (uint32_t ph = 0; ph < uint32_t(std::ceil(period)); ph++) {
+        double sum = 0;
+        for (double k = 0;; k++) {
+            const double idx = double(n - 1) - ph - k * period;
+            if (idx < 0) break;
+            sum += lin_[size_t(std::lround(idx))];
+        }
+        if (sum > bestSum) { bestSum = sum; bestPhase = ph; }
+    }
+    out.lastBeatSeconds = now_ - bestPhase * hop_;
     out.tempoConfidence = float(std::clamp(bestAc, 0.0, 1.0));
 }
 

@@ -12,7 +12,7 @@ var core = NativeCore.TryLoad(out var err) ?? throw new Exception(err);
 var devices = core.CaptureDevices();
 int dev = Array.FindIndex(devices, d => d.Contains("Monitor", StringComparison.OrdinalIgnoreCase) || d.Contains("RDPSink"));
 Console.WriteLine("capture devices: " + string.Join(" | ", devices) + $"  -> using #{dev}");
-var s = new Session { Mode = mode, Key = new KeyOption(1, false), Clef = mode == AppMode.GuitarChords ? Clef.Treble8vb : Clef.Treble,
+var s = new Session { Mode = mode, KeySet = true, Key = new KeyOption(1, false), Clef = mode == AppMode.GuitarChords ? Clef.Treble8vb : Clef.Treble,
                       Bpm = 92, BeatsPerBar = 4, BeatUnit = 4, CountInBars = 1, CaptureDevice = dev, ClickOutput = false };
 var src = core.Start(s);
 var f = new LiveFrame();
@@ -41,7 +41,7 @@ while (Now() < endAt)
     if (play is not null && Now() - playAt >= nextContext)   // dynamic-session estimates as they settle
     {
         nextContext += 1;
-        log.Add($"{Now() - playAt,6:0.000}s  heard key {(f.DetectedKeyValid ? new KeyOption(f.DetectedKeyFifths, f.DetectedKeyMinor).Label : "-")} {f.KeyConfidence:0.00}  tempo {f.DetectedBpm:0.0} {f.TempoConfidence:0.00}");
+        log.Add($"{Now() - playAt,6:0.000}s  heard tempo {f.DetectedBpm:0.0} {f.TempoConfidence:0.00}  last beat {f.AnalyzedSeconds - f.LastBeatSeconds:0.000} s ago");
     }
     maxPeak = Math.Max(maxPeak, f.PeakDbfs);
     if (f.Recording) { proc.Add(f.ProcessingMs); maxCpu = Math.Max(maxCpu, f.CpuPercent); }

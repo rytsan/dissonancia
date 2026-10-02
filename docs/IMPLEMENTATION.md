@@ -56,7 +56,7 @@ Only the pipeline chosen on START exists in a session (`voice_` for mono modes,
 | `core/src/halfband.hpp` | IIR polyphase half-band decimator, analytic response, computed group delay |
 | `core/src/cqt.{hpp,cpp}` | Octave-decimated CQT, 11 tuning sets, chroma with leakage removal, tuning estimator, onset gating |
 | `core/src/bass.{hpp,cpp}` | Onset detector (spectral flux) and bass tracker (YIN preview + CQT confirmation) |
-| `core/src/context.{hpp,cpp}` | Dynamic session: key (Krumhansl-Kessler) and tempo (onset-envelope autocorrelation) heard before REC |
+| `core/src/tempo.{hpp,cpp}` | Tempo heard (onset-envelope autocorrelation + beat phase): beat marks on the scope only |
 | `core/src/chords.{hpp,cpp}` | Chord matcher (180 harmonic-aware templates, Occam, key/cadence context, bass), tracker, slash spelling |
 | `core/src/abi_check.cpp` | `static_assert` sizes/offsets, compiled with `-Wpadded -Werror` |
 | `core/tests/` | Catch2 tests + `rt_trap.cpp` (operator new aborts inside a real-time scope) |
@@ -233,37 +233,25 @@ notes, a sung melody with passing and neighbour tones, kick/snare/hi-hat),
   SkiaSharp 3.119 (Avalonia 12's version). Without the library the tab
   shows text only and says why.
 
-### Dynamic session — key and tempo heard before REC (`core/src/context.cpp`)
-- Key: a pitch-class histogram with a 30 s memory (chroma in chord modes, the
-  stable sung note in mono modes) correlated with the 24 Temperley (1999)
-  profiles. Confidence is the margin over the best key with a different
-  signature (the relative key shares it). Needs ~3 s of pitched input; 3 s
-  without pitch starts the histogram over (another song).
-- Why Temperley: on a 14-case stress set (V/V and passing dim7, harmonic
-  minor with viio7, borrowed iv/bVII, Neapolitan, ii-V-I with tritone sub,
-  V/vi, line cliché, chromatic neighbours, melodic minor, blues, dorian,
-  mixolydian), Krumhansl-Kessler applied 3 wrong signatures under the first
-  app rule (C major with V/V read as G major, E major first as B major,
-  dorian as D minor); Temperley with the stricter rule below applied none.
-- Tempo: onset envelope (CQT flux in chord modes; level rise plus one pulse
-  per note start in mono modes) over the last 8 s, smoothed over 50 ms,
-  autocorrelated for 40–200 BPM with a log-normal prior around 110 BPM. Half
-  the period wins when it keeps 60 % of the periodicity (accents every bar);
-  the period is refined over its first four multiples; the result is folded
-  into 60–180 (strums on beats 1 and 3 count as the beat). No estimate when
-  the last 2 s are silent. The meter is not estimated.
-- `LiveSnapshot.context` publishes both every 0.5 s; `ana_set_key` changes
-  spelling, roman numerals and the chord prior from the next hop. Both
-  `ana_set_key` and `ana_set_metronome` are refused while REC is armed.
-- App: START → "Auto" for key and tempo (default on). A tempo is applied
-  after holding 2 s (confidence ≥ 0.3); a key after holding 3 s at
-  confidence ≥ 0.7, a dip below restarting the wait. Ambiguous music (blues
-  with dominant sevenths everywhere, a dorian vamp, chromatic or whole-tone
-  material) never reaches that and stays at the START key. REC locks
-  both, the take's sidecar records the applied values. With auto tempo the
-  metronome starts off (the estimator would hear its own click); REC turns
-  it on for the count-in. Tap tempo switches auto tempo off. TRANSPORT shows
-  the heard key and tempo.
+### Key, meter and tempo are the user's (`core/src/tempo.cpp`)
+- No key signature by default (START → "Key signature" off): chord names
+  stay plain, no roman numerals, no cadences; MusicXML gets no signature and
+  no mode. Key and meter are chosen by hand by whoever knows the piece and
+  never change by themselves. (A dynamic key was built and measured, then
+  removed: a key that moves renames the chords under the player.)
+- The session BPM (metronome, count-in, REC, bar lines of the score) is set
+  by hand or by TAP.
+- Tempo heard, display only: onset envelope (CQT flux in chord modes; level
+  rise plus one pulse per note start in mono modes) over the last 8 s,
+  smoothed over 50 ms, autocorrelated for 40–200 BPM with a log-normal
+  prior around 110 BPM; half the period wins when it keeps 60 % of the
+  periodicity; the period is refined over its first four multiples and
+  folded into 60–180. The phase is the grid offset that collects the most
+  envelope. `LiveSnapshot.context` carries BPM, confidence and the latest
+  beat on the sample clock; the scope draws beat marks from it and
+  TRANSPORT shows "HEARD TEMPO". No estimate when the last 2 s are silent.
+- Voice and chords are separate pipelines: a mono mode runs only the YIN
+  note pipeline, a chord mode only the CQT front end, matcher and tracker.
 
 ### GUI (prototype, C# / Avalonia 12.1, .NET 10)
 - START: mode, quality, key cascade, clef, meter, BPM, count-in, audio
@@ -347,10 +335,8 @@ item).
 | Live loopback, voice (13 notes, vibrato ±15 ¢, chromatic passing tone) | 13/13 pitches at +2…+3 ¢, D–D♭–C spelled by direction, stable-note latency median 50 ms; legato note changes start ≈ 28 ms late (first note after silence exact); score rhythm exact after quantization |
 | Band mix, before → after (offline, `dz_wav`) | live confirmed chord correct 72.3 → 80.0 % of the time, wrong confirmations 15 → 6, matcher frames 50 → 76 %; take labels 91 %. Stems after: guitar 95 %, guitar + voice 87 % (take 94 %), guitar + bass 94 %, guitar + drums 96 %; clean plucked guitar unchanged at 99.5 % |
 | Band mix, live loopback (engine, `tools/loopback`) | take labels 86 % correct |
-| Dynamic session, synthetic | tempo within 2 BPM at 72/92/120/150 (10 % missing attacks, ±12 ms timing), eighth-note strumming at 92 → 92; Ode to Joy → G major, A minor line → A minor, B♭ scale → 2♭ |
-| Key stress set (`test_context.cpp`, chroma-like weights) | 11/11 tonal cases applied with the right signature, 0 wrong; blues, dorian, chromatic scale, augmented and dim7 cycles: nothing applied |
-| Key stress set, real CQT chroma (plucked-string synth: C with V/V + dim7, A harmonic minor, B♭ jazz, E with V/vi, D minor with Neapolitan, blues) | 5/5 applied right after 7.5–12 s; blues not applied (heard A major at 0.35) |
-| Dynamic session, live loopback | guitar (strums on 1 and 3, 92 bpm): tempo 91.4–92.2 from 3 s, 1♯ from 5 s (E minor until bar 4, then G major); voice melody: 90.4–91.8 from 2 s, G major from 4 s |
+| Tempo heard, synthetic | within 2 BPM at 72/92/120/150 (10 % missing attacks, ±12 ms timing), eighth-note strumming at 92 → 92; beat phase within 30 ms |
+| Tempo heard, live loopback (guitar, strums on 1 and 3, 92 bpm) | 91.5–92.3 from 3 s; beat marks hold their phase within ±15 ms over 13 s |
 | Live loopback, pipeline | capture 15 ms (reported), processing median 4.8–5.1 ms, CPU ≤ 2.5 %, 0 xruns, 0 recorder gaps, 0 event gaps |
 
 ## Tests

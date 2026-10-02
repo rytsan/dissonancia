@@ -119,7 +119,7 @@ public sealed class MainWindow : Window
             _scoreTab,
         };
         Content = _tabs;
-        _tabs.SelectionChanged += (_, _) => { if (_tabs.SelectedIndex == 0) _syncStart(); };   // auto key/tempo may have moved
+        _tabs.SelectionChanged += (_, _) => { if (_tabs.SelectedIndex == 0) _syncStart(); };   // tap tempo may have moved
         Opened += (_, _) => RequestAnimationFrame(OnFrame);
     }
 
@@ -165,47 +165,12 @@ public sealed class MainWindow : Window
     {
         if (_rack.Mode != _session.Mode) _rack.Load(_session.Mode);
         _rack.SetLocked(_frame.Recording || _frame.CountingIn);
-        FollowContext(Clock());
-    }
-
-    // Dynamic session (before REC): a detected tempo is applied once it has held for 2 s, a key
-    // once it has held 3 s at confidence >= 0.7 (a dip below restarts the wait). The key rule
-    // applied no wrong signature on the 14-case stress set (tests/key, docs); ambiguous music
-    // (blues, dorian vamp) is left at the START key. REC locks both.
-    (int Fifths, bool Minor, double Since) _keyCandidate = (99, false, 0);
-    (float Bpm, double Since) _tempoCandidate = (0, 0);
-
-    void FollowContext(double now)
-    {
-        var f = _frame;
-        if (f.Recording || f.CountingIn) return;
-        if (!_session.AutoKey || !f.DetectedKeyValid || f.KeyConfidence < 0.7f) _keyCandidate = (99, false, 0);
-        else
-        {
-            if (_keyCandidate.Fifths != f.DetectedKeyFifths || _keyCandidate.Minor != f.DetectedKeyMinor)
-                _keyCandidate = (f.DetectedKeyFifths, f.DetectedKeyMinor, now);
-            else if (now - _keyCandidate.Since >= 3 && (_session.Key.Fifths != f.DetectedKeyFifths || _session.Key.Minor != f.DetectedKeyMinor))
-            {
-                _session.Key = new KeyOption(f.DetectedKeyFifths, f.DetectedKeyMinor);
-                _source.SetKey(_session.Key.Fifths, _session.Key.Minor);
-            }
-        }
-        if (_session.AutoTempo && f.DetectedBpm > 0 && f.TempoConfidence >= 0.3f)
-        {
-            if (Math.Abs(f.DetectedBpm - _tempoCandidate.Bpm) > 3) _tempoCandidate = (f.DetectedBpm, now);
-            else if (now - _tempoCandidate.Since >= 2 && Math.Abs(MathF.Round(f.DetectedBpm) - _session.Bpm) >= 2)
-            {
-                _session.Bpm = MathF.Round(f.DetectedBpm);
-                _source.SetTempo(_session.Bpm);
-            }
-        }
     }
 
     /// Tap tempo (spec §22.6): mean interval of the last taps (up to 5, reset after a 2 s pause); not during REC.
     void TapTempo()
     {
         if (_frame.Recording || _frame.CountingIn) return;
-        _session.AutoTempo = false;   // the tapped tempo is a decision: detection no longer overrides it
         double now = Clock();
         if (_taps.Count > 0 && now - _taps[^1] > 2) _taps.Clear();
         _taps.Add(now);
@@ -345,7 +310,7 @@ public sealed class MainWindow : Window
 
     // ---------------- START tab (spec §22.1) ----------------
 
-    Action _syncStart = () => { };   // START controls <- session (dynamic key/tempo, tap tempo)
+    Action _syncStart = () => { };   // START controls <- session (tap tempo)
 
     Control BuildStartTab()
     {
@@ -402,10 +367,12 @@ public sealed class MainWindow : Window
         };
         keyBox.SelectionChanged += (_, _) => { if (keyBox.SelectedItem is KeyOption k) _session.Key = k; };
         clefBox.SelectionChanged += (_, _) => _session.Clef = (Clef)Math.Max(0, clefBox.SelectedIndex);
-        var autoKey = new CheckBox { Content = "Auto: follow the key played before REC", IsChecked = _session.AutoKey };
-        autoKey.IsCheckedChanged += (_, _) => _session.AutoKey = autoKey.IsChecked == true;
-        root.Children.Add(Section("KEY SIGNATURE  ·  CLEF  (Auto starts from this key and changes it to the one heard; REC locks it)",
-            Row(Labeled("Mode", modeBox), Labeled("Key (circle of fifths)", keyBox), Labeled(" ", autoKey), Labeled("Clef", clefBox), clefNote)));
+        var useKey = new CheckBox { Content = "Key signature", IsChecked = _session.KeySet };
+        void KeyEnabled() { modeBox.IsEnabled = keyBox.IsEnabled = _session.KeySet; }
+        useKey.IsCheckedChanged += (_, _) => { _session.KeySet = useKey.IsChecked == true; KeyEnabled(); };
+        KeyEnabled();
+        root.Children.Add(Section("KEY SIGNATURE  ·  CLEF  (no key by default: plain chord names; a key adds roman numerals and cadences)",
+            Row(Labeled(" ", useKey), Labeled("Mode", modeBox), Labeled("Key (circle of fifths)", keyBox), Labeled("Clef", clefBox), clefNote)));
 
         // Meter, tempo, metronome
         var meterBox = new ComboBox { ItemsSource = new[] { "4/4", "3/4", "2/4", "6/8", "12/8" }, SelectedIndex = 0, Width = 100 };
@@ -418,19 +385,11 @@ public sealed class MainWindow : Window
         bpm.ValueChanged += (_, _) => _session.Bpm = (float)(bpm.Value ?? 92);
         var countIn = new NumericUpDown { Value = _session.CountInBars, Minimum = 0, Maximum = 4, Increment = 1, Width = 120, FormatString = "0" };
         countIn.ValueChanged += (_, _) => _session.CountInBars = (int)(countIn.Value ?? 1);
-        var autoTempo = new CheckBox { Content = "Auto tempo (metronome off until REC)", IsChecked = _session.AutoTempo };
-        autoTempo.IsCheckedChanged += (_, _) => _session.AutoTempo = autoTempo.IsChecked == true;
-        _syncStart = () =>
-        {
-            modeBox.SelectedIndex = _session.Key.Minor ? 1 : 0;
-            keyBox.SelectedItem = ((IEnumerable<KeyOption>)keyBox.ItemsSource!).FirstOrDefault(k => k == _session.Key);
-            bpm.Value = (decimal)_session.Bpm;
-            autoTempo.IsChecked = _session.AutoTempo;
-        };
+        _syncStart = () => bpm.Value = (decimal)_session.Bpm;   // tap tempo
         var duringTake = new ComboBox { ItemsSource = new[] { "Count-in only (microphone)", "Whole take (headphones)" }, SelectedIndex = _session.ClickDuringTake ? 1 : 0, Width = 230 };
         duringTake.SelectionChanged += (_, _) => _session.ClickDuringTake = duringTake.SelectedIndex == 1;
         root.Children.Add(Section("METER  ·  TEMPO  ·  METRONOME  (REC always counts in; the beat LEDs keep the beat during the take)",
-            Row(Labeled("Meter", meterBox), Labeled("BPM", bpm), Labeled("Count-in bars", countIn), Labeled("Click during the take", duringTake), Labeled(" ", autoTempo))));
+            Row(Labeled("Meter", meterBox), Labeled("BPM", bpm), Labeled("Count-in bars", countIn), Labeled("Click during the take", duringTake))));
 
         // Notation: like Finale's quantization settings. The grid is the shortest value written.
         int[] values = [0, 4, 8, 16];

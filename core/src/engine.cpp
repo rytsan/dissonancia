@@ -107,10 +107,9 @@ int Engine::start(const SessionConfig& s, const AudioDeviceConfig& d, ma_context
                                                    live_.bassMin, live_.bassMax, live_.windowSeconds);
         chords_ = std::make_unique<ChordTracker>(s, live_.hopSeconds, compensationMs() / 1000.0);
     }
-    context_ = std::make_unique<ContextTracker>(live_.hopSeconds);
+    tempo_ = std::make_unique<TempoTracker>(live_.hopSeconds);
     contextOut_ = {};
     lastHopDb_ = -120;
-    keyApplied_ = keyRequest_.load();
     chout_ = {};
     vout_ = {};
     cout_ = {};
@@ -317,21 +316,10 @@ void Engine::process_hop(const float* x, uint32_t n) {
     if (clearClip_.exchange(false, std::memory_order_relaxed)) clip_ = false;
     if (peak >= 0.999f) clip_ = true;
 
-    if (uint32_t k = keyRequest_.load(std::memory_order_acquire); k != keyApplied_) {   // set_key, before REC
-        keyApplied_ = k;
-        const int8_t fifths = int8_t(uint8_t(k >> 8));
-        const KeyMode mode = KeyMode(k & 0xff);
-        if (voice_) voice_->set_key(fifths, mode);
-        if (chroma_) chroma_->set_key(fifths, mode);
-        if (chords_) chords_->set_key(fifths, mode);
-    }
-
-    // Onset envelope for the tempo estimate: chord modes use the CQT spectral flux; mono modes
+    // Onset envelope for the tempo estimate (beat marks): chord modes use the CQT spectral flux; mono modes
     // the rise of the hop level plus one pulse per note start (legato changes have no level rise).
     const float hopDb = 10.f * std::log10(float(sumSq / n) + 1e-12f);
     float onsetStrength = 0;
-    float pcWeights[12]{};
-    bool pitched = false;
 
     if (voice_) {
         voice_->process(x, n, anFrames_, vout_);
@@ -340,7 +328,6 @@ void Engine::process_hop(const float* x, uint32_t n) {
             if (vout_.events[i].type == AnalyzerEventType::NoteStart) onsetStrength += 1;
         }
         if (hopDb > -50) onsetStrength += std::max(0.f, hopDb - lastHopDb_) / 10.f;
-        if (vout_.note.valid) { pcWeights[(vout_.note.midi % 12 + 12) % 12] = 1; pitched = true; }
     }
     if (chroma_) {
         chroma_->process(x, n, anFrames_, cout_);
@@ -355,11 +342,9 @@ void Engine::process_hop(const float* x, uint32_t n) {
         chords_->process(cout_.chroma, cout_.chroma.timestampSeconds, double(anFrames_) / rate_, cout_.bass, cout_.lastOnset, chout_);
         for (uint32_t i = 0; i < chout_.eventCount; i++) publish_event(chout_.events[i]);
         onsetStrength = cout_.flux;
-        for (int i = 0; i < 12; i++) pcWeights[i] = cout_.chroma.raw[i];
-        pitched = true;
     }
     lastHopDb_ = hopDb;
-    context_->process(pitched ? pcWeights : nullptr, onsetStrength, contextOut_);
+    tempo_->process(onsetStrength, t, contextOut_);
 
     LiveSnapshot& s = snapshots_.write_slot();
     double now = now_seconds();
@@ -475,18 +460,6 @@ int Engine::set_metronome(bool on, float bpm, TimeSignature meter) {
     session_.metronome = on;
     metroOrigin_ = cbFrames_.load(std::memory_order_acquire);
     metroGen_.fetch_add(1, std::memory_order_release);
-    return ANA_OK;
-}
-
-int Engine::set_key(int8_t fifths, KeyMode mode) {
-    if (!running_) return ANA_ERR_STATE;
-    if (recStart_.load() != kNever || encoder_.load()) { error_ = "the key is locked while REC is armed"; return ANA_ERR_STATE; }
-    if (fifths < -7 || fifths > 7 || uint8_t(mode) > uint8_t(KeyMode::Mixolydian)) { error_ = "invalid key"; return ANA_ERR_ARG; }
-    session_.keySet = 1;
-    session_.keyFifths = fifths;
-    session_.keyMode = mode;
-    const uint32_t gen = ((keyRequest_.load() >> 16) + 1) & 0xffff;
-    keyRequest_.store((gen << 16) | (uint32_t(uint8_t(fifths)) << 8) | uint32_t(mode), std::memory_order_release);
     return ANA_OK;
 }
 

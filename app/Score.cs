@@ -336,8 +336,8 @@ public sealed class Score
         w.WriteStartElement("attributes");
         w.WriteElementString("divisions", Divisions.ToString());
         w.WriteStartElement("key");
-        w.WriteElementString("fifths", Take.KeyFifths.ToString());
-        w.WriteElementString("mode", Take.Minor ? "minor" : "major");
+        w.WriteElementString("fifths", (Take.KeySet ? Take.KeyFifths : 0).ToString());   // no key: no signature, no mode
+        if (Take.KeySet) w.WriteElementString("mode", Take.Minor ? "minor" : "major");
         w.WriteEndElement();
         w.WriteStartElement("time");
         w.WriteElementString("beats", Take.BeatsPerBar.ToString());
@@ -426,7 +426,7 @@ public sealed class Score
     int KeyAlter(int letter)
     {
         int[] sharps = [3, 0, 4, 1, 5, 2, 6], flats = [6, 2, 5, 1, 4, 0, 3];
-        int f = Take.KeyFifths;
+        int f = Take.KeySet ? Take.KeyFifths : 0;
         return f > 0 && sharps.Take(f).Contains(letter) ? 1 : f < 0 && flats.Take(-f).Contains(letter) ? -1 : 0;
     }
 

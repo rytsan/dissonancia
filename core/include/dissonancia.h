@@ -238,15 +238,12 @@ struct ChordRecognitionResult {        // per-hop preview
     char explanation[64];              // e.g. "C6 = Am7 - bass decides", "missing third"
 };
 
-// Musical context estimated from the live input, for a dynamic session before REC.
+// Tempo heard in the live input: beat marks for the waveform display only. The session BPM
+// (metronome, REC, score) is set by hand and never follows it.
 struct ContextEstimate {
-    float bpm;                         // beats per minute of the pulse, 0 = no estimate yet (needs ~4 s of onsets)
+    float bpm;                         // beats per minute of the pulse, 0 = no estimate (needs ~4 s of onsets)
     float tempoConfidence;             // 0..1: normalised autocorrelation at the chosen period
-    int8_t keyFifths;                  // key signature of the estimate (-5..+6)
-    KeyMode keyMode;                   // Major or NaturalMinor
-    uint8_t keyValid;                  // bool: needs ~3 s of pitched input
-    uint8_t _pad0;
-    float keyConfidence;               // 0..1: margin over the runner-up key
+    double lastBeatSeconds;            // sample clock (analyzedFrames / sampleRate) of the latest beat mark
 };
 
 // ---------------------------------------------------------------- snapshot (§22)
@@ -292,7 +289,7 @@ struct LiveSnapshot {
     float chordConfirmElapsedMs;       // time since onset while provisional, 0 once confirmed
     BassEstimate bass;
     double lastOnsetSeconds;           // sample clock, delay-compensated; < 0 = none yet
-    ContextEstimate context;           // key and tempo heard so far (ana_set_key / ana_set_metronome apply them)
+    ContextEstimate context;           // tempo heard so far (display only)
     float waveMin[ANA_WAVE_COLUMNS];
     float waveMax[ANA_WAVE_COLUMNS];
     float scope[ANA_SCOPE_SAMPLES];    // last samples, oldest first
@@ -331,8 +328,5 @@ ANA_API int32_t ana_drain_events(AnalyzerHandle* h, AnalyzerEvent* out, int32_t 
 ANA_API int32_t ana_rec_start(AnalyzerHandle* h, const char* wavPathUtf8);  // arms at next bar + count-in
 ANA_API int32_t ana_rec_stop(AnalyzerHandle* h);     // finalizes WAV + JSON sidecar
 ANA_API int32_t ana_set_metronome(AnalyzerHandle* h, uint8_t on, float bpm, TimeSignature meter);  // refused while REC
-// Changes the session key before REC (dynamic session, e.g. from LiveSnapshot.context): spelling,
-// roman numerals and the chord context prior follow from the next hop. Refused while REC.
-ANA_API int32_t ana_set_key(AnalyzerHandle* h, int8_t fifths, KeyMode mode);
 ANA_API void ana_clear_clip(AnalyzerHandle* h);
 }

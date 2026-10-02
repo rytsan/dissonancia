@@ -40,7 +40,6 @@ public:
 
     // t: hop end on the sample clock; gated[k] != 0: bin k still holds pre-onset signal.
     void process(const Cqt& cqt, const float* magnitude, const uint8_t* gated, double t, double lastOnset, BassEstimate& out);
-    void set_key(int8_t fifths, KeyMode mode) { session_.keyFifths = fifths; session_.keyMode = mode; speller_.configure(fifths, mode); }
 
 private:
     SessionConfig session_;

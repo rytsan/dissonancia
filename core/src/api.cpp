@@ -132,10 +132,6 @@ int32_t ana_set_metronome(AnalyzerHandle* h, uint8_t on, float bpm, TimeSignatur
     return guarded(h, [&] { return int32_t(h->engine.set_metronome(on != 0, bpm, meter)); });
 }
 
-int32_t ana_set_key(AnalyzerHandle* h, int8_t fifths, KeyMode mode) {
-    return guarded(h, [&] { return int32_t(h->engine.set_key(fifths, mode)); });
-}
-
 void ana_clear_clip(AnalyzerHandle* h) {
     if (h) h->engine.clear_clip();
 }
