@@ -188,6 +188,8 @@ public sealed class StudioState
     }
 
     public void PollMeters() { if (Player is not null) Player.ReadMeters(Meters); }
+    public void Select() => Changed?.Invoke();
+    public bool ConsoleView;
 
     /// Installs the weights if needed (one download, checksum-pinned), then separates the edited take.
     public async void Separate()
@@ -389,6 +391,7 @@ public abstract class StudioUnit : Control
     public sealed override void Render(DrawingContext ctx)
     {
         _keys.Clear();
+        _controls.Clear();
         var b = new Rect(Bounds.Size).Deflate(2);
         ctx.DrawRectangle(Ui.Face, Ui.FaceEdge, b, 4, 4);
         foreach (var p in new[] { b.TopLeft + new Point(9, 9), b.TopRight + new Point(-9, 9), b.BottomLeft + new Point(9, -9), b.BottomRight + new Point(-9, -9) })
@@ -437,12 +440,101 @@ public abstract class StudioUnit : Control
         }
     }
 
+    // Knobs and faders: a value in 0..1 with its setter. Knobs follow a vertical drag (200 px =
+    // the whole range) and the wheel; a fader follows the pointer along its slot.
+    sealed record Control1(Rect R, double Norm, Action<double> Set, bool Fader);
+    readonly List<Control1> _controls = [];
+    Control1? _drag;
+    double _dragY, _dragNorm;
+
+    static readonly IBrush KnobBody = new ImmutableRadialGradientBrush(
+        [new ImmutableGradientStop(0, Color.FromUInt32(0xFF6B7078)), new ImmutableGradientStop(1, Color.FromUInt32(0xFF24272B))],
+        center: new RelativePoint(0.38, 0.32, RelativeUnit.Relative), radiusX: new RelativeScalar(0.75, RelativeUnit.Relative), radiusY: new RelativeScalar(0.75, RelativeUnit.Relative));
+    static readonly IPen KnobRim = new ImmutablePen(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF0B0C0D)), 1.2);
+    static readonly IPen KnobMark = new ImmutablePen(new ImmutableSolidColorBrush(Color.FromUInt32(0xFFFFB000)), 2.4, lineCap: PenLineCap.Round);
+    static readonly IPen KnobMarkOff = new ImmutablePen(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF6B7078)), 2.4, lineCap: PenLineCap.Round);
+    static readonly IPen ArcPen = new ImmutablePen(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF3A2A06)), 2);
+
+    /// A rack knob: -135° .. +135°, amber index when its section is on.
+    protected void Knob(DrawingContext ctx, Point c, double r, string label, string value, double norm, Action<double> set, bool on = true)
+    {
+        norm = Math.Clamp(norm, 0, 1);
+        for (int i = 0; i <= 10; i++)   // scale ticks
+        {
+            double a = (-135 + 27 * i) * Math.PI / 180;
+            ctx.DrawLine(ArcPen, new Point(c.X + Math.Sin(a) * (r + 3), c.Y - Math.Cos(a) * (r + 3)), new Point(c.X + Math.Sin(a) * (r + 6), c.Y - Math.Cos(a) * (r + 6)));
+        }
+        ctx.DrawEllipse(KnobBody, KnobRim, c, r, r);
+        double ang = (-135 + 270 * norm) * Math.PI / 180;
+        ctx.DrawLine(on ? KnobMark : KnobMarkOff, new Point(c.X + Math.Sin(ang) * r * 0.25, c.Y - Math.Cos(ang) * r * 0.25), new Point(c.X + Math.Sin(ang) * r * 0.9, c.Y - Math.Cos(ang) * r * 0.9));
+        Ui.Text(ctx, value, c.X, c.Y + r + 6, 9, on ? Ui.LabelBright : Ui.Label, Ui.Mono, Ui.Align.Center);
+        Ui.Text(ctx, label, c.X, c.Y + r + 18, 7, Ui.Label, Ui.SansBold, Ui.Align.Center);
+        _controls.Add(new Control1(new Rect(c.X - r - 6, c.Y - r - 6, 2 * r + 12, 2 * r + 12), norm, set, false));
+    }
+
+    static readonly IBrush Slot = new ImmutableSolidColorBrush(Color.FromUInt32(0xFF0A0B0C));
+    static readonly IBrush Cap = new ImmutableLinearGradientBrush(
+        [new ImmutableGradientStop(0, Color.FromUInt32(0xFFB9BEC5)), new ImmutableGradientStop(0.5, Color.FromUInt32(0xFF6B7078)), new ImmutableGradientStop(1, Color.FromUInt32(0xFF4A4F56))],
+        startPoint: new RelativePoint(0, 0, RelativeUnit.Relative), endPoint: new RelativePoint(0, 1, RelativeUnit.Relative));
+
+    /// A vertical fader (norm 1 = top).
+    protected void Fader(DrawingContext ctx, Rect slot, double norm, Action<double> set)
+    {
+        norm = Math.Clamp(norm, 0, 1);
+        ctx.DrawRectangle(Slot, Ui.FaceEdge, new Rect(slot.Center.X - 4, slot.Y, 8, slot.Height), 4, 4);
+        double y = slot.Bottom - norm * slot.Height;
+        var cap = new Rect(slot.Center.X - 16, y - 9, 32, 18);
+        ctx.DrawRectangle(Cap, KnobRim, cap, 2, 2);
+        ctx.DrawLine(new ImmutablePen(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF111111)), 2), new Point(cap.X + 3, cap.Center.Y), new Point(cap.Right - 3, cap.Center.Y));
+        _controls.Add(new Control1(new Rect(slot.X - 12, slot.Y - 10, slot.Width + 24, slot.Height + 20), norm, set, true));
+    }
+
+    // Value mappings for the controls.
+    protected static double LogNorm(double v, double lo, double hi) => Math.Log(Math.Clamp(v, lo, hi) / lo) / Math.Log(hi / lo);
+    protected static double FromLog(double n, double lo, double hi) => lo * Math.Pow(hi / lo, Math.Clamp(n, 0, 1));
+    protected static double LinNorm(double v, double lo, double hi) => (Math.Clamp(v, lo, hi) - lo) / (hi - lo);
+    protected static double FromLin(double n, double lo, double hi) => lo + Math.Clamp(n, 0, 1) * (hi - lo);
+
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         var p = e.GetPosition(this);
         foreach (var (r, a) in _keys)
             if (r.Contains(p)) { a(); InvalidateVisual(); e.Handled = true; return; }
+        foreach (var c in _controls)
+            if (c.R.Contains(p))
+            {
+                (_drag, _dragY, _dragNorm) = (c, p.Y, c.Norm);
+                if (c.Fader) c.Set(Math.Clamp((c.R.Bottom - 10 - p.Y) / (c.R.Height - 20), 0, 1));
+                e.Pointer.Capture(this);
+                e.Handled = true;
+                InvalidateVisual();
+                return;
+            }
         Pressed(e, p);
+    }
+
+    protected override void OnPointerMoved(PointerEventArgs e)
+    {
+        if (_drag is null) { base.OnPointerMoved(e); return; }
+        var p = e.GetPosition(this);
+        if (_drag.Fader) _drag.Set(Math.Clamp((_drag.R.Bottom - 10 - p.Y) / (_drag.R.Height - 20), 0, 1));
+        else _drag.Set(Math.Clamp(_dragNorm + (_dragY - p.Y) / 200, 0, 1));
+        InvalidateVisual();
+    }
+
+    protected override void OnPointerReleased(PointerReleasedEventArgs e)
+    {
+        if (_drag is null) { base.OnPointerReleased(e); return; }
+        _drag = null;
+        e.Pointer.Capture(null);
+    }
+
+    protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
+    {
+        var p = e.GetPosition(this);
+        foreach (var c in _controls)
+            if (c.R.Contains(p)) { c.Set(Math.Clamp(c.Norm + Math.Sign(e.Delta.Y) * 0.02, 0, 1)); InvalidateVisual(); e.Handled = true; return; }
+        base.OnPointerWheelChanged(e);
     }
 
     protected virtual void Pressed(PointerPressedEventArgs e, Point p) { }
@@ -475,7 +567,8 @@ public sealed class TransportUnit : StudioUnit
         double y = r.Y + 6, x = r.X;
         Key(ctx, new Rect(x, y + 4, 48, 34), p?.Playing == true ? "■" : "▶", S.TogglePlay, p?.Playing == true);
         Key(ctx, new Rect(x + 56, y + 4, 48, 34), "LOOP", S.ToggleLoop, p?.Looping == true, Ui.Amber);
-        x += 124;
+        Key(ctx, new Rect(x + 112, y + 4, 82, 34), S.ConsoleView ? "GRAVADOR" : "CONSOLE", () => { S.ConsoleView = !S.ConsoleView; S.Select(); }, S.ConsoleView, Ui.Amber);
+        x += 214;
         double sec = (p?.Position ?? 0) / S.Rate, mus = sec - S.GridOrigin;
         int bar = (int)Math.Floor(mus / S.Bar), beat = (int)Math.Floor((mus - bar * S.Bar) / S.Beat), six = (int)Math.Floor((mus - bar * S.Bar - beat * S.Beat) / (S.Beat / 4));
         x += Readout(ctx, x, y, mus < 0 ? "0.0.0" : $"{bar + 1}.{beat + 1}.{six + 1}", 7, 3.4, "POSIÇÃO") + 12;
@@ -565,6 +658,7 @@ public sealed class RecorderUnit : StudioUnit
 {
     float[] _mn = new float[4096], _mx = new float[4096];
     Rect _screen, _lane;
+    readonly List<(Rect R, int Track)> _cards = [];
     double _dragFrom = -1;
 
     public RecorderUnit(StudioState s) : base(s, "DS-A", "GRAVADOR DE FAIXAS") { }
@@ -599,7 +693,13 @@ public sealed class RecorderUnit : StudioUnit
         double laneH = 44;
         double stemH = S.Stems.Count == 0 ? 0 : Math.Clamp((area.Height - 30 - laneH) * 0.55 / S.Stems.Count, 26, 60);
         double trackH = Math.Max(60, area.Height - 30 - laneH - stemH * S.Stems.Count);
+        _cards.Clear();
+        var selPen = new ImmutablePen((IImmutableBrush)Ui.Amber, 1.5);
+        var mixRow = new Rect(card.X + 3, card.Y + 18, card.Width - 6, trackH + 4);
+        _cards.Add((mixRow, 0));
+        if (S.Selected == 0 && S.Current is not null) ctx.DrawRectangle(null, selPen, mixRow, 3, 3);
         Tape(ctx, card.X + 10, card.Y + 26, S.Current is null ? "—" : "MIX");
+        if (S.Channel(0).Mute) Ui.Text(ctx, "MUDO", card.X + 16, card.Y + 82, 8, Ui.Amber, Ui.SansBold);
         Plasma.DotText(ctx, "1", card.Right - 22, card.Y + 26, 2.4, 1);
         Ui.Led(ctx, new Point(card.X + 16, card.Y + 64), 3.5, S.Player?.Playing == true, Ui.Green, Ui.GreenOff);
         Ui.Text(ctx, "PLAY", card.X + 24, card.Y + 58, 8, Ui.Label, Ui.SansBold);
@@ -610,6 +710,9 @@ public sealed class RecorderUnit : StudioUnit
         for (int i = 0; i < S.Stems.Count; i++)
         {
             double sy = area.Y + 22 + trackH + i * stemH;
+            var row = new Rect(card.X + 3, sy, card.Width - 6, stemH);
+            _cards.Add((row, i + 1));
+            if (S.Selected == i + 1) ctx.DrawRectangle(null, selPen, row, 3, 3);
             Tape(ctx, card.X + 10, sy + stemH / 2 - 10, stemNames.GetValueOrDefault(S.Stems[i].Name, S.Stems[i].Name.ToUpperInvariant()), i % 2 == 0 ? 1.2 : -1.2);
             Plasma.DotText(ctx, $"{i + 2}", card.Right - 22, sy + stemH / 2 - 8, 2.2, 1);
         }
@@ -718,6 +821,8 @@ public sealed class RecorderUnit : StudioUnit
 
     protected override void Pressed(PointerPressedEventArgs e, Point p)
     {
+        foreach (var (row, track) in _cards)
+            if (row.Contains(p) && S.Current is not null) { S.Selected = track; S.Select(); InvalidateVisual(); return; }   // the chain shows this channel
         if (!_screen.Union(_lane).Contains(p) || S.Player is null) return;
         _dragFrom = FrameAt(p.X);
         S.SelStart = S.SelEnd = -1;
@@ -766,59 +871,116 @@ public sealed class RecorderUnit : StudioUnit
 /// (the only unit at work before S4: the others are mounted and wait for the mixing milestone).
 public sealed class ChainUnit : StudioUnit
 {
-    public ChainUnit(StudioState s) : base(s, "DS-C", "CADEIA DO CANAL") { Height = 220; }
+    public ChainUnit(StudioState s) : base(s, "DS-C", "CADEIA DO CANAL") { Height = 240; }
 
     static readonly IPen CableBlack = new ImmutablePen(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF0B0C0D)), 7, lineCap: PenLineCap.Round);
     static readonly IPen CableAmber = new ImmutablePen(new ImmutableSolidColorBrush(Color.FromUInt32(0xFFFFB000)), 4, lineCap: PenLineCap.Round);
 
+    static string Hz(double f) => f >= 1000 ? $"{f / 1000:0.#}k" : $"{f:0}";
+
     protected override void DrawContent(DrawingContext ctx, Rect r)
     {
-        Tape(ctx, r.X, r.Y, S.Current is null ? "—" : "MIX", -1);
-        Ui.Text(ctx, "ordem fixa de estúdio · cabos de patch na sequência do sinal · análise lê pós-insertos, pré-fader", r.X + 70, r.Y + 2, 9, Ui.Label, Ui.Mono);
+        var names = new Dictionary<string, string> { ["mix"] = "MIX", ["vocals"] = "VOZ", ["bass"] = "BAIXO", ["other"] = "OUTROS", ["drums"] = "BATERIA", ["guitar"] = "VIOLÃO", ["piano"] = "PIANO" };
+        Tape(ctx, r.X, r.Y, S.Current is null ? "—" : names.GetValueOrDefault(S.NameOf(S.Selected), S.NameOf(S.Selected)), -1);
+        Ui.Text(ctx, "ordem fixa de estúdio · cabos de patch na sequência do sinal · análise lê pós-insertos, pré-fader · clique na fita do canal para escolhê-lo", r.X + 90, r.Y + 2, 9, Ui.Label, Ui.Mono);
         double x = r.X, y = r.Y + 26, h = r.Height - 26;
-        (string Model, string Name, double W)[] units = [("DS-1", "TRIM", 110), ("DF-2", "FILTRO", 110), ("DG-3", "GATE", 110), ("DQ-4", "EQ", 150), ("DC-5", "COMP", 120)];
-        foreach (var u in units)
+        var c = S.Channel(S.Selected);
+        void Changed() => S.MixChanged();
+        bool has = S.Current is not null;
+        double ky = y + h / 2 + 4;
+
+        // DS-1 TRIM
+        var box = new Rect(x, y, 96, h);
+        DrawDevice(ctx, box, "DS-1", "TRIM", has);
+        Knob(ctx, new Point(box.Center.X, ky - 6), 18, "GANHO", $"{c.Trim:+0.0;-0.0} dB", LinNorm(c.Trim, -24, 24), n => { c.Trim = (float)Math.Round(FromLin(n, -24, 24), 1); Changed(); });
+        float pk = S.Meters.Peak[Math.Min(S.Selected, 7)];
+        for (int i = 0; i < 10; i++) Ui.Led(ctx, new Point(box.X + 14 + i * 8, box.Bottom - 14), 2.6, pk > -50 + i * 5.5, i > 7 ? Ui.Red : i > 5 ? Ui.Amber : Ui.Green, Ui.GreenOff);
+        Cable(ctx, box.Right, box.Center.Y);
+        x = box.Right + 26;
+
+        // DF-2 FILTRO
+        box = new Rect(x, y, 132, h);
+        DrawDevice(ctx, box, "DF-2", "FILTRO", c.HpOn || c.LpOn);
+        Key(ctx, new Rect(box.X + 12, box.Y + 24, 36, 20), "HP", () => { c.HpOn = !c.HpOn; Changed(); }, c.HpOn, Ui.Green, has);
+        Key(ctx, new Rect(box.X + 52, box.Y + 24, 36, 20), "LP", () => { c.LpOn = !c.LpOn; Changed(); }, c.LpOn, Ui.Green, has);
+        Key(ctx, new Rect(box.X + 88, box.Y + 24, 36, 20), c.Steep ? "24" : "12", () => { c.Steep = !c.Steep; Changed(); }, c.Steep, Ui.Amber, has);
+        Knob(ctx, new Point(box.X + 38, ky + 10), 16, "HP", Hz(c.Hp), LogNorm(c.Hp, 20, 1000), n => { c.Hp = (float)Math.Round(FromLog(n, 20, 1000)); Changed(); }, c.HpOn);
+        Knob(ctx, new Point(box.X + 96, ky + 10), 16, "LP", Hz(c.Lp), LogNorm(c.Lp, 1000, 20000), n => { c.Lp = (float)Math.Round(FromLog(n, 1000, 20000), -1); Changed(); }, c.LpOn);
+        Cable(ctx, box.Right, box.Center.Y);
+        x = box.Right + 26;
+
+        // DG-3 GATE
+        box = new Rect(x, y, 140, h);
+        DrawDevice(ctx, box, "DG-3", "GATE", c.GateOn);
+        Key(ctx, new Rect(box.X + 12, box.Y + 24, 40, 20), "ON", () => { c.GateOn = !c.GateOn; Changed(); }, c.GateOn, Ui.Green, has);
+        Ui.Led(ctx, new Point(box.X + 66, box.Y + 34), 3.5, c.GateOn && S.Meters.GateOpen[Math.Min(S.Selected, 7)], Ui.Green, Ui.GreenOff);
+        Ui.Text(ctx, "ABERTO", box.X + 74, box.Y + 28, 7, Ui.Label, Ui.SansBold);
+        Knob(ctx, new Point(box.X + 28, ky + 10), 14, "LIMIAR", $"{c.GateThreshold:0}", LinNorm(c.GateThreshold, -80, 0), n => { c.GateThreshold = (float)Math.Round(FromLin(n, -80, 0)); Changed(); }, c.GateOn);
+        Knob(ctx, new Point(box.X + 70, ky + 10), 14, "SOLTURA", $"{c.GateRelease:0} ms", LogNorm(c.GateRelease, 5, 1000), n => { c.GateRelease = (float)Math.Round(FromLog(n, 5, 1000)); Changed(); }, c.GateOn);
+        Knob(ctx, new Point(box.X + 112, ky + 10), 14, "FAIXA", $"{c.GateRange:0} dB", LinNorm(c.GateRange, 0, 80), n => { c.GateRange = (float)Math.Round(FromLin(n, 0, 80)); Changed(); }, c.GateOn);
+        Cable(ctx, box.Right, box.Center.Y);
+        x = box.Right + 26;
+
+        // DQ-4 EQ (4 bands: low shelf, two bells, high shelf; frequency and gain per band)
+        box = new Rect(x, y, 216, h);
+        DrawDevice(ctx, box, "DQ-4", "EQ", c.EqOn);
+        Key(ctx, new Rect(box.X + 12, box.Y + 24, 40, 20), "ON", () => { c.EqOn = !c.EqOn; Changed(); }, c.EqOn, Ui.Green, has);
+        string[] bandNames = ["GRAVE", "MÉDIO-G", "MÉDIO-A", "AGUDO"];
+        for (int b = 0; b < Math.Min(4, c.Bands.Length); b++)
         {
-            var box = new Rect(x, y, u.W, h);
-            DrawDevice(ctx, box, u.Model, u.Name, false);
-            Ui.Text(ctx, "mixagem · S4", box.Center.X, box.Center.Y - 6, 9, Ui.Label, Ui.Mono, Ui.Align.Center);
-            Cable(ctx, box.Right, box.Center.Y);
-            x += u.W + 26;
+            var band = c.Bands[b];
+            double bx = box.X + 28 + b * 52;
+            Knob(ctx, new Point(bx, ky - 14), 12, bandNames[b], Hz(band.Freq), LogNorm(band.Freq, 20, 20000), n => { band.Freq = (float)Math.Round(FromLog(n, 20, 20000)); Changed(); }, c.EqOn);
+            Knob(ctx, new Point(bx, ky + 40), 12, "GANHO", $"{band.Gain:+0;-0}", LinNorm(band.Gain, -15, 15), n => { band.Gain = (float)Math.Round(FromLin(n, -15, 15), 1); Changed(); }, c.EqOn);
         }
+        Cable(ctx, box.Right, box.Center.Y);
+        x = box.Right + 26;
+
+        // DC-5 COMP
+        box = new Rect(x, y, 184, h);
+        DrawDevice(ctx, box, "DC-5", "COMP", c.CompOn);
+        Key(ctx, new Rect(box.X + 12, box.Y + 24, 40, 20), "ON", () => { c.CompOn = !c.CompOn; Changed(); }, c.CompOn, Ui.Green, has);
+        float gr = S.Meters.Gr[Math.Min(S.Selected, 7)];
+        for (int i = 0; i < 8; i++) Ui.Led(ctx, new Point(box.X + 62 + i * 13, box.Y + 34), 3, c.CompOn && gr > 1 + i * 1.5, Ui.Amber, Ui.AmberOff);
+        Knob(ctx, new Point(box.X + 30, ky + 10), 13, "LIMIAR", $"{c.CompThreshold:0}", LinNorm(c.CompThreshold, -50, 0), n => { c.CompThreshold = (float)Math.Round(FromLin(n, -50, 0)); Changed(); }, c.CompOn);
+        Knob(ctx, new Point(box.X + 68, ky + 10), 13, "RAZÃO", $"{c.CompRatio:0.#}:1", LogNorm(c.CompRatio, 1, 20), n => { c.CompRatio = (float)Math.Round(FromLog(n, 1, 20), 1); Changed(); }, c.CompOn);
+        Knob(ctx, new Point(box.X + 106, ky + 10), 13, "ATAQUE", $"{c.CompAttack:0.#}", LogNorm(c.CompAttack, 0.1, 100), n => { c.CompAttack = (float)Math.Round(FromLog(n, 0.1, 100), 1); Changed(); }, c.CompOn);
+        Knob(ctx, new Point(box.X + 144, ky + 10), 13, "GANHO", $"{c.CompMakeup:+0}", LinNorm(c.CompMakeup, 0, 24), n => { c.CompMakeup = (float)Math.Round(FromLin(n, 0, 24)); Changed(); }, c.CompOn);
+        Cable(ctx, box.Right, box.Center.Y);
+        x = box.Right + 26;
+
         var an = new Rect(x, y, r.Right - x, h);
         DrawDevice(ctx, an, S.Mode is AppMode.VoiceMono or AppMode.InstrumentMono ? "DA-N" : "DA-C", "ANALISADOR", true);
         string mode = S.Mode switch
         {
             AppMode.VoiceMono => "VOZ", AppMode.InstrumentMono => "MELODIA", AppMode.GuitarChords => "VIOLÃO", AppMode.PianoChords => "PIANO", _ => "GERAL",
         };
-        double ix = an.X + 14, iy = an.Y + 26;
-        Key(ctx, new Rect(ix, iy, 88, 30), mode, () => { S.CycleMode(); InvalidateVisual(); }, true, Ui.Amber, !S.Running);
+        double ix = an.X + 14, iy = an.Y + 24;
+        Key(ctx, new Rect(ix, iy, 88, 28), mode, () => { S.CycleMode(); InvalidateVisual(); }, true, Ui.Amber, !S.Running);
         string sepLabel = !DemucsModel.HelperPresent ? "SEM DEMUCS" : S.Stems.Count > 0 ? "SEPARADO" : DemucsModel.Installed(S.Variant) ? "SEPARAR" : "SEPARAR*";
-        Key(ctx, new Rect(ix + 94, iy, 104, 30), sepLabel, S.Separate, S.Stems.Count > 0 || S.Separating, Ui.Amber, DemucsModel.HelperPresent && S.Current is not null && !S.Separating && !S.Running);
-        Key(ctx, new Rect(ix + 204, iy, 100, 30), "ANALISAR", S.Analyze, S.Running, Ui.Green, S.Current is not null && !S.Running && !S.Separating);
-        Key(ctx, new Rect(ix + 310, iy, 96, 30), "CANCELAR", S.Cancel, false, Ui.Red, S.Running || S.Separating);
-        Key(ctx, new Rect(ix + 412, iy, 80, 30), "SCORE", S.OpenScore, S.Result is not null, Ui.Green, S.Current is not null);
-        if (sepLabel == "SEPARAR*") Ui.Text(ctx, $"* baixa o modelo Demucs ({S.Variant.Size / 1_000_000} MB) uma vez", ix + 94, iy + 34, 8, Ui.Label, Ui.Mono);
+        Key(ctx, new Rect(ix + 94, iy, 104, 28), sepLabel, S.Separate, S.Stems.Count > 0 || S.Separating, Ui.Amber, DemucsModel.HelperPresent && S.Current is not null && !S.Separating && !S.Running);
+        Key(ctx, new Rect(ix, iy + 34, 100, 28), "ANALISAR", S.Analyze, S.Running, Ui.Green, S.Current is not null && !S.Running && !S.Separating);
+        Key(ctx, new Rect(ix + 106, iy + 34, 92, 28), "CANCELAR", S.Cancel, false, Ui.Red, S.Running || S.Separating);
+        Key(ctx, new Rect(ix + 204, iy, 76, 62), "SCORE", S.OpenScore, S.Result is not null, Ui.Green, S.Current is not null);
+        if (sepLabel == "SEPARAR*") Ui.Text(ctx, $"* baixa o Demucs ({S.Variant.Size / 1_000_000} MB) uma vez", ix, iy + 66, 8, Ui.Label, Ui.Mono);
         // Progress as an LED bar (separation amber, analysis green).
         bool sep = S.Separating;
         int lit = (int)Math.Round((sep ? S.SepProgress : S.Running ? S.Progress : S.Result is not null ? 1 : 0) * 20);
-        for (int i = 0; i < 20; i++) Ui.Led(ctx, new Point(ix + 6 + i * 14, iy + 50), 4, i < lit, sep ? Ui.Amber : Ui.Green, sep ? Ui.AmberOff : Ui.GreenOff);
+        for (int i = 0; i < 20; i++) Ui.Led(ctx, new Point(ix + 6 + i * 13.5, iy + 82), 4, i < lit, sep ? Ui.Amber : Ui.Green, sep ? Ui.AmberOff : Ui.GreenOff);
         // Plasma readout of the result.
-        var win = new Rect(ix, iy + 64, Math.Min(an.Width - 28, 520), an.Bottom - iy - 74);
+        var win = new Rect(ix, iy + 94, Math.Min(an.Width - 28, 520), an.Bottom - iy - 102);
         ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF120804)), Ui.FaceEdge, win, 2, 2);
         if (S.ResultTake is { } t)
         {
             bool notes = t.Notes.Count > 0;
             string main = notes ? $"{t.Notes.Count}" : $"{t.Chords.Count}";
-            Plasma.DotText(ctx, main, win.X + 10, win.Y + 8, 4.2, 4);
-            Plasma.Text(ctx, notes ? "NOTAS" : "ACORDES", win.X + 140, win.Y + 10, 14);
+            Plasma.DotText(ctx, main, win.X + 8, win.Y + 6, 3, 3);
+            Plasma.Text(ctx, notes ? "NOTAS" : "ACORDES", win.X + 84, win.Y + 6, 13);
             string how = S.Stems.Count > 0 ? $"{t.Notes.Count} notas da voz · {t.Chords.Count} acordes · faixas separadas"
                 : notes ? "voz: take inteiro" : "take inteiro · Viterbi" + (S.FromTake && S.Edits.KeepsGrid ? " · grade do metrônomo" : "");
-            Plasma.Text(ctx, how, win.X + 140, win.Y + 32, 11, false);
+            Plasma.Text(ctx, how.Length > 44 ? how[..44] : how, win.X + 84, win.Y + 24, 9, false);
         }
         else Plasma.Text(ctx, S.Separating ? $"SEPARANDO {S.SepProgress * 100:0} %" : S.Running ? $"{S.Progress * 100:0} %" : "—", win.X + 12, win.Y + 12, 16, S.Running || S.Separating);
-        Ui.Led(ctx, new Point(an.Right - 150, an.Bottom - 16), 4, true, Ui.Amber, Ui.AmberOff);
-        Ui.Text(ctx, "PÓS-INSERTOS · PRÉ-FADER", an.Right - 142, an.Bottom - 22, 8, Ui.Amber, Ui.SansBold);
     }
 
     void DrawDevice(DrawingContext ctx, Rect box, string model, string name, bool on)
@@ -851,6 +1013,81 @@ public sealed class ChainUnit : StudioUnit
     }
 }
 
+/// DS-M: the console — one strip per channel (number, tape label, trim, insert LEDs in console order,
+/// analyser, pan, mute / solo, meter, fader, dB) and the master (EQ, bus compressor, limiter,
+/// fader, a pair of VU meters, BOUNCE). Faders and pans are listening only: never the transcription.
+public sealed class ConsoleUnit : StudioUnit
+{
+    public ConsoleUnit(StudioState s) : base(s, "DS-M", "CONSOLE") { }
+
+    static double FaderNorm(float db) => db <= -60 ? 0 : Math.Pow((db + 60) / 72, 1.6);   // -60..+12 dB, more travel near 0
+    static float FaderDb(double n) => n <= 0.001 ? -90f : (float)Math.Round(Math.Pow(n, 1 / 1.6) * 72 - 60, 1);
+
+    protected override void DrawContent(DrawingContext ctx, Rect r)
+    {
+        if (S.Current is null) { Ui.Text(ctx, "escolha um take na biblioteca", r.Center.X, r.Center.Y, 12, Ui.Label, Ui.Mono, Ui.Align.Center); return; }
+        var names = new Dictionary<string, string> { ["mix"] = "MIX", ["vocals"] = "VOZ", ["bass"] = "BAIXO", ["other"] = "OUTROS", ["drums"] = "BATERIA", ["guitar"] = "VIOLÃO", ["piano"] = "PIANO" };
+        double w = 118, x = r.X;
+        for (int t = 0; t < S.Tracks; t++, x += w + 8)
+        {
+            var c = S.Channel(t);
+            int track = t;
+            var st = new Rect(x, r.Y, w, r.Height);
+            ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF2A2D32)), t == S.Selected ? new ImmutablePen((IImmutableBrush)Ui.Amber, 1.5) : Ui.FaceEdge, st, 4, 4);
+            Plasma.DotText(ctx, $"{t + 1}", st.X + 8, st.Y + 8, 2.2, 1);
+            Tape(ctx, st.X + 26, st.Y + 6, names.GetValueOrDefault(S.NameOf(t), S.NameOf(t)), t % 2 == 0 ? -1.2 : 1.2);
+            Knob(ctx, new Point(st.Center.X, st.Y + 52), 13, "TRIM", $"{c.Trim:+0;-0} dB", LinNorm(c.Trim, -24, 24), n => { c.Trim = (float)Math.Round(FromLin(n, -24, 24)); S.MixChanged(); });
+            (string, bool)[] ins = [("FILT", c.HpOn || c.LpOn), ("GATE", c.GateOn), ("EQ", c.EqOn), ("COMP", c.CompOn)];
+            for (int i = 0; i < ins.Length; i++)
+            {
+                var rr = new Rect(st.X + 8, st.Y + 88 + i * 17, w - 16, 15);
+                ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(ins[i].Item2 ? 0xFF24272Bu : 0xFF16181Bu)), Ui.FaceEdge, rr, 2, 2);
+                Ui.Text(ctx, ins[i].Item1, rr.X + 5, rr.Y + 1, 8, ins[i].Item2 ? Ui.LabelBright : Ui.Label, Ui.Mono);
+                Ui.Led(ctx, new Point(rr.Right - 7, rr.Center.Y), 2.6, ins[i].Item2, Ui.Green, Ui.GreenOff);
+            }
+            Key(ctx, new Rect(st.X + 8, st.Y + 160, w - 16, 18), "CADEIA ↓", () => { S.Selected = track; S.Select(); }, t == S.Selected, Ui.Amber);
+            Knob(ctx, new Point(st.Center.X, st.Y + 204), 12, "PAN", c.Pan == 0 ? "C" : c.Pan < 0 ? $"L{-c.Pan * 100:0}" : $"R{c.Pan * 100:0}", (c.Pan + 1) / 2, n => { c.Pan = (float)Math.Round(n * 2 - 1, 2); if (Math.Abs(c.Pan) < 0.04f) c.Pan = 0; S.MixChanged(); });
+            Key(ctx, new Rect(st.X + 14, st.Y + 244, 40, 22), "M", () => { c.Mute = !c.Mute; S.MixChanged(); }, c.Mute, Ui.Amber);
+            Key(ctx, new Rect(st.Right - 54, st.Y + 244, 40, 22), "S", () => { c.Solo = !c.Solo; S.MixChanged(); }, c.Solo, Ui.Green);
+            // Meter (post-fader peak) and fader.
+            var slot = new Rect(st.Center.X + 6, st.Y + 282, 20, st.Bottom - st.Y - 282 - 34);
+            float pk = S.Meters.Peak[Math.Min(t, 7)];
+            int segs = (int)(slot.Height / 7);
+            for (int i = 0; i < segs; i++)
+            {
+                double db = -60 + 63.0 * i / segs;
+                var col = db > 0 ? Ui.Red : db > -6 ? Ui.Amber : Ui.Green;
+                ctx.DrawRectangle(pk >= db ? col : new ImmutableSolidColorBrush(Color.FromUInt32(0xFF15301F)), null, new Rect(st.X + 14, slot.Bottom - (i + 1) * 7, 10, 5));
+            }
+            Fader(ctx, slot, FaderNorm(c.Fader), n => { c.Fader = FaderDb(n); S.MixChanged(); });
+            Plasma.Text(ctx, c.Fader <= -90 ? "-inf" : $"{c.Fader:+0.0;-0.0}", st.Center.X, st.Bottom - 24, 11, true, Ui.Mono, Ui.Align.Center);
+        }
+
+        // Master.
+        var m = S.Mix.Master;
+        double mw = 300, mx = r.Right - mw;
+        var ms = new Rect(mx, r.Y, mw, r.Height);
+        ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF2A2D32)), new ImmutablePen((IImmutableBrush)Ui.Amber, 1), ms, 4, 4);
+        Tape(ctx, ms.X + 10, ms.Y + 6, "MASTER", -1);
+        float vuL = S.Meters.MasterRms[0] + 18, vuR = S.Meters.MasterRms[1] + 18;   // 0 VU = -18 dBFS
+        InputModule.DrawVu(ctx, new Rect(ms.X + 12, ms.Y + 34, 134, 80), vuL);
+        InputModule.DrawVu(ctx, new Rect(ms.X + 154, ms.Y + 34, 134, 80), vuR);
+        Key(ctx, new Rect(ms.X + 12, ms.Y + 126, 60, 22), "EQ", () => { m.EqOn = !m.EqOn; S.MixChanged(); }, m.EqOn, Ui.Green);
+        Key(ctx, new Rect(ms.X + 78, ms.Y + 126, 60, 22), "COMP", () => { m.CompOn = !m.CompOn; S.MixChanged(); }, m.CompOn, Ui.Green);
+        Key(ctx, new Rect(ms.X + 144, ms.Y + 126, 72, 22), "LIMITER", () => { m.LimiterOn = !m.LimiterOn; S.MixChanged(); }, m.LimiterOn, Ui.Green);
+        Knob(ctx, new Point(ms.X + 40, ms.Y + 186), 14, "LIMIAR", $"{m.CompThreshold:0}", LinNorm(m.CompThreshold, -40, 0), n => { m.CompThreshold = (float)Math.Round(FromLin(n, -40, 0)); S.MixChanged(); }, m.CompOn);
+        Knob(ctx, new Point(ms.X + 100, ms.Y + 186), 14, "RAZÃO", $"{m.CompRatio:0.#}:1", LogNorm(m.CompRatio, 1, 10), n => { m.CompRatio = (float)Math.Round(FromLog(n, 1, 10), 1); S.MixChanged(); }, m.CompOn);
+        Knob(ctx, new Point(ms.X + 160, ms.Y + 186), 14, "TETO", $"{m.Ceiling:0.0}", LinNorm(m.Ceiling, -12, 0), n => { m.Ceiling = (float)Math.Round(FromLin(n, -12, 0), 1); S.MixChanged(); }, m.LimiterOn);
+        for (int i = 0; i < 8; i++) Ui.Led(ctx, new Point(ms.X + 196 + i * 11, ms.Y + 186), 3, S.Meters.LimiterGr > 0.5 + i, Ui.Red, Ui.RedOff);
+        Ui.Text(ctx, "LIMITANDO", ms.X + 196, ms.Y + 196, 7, Ui.Label, Ui.SansBold);
+        var mslot = new Rect(ms.X + 40, ms.Y + 236, 20, ms.Bottom - ms.Y - 236 - 34);
+        Fader(ctx, mslot, FaderNorm(m.Fader), n => { m.Fader = FaderDb(n); S.MixChanged(); });
+        Plasma.Text(ctx, $"{m.Fader:+0.0;-0.0}", mslot.Center.X, ms.Bottom - 24, 11, true, Ui.Mono, Ui.Align.Center);
+        Key(ctx, new Rect(ms.X + 120, ms.Bottom - 70, 150, 34), "BOUNCE WAV", S.Bounce, false, Ui.Amber);
+        Ui.Text(ctx, "escuta e bounce; não a transcrição", ms.X + 120, ms.Bottom - 30, 7, Ui.Label, Ui.Mono);
+    }
+}
+
 /// The STUDIO tab: the rack between its rails.
 public sealed class StudioView : DockPanel
 {
@@ -869,7 +1106,10 @@ public sealed class StudioView : DockPanel
         var library = new LibraryUnit(_s);
         var recorder = new RecorderUnit(_s);
         var chain = new ChainUnit(_s);
-        _units = [transport, library, recorder, chain];
+        var console = new ConsoleUnit(_s) { IsVisible = false };
+        _recorder = recorder;
+        _console = console;
+        _units = [transport, library, recorder, console, chain];
         var left = new RackRail();
         var right = new RackRail();
         SetDock(left, Dock.Left);
@@ -888,16 +1128,25 @@ public sealed class StudioView : DockPanel
         body.Children.Add(_status);
         body.Children.Add(chain);
         body.Children.Add(library);
-        body.Children.Add(recorder);
+        body.Children.Add(new Panel { Children = { recorder, console } });
         Children.Add(body);
         _s.Changed += Refresh;
         if (_s.Player is null) _s.Status = "núcleo nativo ausente: biblioteca sem reprodução nem análise";
     }
 
-    void Refresh() { foreach (var u in _units) u.InvalidateVisual(); _status.Text = _s.Status; }
+    readonly StudioUnit _recorder, _console;
 
-    /// Animation tick from the window: job progress, playhead, readouts.
-    public void Tick() { _s.Poll(); Refresh(); }
+    void Refresh()
+    {
+        _recorder.IsVisible = !_s.ConsoleView;
+        _console.IsVisible = _s.ConsoleView;
+        foreach (var u in _units) u.InvalidateVisual();
+        _status.Text = _s.Status;
+    }
+
+    /// Animation tick from the window: job progress, meters, playhead, readouts.
+    public void Tick() { _s.Poll(); _s.PollMeters(); Refresh(); }
+    public void ShowConsole(bool on) { _s.ConsoleView = on; Refresh(); }
 
     public void TogglePlay() => _s.TogglePlay();
     public void OpenFirst() { if (_s.Library.Count > 0) _s.Open(_s.Library[0].Path); Refresh(); }

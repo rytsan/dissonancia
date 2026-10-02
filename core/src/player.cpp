@@ -99,6 +99,7 @@ void Player::sync_params(double fs) {
 
 int Player::load(const char* path) {
     stop();
+    silence_meters();
     for (auto& s : slots_) { ChannelParams d; mix::channel_defaults(d); write_slot(s, d); }
     { MasterParams m; mix::master_defaults(m); m.limiterOn = 0; write_slot(masterSlot_, m); }   // a plain file plays untouched
     ma_decoder dec;
@@ -245,7 +246,7 @@ void Player::close_device() {
 void Player::render(float* out, uint32_t n, uint32_t outChannels) {
     std::memset(out, 0, size_t(n) * outChannels * sizeof(float));
     sync_params(rate_);
-    if (!playing_.load(std::memory_order_acquire)) return;
+    if (!playing_.load(std::memory_order_acquire)) { silence_meters(); return; }
     uint64_t pos = pos_.load(std::memory_order_acquire);
     const uint64_t total = frames(), a = loopA_.load(), b = loopB_.load();
     const int nt = tracks();
@@ -291,6 +292,13 @@ void Player::render(float* out, uint32_t n, uint32_t outChannels) {
     }
     mMasterGr_.store(bus_.comp.gr, std::memory_order_relaxed);
     mLimGr_.store(bus_.lim.gr_db(), std::memory_order_relaxed);
+}
+
+void Player::silence_meters() {
+    for (int t = 0; t < ANA_MAX_TRACKS; t++) { mPeak_[t].store(-120.f, std::memory_order_relaxed); mRms_[t].store(-120.f, std::memory_order_relaxed); mGr_[t].store(0, std::memory_order_relaxed); }
+    for (auto& m : mMaster_) m.store(-120.f, std::memory_order_relaxed);
+    mMasterGr_.store(0, std::memory_order_relaxed);
+    mLimGr_.store(0, std::memory_order_relaxed);
 }
 
 void Player::meters(MixMeters& out) const {

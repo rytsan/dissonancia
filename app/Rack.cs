@@ -140,11 +140,9 @@ public sealed class InputModule : RackModule
         return (Math.Pow(10, Math.Clamp(vu, -20, 3) / 20.0) - lo) / (hi - lo);
     }
 
-    protected override void DrawContent(DrawingContext ctx, Rect r)
+    /// The analog VU (backlit face, scale, needle with its shadow, glass, bezel); also STUDIO's master.
+    public static void DrawVu(DrawingContext ctx, Rect face, float vuLevel)
     {
-        var f = Frame!;
-        // VU face
-        var face = new Rect(r.X, r.Y, Math.Min(230, r.Width * 0.55), r.Height);
         var faceClip = new RoundedRect(face, 6);
         ctx.DrawRectangle(Ui.VuFace, null, face, 6, 6);
         using (ctx.PushClip(faceClip)) ctx.DrawRectangle(Ui.Backlight, null, face);
@@ -174,7 +172,7 @@ public sealed class InputModule : RackModule
         Ui.Text(ctx, "VU", face.Center.X, face.Bottom - 26, 13, Ui.VuInkBrush, Ui.SansBold, Ui.Align.Center);
         using (ctx.PushClip(faceClip))
         {
-            var tip = OnArc(VuPos(f.VuLevel), radius * 0.9);
+            var tip = OnArc(VuPos(vuLevel), radius * 0.9);
             var shadow = new Point(2.5, 3.5);   // needle sits a few mm above the scale, under the glass
             ctx.DrawLine(Ui.NeedleShadow, pivot + shadow, tip + shadow);
             ctx.DrawLine(Ui.VuNeedle, pivot, tip);
@@ -197,6 +195,14 @@ public sealed class InputModule : RackModule
         }
         ctx.DrawRectangle(null, Ui.BezelOuter, face.Inflate(1.5), 7, 7);
         ctx.DrawRectangle(null, Ui.BezelHighlight, face.Deflate(0.5), 6, 6);
+    }
+
+    protected override void DrawContent(DrawingContext ctx, Rect r)
+    {
+        var f = Frame!;
+        // VU face
+        var face = new Rect(r.X, r.Y, Math.Min(230, r.Width * 0.55), r.Height);
+        DrawVu(ctx, face, f.VuLevel);
 
         // Peak LED ladder (dBFS), target zone -18..-6
         double x0 = face.Right + 18, w = r.Right - x0, y = r.Y + 14;

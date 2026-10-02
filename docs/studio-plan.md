@@ -110,7 +110,7 @@ this order because each stage needs the one before it, as in a studio.
 - Each stem becomes a track and a channel; every stem shows a confidence.
   Without separation the mix is one channel and everything still works.
 
-### S4 — Mixing: channel strip and master (spec stage 2)
+### S4 — Mixing: channel strip and master (spec stage 2) — done 2026-10-02
 - Strip in console order: trim → HP/LP filters → gate → parametric EQ
   (4–6 bands, curve over the spectrum) → compressor → fader → pan.
 - Master bus: EQ, bus compressor, limiter (listening and bounce only).

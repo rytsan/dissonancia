@@ -77,6 +77,7 @@ private:
     std::atomic<float> mPeak_[ANA_MAX_TRACKS], mRms_[ANA_MAX_TRACKS], mGr_[ANA_MAX_TRACKS], mMaster_[4], mMasterGr_{0}, mLimGr_{0};
     std::atomic<uint8_t> mGate_[ANA_MAX_TRACKS];
     void sample(int track, uint64_t frame, float& l, float& r) const;
+    void silence_meters();
     void sync_params(double fs);
     void reopen_after(const std::function<void()>& change);
     std::atomic<uint64_t> pos_{0}, loopA_{0}, loopB_{0};

@@ -64,6 +64,8 @@ Only the pipeline chosen on START exists in a session (`voice_` for mono modes,
 | `app/StudioSeparation.cs` | STUDIO S3: Demucs weights (download + SHA-256), the dz_separate process, stem waveforms |
 | `app/EditList.cs` | S2 edit list (trim, cut, clip gain, fades, normalize) |
 | `core/tools/dz_separate.cpp` | Separation helper: Demucs v4 via demucs.cpp, one WAV per stem, progress on stdout |
+| `core/src/mixdsp.hpp` | S4 strip and master DSP: RBJ biquads, 12/24 dB filters, gate, soft-knee compressor, limiter, constant-power pan |
+| `app/StudioMix.cs` | S4 mix model per take (strips by channel name, master), native mirrors |
 | `app/StudioRack.cs` | STUDIO tab as a 19" rack: DS-T transport, DS-L library, DS-A track recorder with the edit keys, DS-C chain + analyser |
 | `core/src/tempo.{hpp,cpp}` | Tempo heard (onset-envelope autocorrelation + beat phase): beat marks on the scope only |
 | `core/src/chords.{hpp,cpp}` | Chord matcher (180 harmonic-aware templates, Occam, key/cadence context, bass), tracker, slash spelling |
@@ -327,6 +329,36 @@ notes, a sung melody with passing and neighbour tones, kick/snare/hi-hat),
   onset; spelling by melodic direction in the key.
 - Fixed on the way: the pitch timestamp of the first hops underflowed (an
   unsigned subtraction before the window filled) — LIVE and offline.
+
+### STUDIO S4 — mixing
+- Core (`player.cpp`, `mixdsp.hpp`): tracks = the edited take + the stems
+  (resampled to its rate and length); each through a strip in console
+  order — trim → high-pass / low-pass (Butterworth, 12 or 24 dB/oct) → gate
+  (peak follower, 3 dB hysteresis, range) → 4-band EQ (low shelf, two bells,
+  high shelf; RBJ) → compressor (feed-forward, stereo-linked, 6 dB soft
+  knee) → analysis tap → fader → constant-power pan; mute / solo; master
+  EQ → bus compressor → fader → peak limiter (instant attack). Parameters
+  reach the audio thread through a seqlock per slot (never blocking); meters
+  per block, silent when stopped. Offline renders use fresh strips with the
+  same settings: the tap of any set of tracks and the bounce.
+- App: one strip per channel by name and the master in
+  `<name>.mix.json`; with stems the original is muted by default. Each
+  transcription reads its channel's tap (the harmony sums other + bass at
+  their taps) and its cache key includes those strips' tap settings — a
+  fader, pan, mute or solo never changes a transcription.
+- UI: DS-1 TRIM (gain, LED meter), DF-2 FILTRO (HP / LP / 12-24, frequencies),
+  DG-3 GATE (threshold, release, range, open LED), DQ-4 EQ (four bands,
+  frequency and gain), DC-5 COMP (threshold, ratio, attack, makeup, gain
+  reduction LEDs) work on the channel chosen by its tape label; knobs follow
+  a vertical drag or the wheel. CONSOLE (transport) swaps the recorder for
+  DS-M: per channel trim, insert LEDs, CADEIA ↓, pan, M / S, LED meter,
+  fader, plasma dB; master EQ / COMP / LIMITER with threshold, ratio,
+  ceiling, limiting LEDs, fader, the LIVE VU pair, BOUNCE WAV.
+- Tests (`test_mix.cpp`): defaults transparent; 24 dB high-pass two
+  octaves above a tone > 40 dB down; +6 dB bell; constant-power pan;
+  gate 40 dB on the quiet half; 4:1 at −18 dB → −15 dBFS from −6; limiter
+  never above its ceiling; stems resampled; solo; the tap ignores the fader
+  and follows the trim; bounce with mute and fader; an edit drops stems.
 
 ### STUDIO S3 — separation (Demucs)
 - Optional component, any environment: `dz_separate` (built when

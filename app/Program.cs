@@ -107,6 +107,7 @@ public sealed class MainWindow : Window
             ["StudioAnalyze"] = () => _studio.AnalyzeCurrent(),
             ["StudioSeparate"] = () => _studio.SeparateCurrent(),
             ["StudioTick"] = () => _studio.Tick(),
+            ["StudioConsole"] = () => _studio.ShowConsole(true),
             ["StudioScore"] = () => _studio.ScoreCurrent(),
             ["StudioSelectDemo"] = () => _studio.SelectRange(1.0, 6.0),   // screenshot tool: a selection to edit
             ["StudioTrim"] = () => _studio.EditAction("trim"),
