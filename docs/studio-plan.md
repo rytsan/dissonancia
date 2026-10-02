@@ -6,17 +6,30 @@ testing is possible again.
 
 ## What STUDIO is
 
-The heavy, offline layer. A REC take (or an imported file) is treated, then
-reanalysed with everything LIVE cannot afford, and only then turned into
-notation and exported:
+The heavy, offline layer, in the order of a real studio. A REC take (or an
+imported file) goes through the same stages a recording goes through in a
+studio, and only then is it transcribed and delivered:
 
 ```
-take ─▶ edit ─▶ effects ─▶ separation ─▶ analysis per stem ─▶ review ─▶ score ─▶ export
-        trim     gain/EQ    Demucs        voice: notes          key, meter,   staves   MusicXML
-        cut      HP/LP      vocals        harmony: chords       tempo map,    chords   MIDI
-        fades    gate       bass, drums   bass: bass line       corrections   numerals JSON / text
-        normalize           guitar, piano drums: beats          (user)                 WAV stems
+session ─▶ editing ─▶ separation ─▶ mixing (per channel) ─▶ transcription ─▶ review ─▶ delivery
+takes      trim, cut   Demucs:       trim → HP/LP → gate      voice: notes      key,       score
+import     fades,      the stereo    → EQ → compressor        chords            meter,     MusicXML
+playback   clip gain,  take becomes  → [analysis tap]         bass line         tempo,     MIDI
+           normalize   a multitrack  → fader / pan → master   beats             fixes      WAV, JSON
 ```
+
+Order is fixed and mirrors real life (decision 2026-10-02):
+- **Stages** follow a studio session: tracking (the take), editing,
+  multitrack (here made by separation), mixing, then the transcriber's and
+  the producer's work, then delivery.
+- **The channel strip** follows a real console: input trim → filters
+  (high-pass / low-pass) → gate → EQ → compressor → fader → pan → master
+  bus. The order is not rearranged by the user.
+- **Analysis taps each channel post-inserts, pre-fader** (like a direct out
+  after EQ): the cleaned signal is what gets transcribed, and the listening
+  fader never changes the transcription.
+- **Master bus** (EQ, bus compressor, limiter) affects listening and the WAV
+  bounce only, never the analysis.
 
 Not 100 %, but far more precise than the live events, because it has:
 look-ahead (decide a note knowing what follows), the whole take as context,
@@ -24,115 +37,109 @@ high-resolution analysis (24–36 bins per octave, long windows, multi-pass),
 and clean stems (the voice read alone, the guitar read without the voice).
 
 Rules kept from the spec: never touches a running LIVE session; the original
-take is never modified (edits are a list, outputs are cached); every result
-carries a confidence and the UI never presents it as certain; key and meter
-are the user's (STUDIO may suggest, never applies by itself).
+take is never modified (edits are a list, outputs are cached per stage);
+every result carries a confidence and the UI never presents it as certain;
+key and meter are the user's (STUDIO may suggest, never applies by itself).
 
-## Layout: a mixing console (decision 2026-10-02)
+## Layout: a mixing console
 
 STUDIO looks and works like LIVE's rack, as a mixing desk. Mockup:
 https://claude.ai/artifact/1cES4MCBM9otq1qSVa3ed5 (three screens).
 
-1. **Desk (overview):** stage bar (Library · Edit · Desk · Analyse ·
-   Review → Score), library on the left, track timeline on top
-   (non-destructive trim / cut / fades / normalize across all tracks), the
-   console below. One channel strip per track: the original mix, then
-   one per separated stem (voice, guitar, bass, drums, other), plus master.
-   Per strip: source and separation confidence, insert slots, analysis type
-   (notes / chords / bass / beats / off), staff assignment, pan, mute / solo,
-   meter, fader.
-2. **Channel:** the strip's insert chain as rack modules, in order and
-   reorderable (high-pass, parametric EQ with its curve over the stem's
-   spectrum, noise gate, + insert; VST3 later), ending in the channel's
-   analysis module (type, resolution, vocabulary, whole-take decoding) with
-   a preview of its result. Listening, export and analysis use the same
-   chain; re-running one stage re-runs only it and what follows.
-3. **Analysis and review:** one lane per channel on the bar grid (voice
-   piano roll, chord lane with confidences, bass notes, beats), click to
-   correct; a side panel where the user sets key (none by default), meter,
-   tempo and quantization — STUDIO only suggests — and a list of low-
-   confidence spots to review, then "Generate score".
+1. **Mixing (overview):** stage bar Session · Editing · Separation · Mixing ·
+   Transcription · Review · Delivery; library on the left; track timeline on
+   top (non-destructive trim / cut / fades / normalize across all tracks);
+   the console below. One channel strip per track — the original mix, one
+   per separated stem (voice, guitar, bass, drums, other) — plus master.
+   Per strip: source and separation confidence, the inserts in console
+   order, the analysis tap, analysis type (notes / chords / bass / beats /
+   off), staff assignment, pan, mute / solo, meter, fader.
+2. **Channel:** the strip as rack modules in console order (1 trim,
+   2 filters, 3 gate, 4 EQ with its curve over the stem's spectrum,
+   5 compressor), then the analysis module at the tap (type, resolution,
+   vocabulary, whole-take decoding) with a preview of its result, then
+   fader / pan. Re-running one stage re-runs only it and what follows.
+3. **Transcription and review:** one lane per channel on the bar grid
+   (voice piano roll, chord lane with confidences, bass notes, beats), click
+   to correct; a side panel where the user sets key (none by default),
+   meter, tempo and quantization — STUDIO only suggests — and a list of
+   low-confidence spots, then "Generate score".
 
-The milestones below map onto it: S1 library + analysis lanes, S2 the
-timeline editing, S3 the insert modules, S4 the stem channels, S5 the
-per-channel analysis, S6 the review panel, S7 the score.
+## Milestones (in studio order)
 
-## Milestones
+Each one compiles, tests and measures, and is usable on its own. Built in
+this order because each stage needs the one before it, as in a studio.
 
-Each one compiles, tests and measures, and is usable on its own.
-
-### S1 — Library, jobs, offline reanalysis (spec M7)
-- Library: REC takes + imported WAV/FLAC/MP3 (miniaudio decoder) / OGG
-  (stb_vorbis); list with duration, mode, date; open, rename, delete.
-- Take project: `take-….studio.json` next to the take — stage options, edit
+### S1 — Session: library, playback, jobs
+- Library: REC takes + imported WAV / FLAC / MP3 (miniaudio decoder) / OGG
+  (stb_vorbis); duration, mode, date; open, rename, delete.
+- Take project `take-….studio.json` next to the take: stage options, edit
   list, user corrections. Stage cache keyed by hash(options + upstream).
+- Playback engine (offline graph rendered to the output device): play,
+  stop, locate, loop a selection, cursor. Everything after this is judged
+  by listening.
 - Job system: C++ `OfflineAnalysisThread` pool behind the C ABI
-  (`ana_post_*`: start, progress, cancel, fetch results as POD arrays); C#
-  tasks; progress bar and cancel in the tab.
-- Offline reanalysis with the existing pipelines run as HighPrecision over
-  the whole file (no device, like `dz_wav`), plus look-ahead where it is
-  cheap: chord labels decided per segment (already in the tracker), notes
-  with a forward pass.
-- SCORE input switches to the STUDIO result; the raw-take preview stays.
-- Measure: the band mix (`tools/loopback/mix.py`) and the plucked-guitar /
-  voice takes, offline vs LIVE.
+  (`ana_post_*`: start, progress, cancel, results as POD arrays); C# tasks;
+  progress and cancel in the tab.
 
-### S2 — Editor (spec M7b, §20.1)
-- Waveform from a peak mipmap (O(visible pixels) zoom), playback with
-  cursor, selection.
+### S2 — Editing (spec M7b, §20.1)
+- Waveform from a peak mipmap (O(visible pixels) zoom), selection, bar/beat
+  grid from the take's metronome, snap.
 - Non-destructive edit list: trim, cut, delete, split, mute region, fades
-  (linear / equal-power), gain envelope, normalize (peak / RMS).
-- Bar/beat grid overlay from the take's metronome; snap.
+  (linear / equal-power), clip gain, normalize (peak / RMS).
+- Edits apply to all tracks at once (time-aligned), also after separation.
 
-### S3 — Built-in effects (spec stage 2)
-- Gain, high-pass / low-pass, parametric EQ (4–6 bands), noise gate. Applied
-  before separation and analysis; preview by listening.
-- VST3 stays last (S8): high effort, mainly the same denoise/EQ.
-
-### S4 — Separation (spec M8, §20.3)
+### S3 — Separation: the multitrack (spec M8, §20.3)
 - demucs.cpp (MIT, C++17 + Eigen, CPU) with Demucs v4 weights (MIT):
-  4 stems (vocals, drums, bass, other) and 6 stems (+ guitar, piano).
-  Weights downloaded once (hundreds of MB), checksum-pinned.
-- Cancellable job with progress; result cached per take + options. Expect
-  minutes per song on CPU — MEASURE on the reference machine before
-  promising anything; multi-threading measured too.
-- Stems become tracks: mute / solo / gain / pan for listening, waveform,
-  analysis type per track (voice, chords, bass, drums, off).
-- Every stem shows a confidence; separation is never shown as perfect.
+  4 stems (vocals, drums, bass, other) by default, 6 (+ guitar, piano) as an
+  option. Weights downloaded once, checksum-pinned.
+- Cancellable job with progress; cached per take + edit list + options.
+  Minutes per song on CPU expected — MEASURE before promising anything.
+- Each stem becomes a track and a channel; every stem shows a confidence.
+  Without separation the mix is one channel and everything still works.
 
-### S5 — Analysis per stem (spec stage 4, §21)
-- Voice stem: YIN + MPM cross-check, Viterbi smoothing over the whole take
-  (pYIN-style), note segmentation with look-ahead, vibrato and glides kept
-  as one note.
-- Harmony stems (guitar / piano / other): CQT 24–36 bpo down to 27.5 Hz,
-  NNLS chroma, inharmonicity correction for piano (spec M7c), chord decoding
-  over the whole take (HMM / Viterbi with a change penalty, so a chord lasts
-  until the harmony changes), chord vocabulary option (triads / sevenths /
-  extended).
-- Bass stem: bass line as notes; inversions from it, not from the mix.
-- Drums stem: beat and downbeat tracking → tempo map; flags tempo drift
-  against the metronome.
-- Conflicts reduce confidence (e.g. voice note vs chord), never forced.
+### S4 — Mixing: channel strip and master (spec stage 2)
+- Strip in console order: trim → HP/LP filters → gate → parametric EQ
+  (4–6 bands, curve over the spectrum) → compressor → fader → pan.
+- Master bus: EQ, bus compressor, limiter (listening and bounce only).
+- Metering per channel and master; mute / solo; the analysis tap
+  (post-inserts, pre-fader) exposed per channel.
+- Built-in processors only; VST3 is S8.
 
-### S6 — Review: theory and rhythm (spec stages 5–6)
-- Key and meter: chosen by the user; STUDIO shows a suggestion (key profile
-  over the whole take, meter from the downbeats) with its confidence.
-- Tempo: session metronome by default; tempo map from S5 as an option.
-- Quantization options: grid (from the beat unit down to 1/32), tuplets,
-  swing, strength, pickup bar.
-- Corrections: click a note or chord to change it (pitch, duration, symbol);
-  stored in the take project and kept when upstream stages re-run.
+### S5 — Transcription per channel (spec stage 4, §21)
+- Reads each channel at its tap, by its analysis type:
+  - Voice / melody: YIN + MPM cross-check, Viterbi smoothing over the whole
+    take (pYIN-style), note segmentation with look-ahead, vibrato and
+    glides kept as one note.
+  - Chords (guitar / piano / other): CQT 24–36 bpo down to 27.5 Hz, NNLS
+    chroma, inharmonicity correction for piano (spec M7c), whole-take chord
+    decoding (HMM / Viterbi with a change penalty), vocabulary option
+    (triads / sevenths / extended).
+  - Bass: bass line as notes; chord inversions come from it.
+  - Beats (drums): beat and downbeat tracking → tempo map; drift against
+    the metronome flagged.
+- Conflicts between channels (voice note vs chord, bass vs chord root)
+  lower confidence, never forced.
 
-### S7 — Score and export (spec stages 7–8)
-- Staves per stem: voice (clef auto by range), chord symbols above, guitar
-  (treble 8vb; tablature later), piano grand staff, bass (bass clef).
+### S6 — Review (spec stages 5–6)
+- Key and meter set by the user; STUDIO shows its suggestion (key profile
+  over the whole take, meter from the downbeats) with a confidence.
+- Tempo: session metronome by default; the tempo map from S5 as an option.
+- Quantization: grid (beat unit down to 1/32), tuplets, swing, strength,
+  pickup bar.
+- Corrections by clicking a note or chord; kept in the take project and
+  preserved when upstream stages re-run. Low-confidence spots listed.
+
+### S7 — Delivery: score and export (spec stages 7–8, M10)
+- Staves per channel: voice (clef auto by range), chord symbols above,
+  guitar (treble 8vb), piano grand staff, bass (bass clef).
 - Roman numerals and cadences only with a key set.
 - MusicXML (XSD-validated, opened in MuseScore), MIDI type 1 (one track per
-  stem + tempo map), JSON (full result with confidences and alternatives),
-  text chart, WAV of edited / separated audio (spec M10).
+  channel + tempo map), JSON (full result with confidences), text chart,
+  WAV bounce of the mix and of each stem.
 
 ### Later
-- S8: VST3 host, out of process (spec M11, §20.2).
+- S8: VST3 inserts, out-of-process host (spec M11, §20.2).
 - S9: choir by section, SATB (spec M9, §21) — experimental.
 
 ## How precision is measured
@@ -147,12 +154,9 @@ Each one compiles, tests and measures, and is usable on its own.
 - Every change reports before → after on the corpus; numbers in
   `docs/IMPLEMENTATION.md`, as for LIVE.
 
-## Decisions needed before S1
+## Open decisions
 
-1. Order after S1: separation first (S4, biggest precision gain, heaviest)
-   or editor + effects first (S2–S3, simpler, needed for real takes)?
-   Proposal: S1 → S4 → S5 → S7, editor and effects in between as needed.
-2. Separation model: 4 stems (better quality) vs 6 stems (guitar / piano
-   tracks, weaker on guitar). Proposal: 4 stems by default, 6 as an option.
-3. Guitar output: chord symbols only, or also tablature later?
-4. Hardware: CPU only (portable, slow) or optional GPU later?
+1. Separation default: 4 stems (better quality) or 6 (guitar / piano tracks,
+   weaker on guitar)? Proposal: 4 by default, 6 as an option.
+2. Guitar delivery: chord symbols only, or also tablature later?
+3. Hardware: CPU only (portable, slow) or optional GPU later?
