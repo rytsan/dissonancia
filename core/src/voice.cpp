@@ -209,6 +209,10 @@ void VoicePipeline::process(const float* x, uint32_t n, uint64_t endFrame, Voice
     p.rms = rms;
     p.timestampSeconds = seconds(endFrame - windowNative_ / 2);
 
+    rawMidi_[rawPos_] = voiced ? p.midiFloat : -1.f;
+    rawEnd_[rawPos_] = endFrame;
+    rawPos_ = (rawPos_ + 1) % kRaw;
+
     // Stable note: causal median of 3 + hysteresis + minimum duration.
     if (voiced) {
         med_[medPos_] = p.midiFloat;
@@ -253,6 +257,22 @@ void VoicePipeline::process(const float* x, uint32_t n, uint64_t endFrame, Voice
                 if (state_ == State::Silence) state_ = State::Candidate;
             }
             if (++candHops_ >= minCandidateHops_) {
+                if (cur_.count > 0 && previousMidi_ >= 0) {   // pitch change (from silence: the energy onset stands)
+                    int k = 0, firstNew = -1, lastOld = -1;
+                    for (; k < kRaw; k++) {
+                        const int i = (rawPos_ - 1 - k + 2 * kRaw) % kRaw;
+                        if (rawMidi_[i] < 0 || std::lround(rawMidi_[i]) != mi) break;
+                        firstNew = i;
+                    }
+                    for (; k < kRaw && firstNew >= 0; k++) {
+                        const int i = (rawPos_ - 1 - k + 2 * kRaw) % kRaw;
+                        if (rawMidi_[i] >= 0 && std::lround(rawMidi_[i]) == previousMidi_) { lastOld = i; break; }
+                    }
+                    if (firstNew >= 0 && lastOld >= 0) {
+                        const uint64_t mid = (rawEnd_[lastOld] + rawEnd_[firstNew]) / 2, half = windowNative_ / 2;
+                        if (mid > half && mid - half > cur_.startFrame) candStart_ = mid - half;
+                    }
+                }
                 // Confirmed: the previous note ends exactly at the new note's backdated onset (§13).
                 if (cur_.count > 0 && (state_ == State::Stable || state_ == State::Candidate) && previousMidi_ >= 0 && cur_.startFrame < candStart_)
                     emit(out, AnalyzerEventType::NoteEnd, cur_, candStart_);

@@ -99,6 +99,13 @@ private:
 
     float med_[3]{};
     uint32_t medCount_ = 0, medPos_ = 0;
+    // Instantaneous pitch of the last hops (before the median) and their end frames: a legato change
+    // is placed midway between the last hop that still showed the old note and the first that showed
+    // the new one (the frames in between mix both and read unvoiced or in between), minus half a window.
+    static constexpr int kRaw = 16;
+    float rawMidi_[kRaw]{};
+    uint64_t rawEnd_[kRaw]{};
+    int rawPos_ = 0;
 
     State state_ = State::Silence;
     Note cur_{};

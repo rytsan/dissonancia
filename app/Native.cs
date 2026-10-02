@@ -297,6 +297,9 @@ public sealed class NativeLiveSource : ILiveSource
     readonly TextCache _symbol = new(), _confirmed = new(), _roman = new(), _alt0 = new(), _alt1 = new(), _alt2 = new(), _reason = new(), _event = new();
     string _alternatives = "";
     readonly int[][] _pcSets = Enumerable.Range(0, 9).Select(n => new int[n]).ToArray();
+    readonly int[][] _heldSets = Enumerable.Range(0, 9).Select(n => new int[n]).ToArray();
+    int[] _held = [];
+    int _heldBass = -1;
     bool _metronome = true;
     int _shapeKey = -1;
     int[] _frets = [];
@@ -368,7 +371,6 @@ public sealed class NativeLiveSource : ILiveSource
         int detected = Math.Min((int)ch.Best.DetectedCount, 8);
         var pcs = _pcSets[detected];
         for (int i = 0; i < detected; i++) pcs[i] = ch.Best.Detected[i];
-        f.ChordPitchClasses = pcs;
         // Bass (M4): spelled like the note; the GUI holds the sounding pitch.
         ref readonly var b = ref _snap.Bass;
         f.BassValid = b.Valid != 0;
@@ -381,6 +383,15 @@ public sealed class NativeLiveSource : ILiveSource
         if (f.ChordConfirmed) f.DisplayRoman = f.ChordRoman;                 // the roman of the chord on display
         else if (f.DisplayChord.Length == 0) f.DisplayRoman = "";
         f.ProvisionalChord = f.CandidateChord;
+        // Fretboard / keyboard show the chord on display: its notes are held while a strum or a
+        // passing note moves the preview, and follow the preview only when it is the chord shown.
+        if (f.ChordConfirmed || f.DisplayChord.Length == 0 || f.DisplayChord == f.CandidateChord)
+        {
+            _held = _heldSets[detected];
+            pcs.AsSpan(0, detected).CopyTo(_held);
+            _heldBass = f.BassSettled ? f.Bass.Midi % 12 : -1;
+        }
+        f.ChordPitchClasses = _held;
         fixed (float* chroma = _snap.Chroma.Normalized) new ReadOnlySpan<float>(chroma, 12).CopyTo(f.Chroma);
         f.TuningValid = _snap.Tuning.Valid != 0;
         f.TuningCents = _snap.Tuning.OffsetCents;
@@ -392,9 +403,9 @@ public sealed class NativeLiveSource : ILiveSource
         fixed (float* cqt = _snap.CqtMagnitude) new ReadOnlySpan<float>(cqt, LiveFrame.MaxCqtBins).CopyTo(f.Cqt);
         fixed (float* scope = _snap.Scope) new ReadOnlySpan<float>(scope, LiveFrame.ScopeSamples).CopyTo(f.Scope);
         // Likely guitar shape, recomputed only when the detected set or the settled bass changes.
-        int shapeKey = f.BassSettled ? f.Bass.Midi % 12 + 1 : 0;
-        foreach (int pc in pcs) shapeKey |= 1 << (pc + 4);
-        if (shapeKey != _shapeKey) { _shapeKey = shapeKey; _frets = pcs.Length >= 2 ? Theory.LikelyShape(pcs, f.BassSettled ? f.Bass.Midi % 12 : -1) : []; }
+        int shapeKey = _heldBass + 1;
+        foreach (int pc in _held) shapeKey |= 1 << (pc + 4);
+        if (shapeKey != _shapeKey) { _shapeKey = shapeKey; _frets = _held.Length >= 2 ? Theory.LikelyShape(_held, _heldBass) : []; }
         f.Frets = _frets;
 
         // Drain every frame so the queue never overflows; SCORE (M6) will consume the payloads.

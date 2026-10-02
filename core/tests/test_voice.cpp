@@ -247,3 +247,15 @@ TEST_CASE("voice pipeline: a note after an unvoiced gap above the gate starts at
     CHECK(std::string(notes[1].writtenName) == "C5");
     CHECK(notes[1].startTimeSeconds == Approx(0.9).margin(0.03));
 }
+
+TEST_CASE("voice pipeline: legato note changes start at the change") {
+    // A3 -> B3 -> G3 legato (phase continuous), changes at 0.9 s and 1.5 s.
+    for (AudioQuality q : {AudioQuality::LowLatency, AudioQuality::Balanced, AudioQuality::HighPrecision}) {
+        auto notes = ended(run(render({{-1, 0.3}, {57, 0.6}, {59, 0.6}, {55, 0.6}, {-1, 0.4}}), voice_session(), q));
+        REQUIRE(notes.size() == 3);
+        double e1 = notes[1].startTimeSeconds - 0.9, e2 = notes[2].startTimeSeconds - 1.5;
+        std::printf("[measure] quality %d: legato change starts %+.1f / %+.1f ms from the change\n", int(q), e1 * 1000, e2 * 1000);
+        CHECK(std::fabs(e1) < 0.015);
+        CHECK(std::fabs(e2) < 0.015);
+    }
+}

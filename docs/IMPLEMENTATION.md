@@ -101,8 +101,11 @@ Only the pipeline chosen on START exists in a session (`voice_` for mono modes,
 - Octave-down guard: when the CMND dip at half the chosen lag is under 0.25,
   the half lag wins (a decaying or breathy note can push the true-period dip
   just over the 0.15 threshold while the double-period dip stays under it).
-- Notes are backdated to the energy onset (from silence) or to the window
-  centre (pitch change). The energy onset counts only when newer than the
+- Notes are backdated to the energy onset (from silence) or, on a legato
+  change, to the midpoint between the last hop whose own estimate still
+  showed the old note and the first showing the new one, minus half a window
+  (the frames between mix both notes and read unvoiced). Legato changes now
+  start +4…+9 ms from the change (were +14…+34 ms). The energy onset counts only when newer than the
   last voiced hop, so an unvoiced gap above the gate does not pull a note back
   to the start of the phrase. The previous note ends exactly at the new onset.
 - Spelling: key signature letters; chromatic notes by melodic direction (A→A♯→B,
@@ -169,6 +172,10 @@ notes, a sung melody with passing and neighbour tones, kick/snare/hi-hat),
   chord is relabelled when it ends on its whole duration with each pitch
   class weighted by its share of strong frames (chord tones ring, a melody
   note passes) — that label goes into the take and the score.
+- Display: fretboard and keyboard show the notes of the chord on display,
+  held while strums and passing notes move the preview.
+- Confirmation stays 0.4 s: 0.3 s read 85 % of the band mix live but with 8
+  wrong confirmations instead of 6 and take labels 87 % instead of 91 %.
 - Display: the analyzer shows the confirmed chord, steady; a candidate shows
   only after holding 120 ms ("→ Am?"), and the timeline's provisional cell
   likewise. The matcher's per-hop preview no longer reaches the panel.
@@ -345,7 +352,7 @@ item).
 | Notify rule | ≈ 1 wake-up per hop, not per callback (≤ 110 for 100 hops / 750 callbacks) |
 | Loopback (WSLg) | voice A3 → A♯3 → B3 at +0 ¢, 46–69 ms; CPU ≈ 2 % (voice), 0.16 % (chords) |
 | Live loopback, guitar (`tools/loopback`, 8 bars G Em C D7 G/B Am7 D G, 92 bpm, plucked strings) | 8/8 chords with inversions (Guitar and Piano pipelines), starts within ±20 ms of the strums, confirmed 0.40 s after the attack, V7→I6 imperfect and V→I perfect authentic cadences, chart and numerals exact, 8 bars engraved |
-| Live loopback, voice (13 notes, vibrato ±15 ¢, chromatic passing tone) | 13/13 pitches at +2…+3 ¢, D–D♭–C spelled by direction, stable-note latency median 50 ms; legato note changes start ≈ 28 ms late (first note after silence exact); score rhythm exact after quantization |
+| Live loopback, voice (13 notes, vibrato ±15 ¢, chromatic passing tone) | 13/13 pitches at +2…+3 ¢, D–D♭–C spelled by direction, stable-note latency median 50 ms; legato note changes started ≈ 28 ms late (now +4…+9 ms; first note after silence exact); score rhythm exact after quantization |
 | Band mix, before → after (offline, `dz_wav`) | live confirmed chord correct 72.3 → 80.0 % of the time, wrong confirmations 15 → 6, matcher frames 50 → 76 %; take labels 91 %. Stems after: guitar 95 %, guitar + voice 87 % (take 94 %), guitar + bass 94 %, guitar + drums 96 %; clean plucked guitar unchanged at 99.5 % |
 | Band mix, live loopback (engine, `tools/loopback`) | take labels 86 % correct |
 | Tempo heard, synthetic | within 2 BPM at 72/92/120/150 (10 % missing attacks, ±12 ms timing), eighth-note strumming at 92 → 92; beat phase within 30 ms |
