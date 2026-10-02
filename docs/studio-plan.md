@@ -154,9 +154,18 @@ this order because each stage needs the one before it, as in a studio.
 - Every change reports before → after on the corpus; numbers in
   `docs/IMPLEMENTATION.md`, as for LIVE.
 
-## Open decisions
+## Reliable in any environment (decision 2026-10-02)
 
-1. Separation default: 4 stems (better quality) or 6 (guitar / piano tracks,
-   weaker on guitar)? Proposal: 4 by default, 6 as an option.
-2. Guitar delivery: chord symbols only, or also tablature later?
-3. Hardware: CPU only (portable, slow) or optional GPU later?
+Everything beyond the base is optional and used when it is available and the
+take needs it; STUDIO always works with what the machine has:
+- Base, always present: library, playback, editing, channel strip, the
+  offline analysis of the mix as one channel, review, score and export.
+- Separation: used when its weights are installed (downloaded on demand,
+  checksum-pinned); 4 or 6 stems chosen per take. Without it the mix is one
+  channel.
+- Acceleration: CPU always; a GPU backend only when present and measured to
+  agree with the CPU result.
+- Optional outputs (guitar tablature, Verovio engraving, VST3 inserts) appear
+  only when their component is there; missing ones say why, never fail.
+- Each optional piece reports itself (present / missing / failed) in the
+  STUDIO status line, and a take records which ones produced its result.
