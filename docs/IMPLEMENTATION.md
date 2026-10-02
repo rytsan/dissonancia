@@ -252,6 +252,15 @@ notes, a sung melody with passing and neighbour tones, kick/snare/hi-hat),
   TRANSPORT shows "HEARD TEMPO". No estimate when the last 2 s are silent.
 - Voice and chords are separate pipelines: a mono mode runs only the YIN
   note pipeline, a chord mode only the CQT front end, matcher and tracker.
+- Clef "Auto" (default for voice and melody): by the median of the notes,
+  below E3 the bass clef, below C4 treble 8vb (read an octave up), else
+  treble; 2 semitones of hysteresis at each boundary. LIVE follows the last
+  16 notes; the SCORE uses the take's own range. The core then names notes
+  as sounding (Treble), and the app shifts them for the clef shown. Guitar
+  stays treble 8vb, piano the grand staff. The B2–D4 voice take of
+  2026-10-02 (median G3) now engraves in treble 8vb instead of on ledger
+  lines below the treble staff.
+- `DISSONANCIA_TAKES` overrides the takes folder (tools, tests).
 
 ### GUI (prototype, C# / Avalonia 12.1, .NET 10)
 - START: mode, quality, key cascade, clef, meter, BPM, count-in, audio

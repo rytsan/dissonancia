@@ -267,7 +267,7 @@ public sealed class NativeCore : IDisposable
         var cfg = new SessionConfigNative
         {
             Mode = (byte)s.Mode, Quality = (byte)s.Quality, KeySet = (byte)(s.KeySet ? 1 : 0), KeyFifths = (sbyte)s.Key.Fifths,
-            ReferenceA4 = 440, KeyMode = (byte)(s.Key.Minor ? 1 : 0), Clef = (byte)s.Clef,
+            ReferenceA4 = 440, KeyMode = (byte)(s.Key.Minor ? 1 : 0), Clef = (byte)s.CoreClef,
             MeterNumerator = (byte)s.BeatsPerBar, MeterDenominator = (byte)s.BeatUnit, Bpm = s.Bpm,
             Metronome = 1, CountInBars = (byte)s.CountInBars, GuitarStringCount = 6,
         };
@@ -346,7 +346,7 @@ public sealed class NativeLiveSource : ILiveSource
         // Pitch (M1). Chords arrive with M3: until then the chord LCD stays empty.
         ref readonly var n = ref _snap.Note;
         f.NoteValid = n.Valid != 0;
-        if (f.NoteValid) f.Note = new Pitch(n.Letter, n.Alter, n.WrittenOctave - _session.Clef.OctaveShift());   // GUI holds sounding pitch
+        if (f.NoteValid) f.Note = new Pitch(n.Letter, n.Alter, n.WrittenOctave - _session.CoreClef.OctaveShift());   // GUI holds sounding pitch
         f.Hz = _snap.Pitch.Voiced != 0 ? _snap.Pitch.FrequencyHz : 0;
         f.Cents = f.NoteValid ? n.Cents : 0;
         f.NoteLatencyMs = _snap.NoteLatencyMs;
@@ -374,7 +374,7 @@ public sealed class NativeLiveSource : ILiveSource
         f.BassValid = b.Valid != 0;
         f.BassSettled = b.Settled != 0;
         f.BassSettleRemainingMs = b.SettleRemainingMs;
-        if (f.BassValid) f.Bass = new Pitch(b.Letter, b.Alter, b.WrittenOctave - _session.Clef.OctaveShift());
+        if (f.BassValid) f.Bass = new Pitch(b.Letter, b.Alter, b.WrittenOctave - _session.CoreClef.OctaveShift());
         fixed (byte* cs = _snap.ConfirmedSymbol) f.DisplayChord = _confirmed.Get(cs, 16, Display);
         f.CandidateChord = !f.ChordConfirmed && f.ChordSymbol.Length > 0 && f.ChordConfirmElapsedMs >= 120 ? f.ChordSymbol : "";
         if (f.DisplayChord.Length == 0) f.DisplayChord = f.CandidateChord;   // nothing confirmed yet: the candidate, dimmed

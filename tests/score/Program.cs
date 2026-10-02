@@ -23,6 +23,18 @@ Check(Score.Build(T((0.0, 0.3, "C4")), 8).Step == 6 && Score.Build(T((0.0, 0.3, 
 var t68 = T((0.0, 0.25, "C4")); t68.BeatsPerBar = 6; t68.BeatUnit = 8;
 Check(Score.Build(t68).Step == 6, "default 6/8 grid is the eighth");
 
+// Clef "Auto" by range: the male voice of the 2026-10-02 take (B2-D4, median G3) is read an octave
+// up in treble 8vb, a bass line (E2-C3) gets the bass clef, a soprano line treble; hysteresis keeps
+// the clef near a boundary.
+List<int> M(params string[] names) => names.Select(n => Take.ParseName(n).Midi).ToList();
+Check(Theory.ClefForRange(M("B2", "Bb2", "C3", "B2", "A2", "C#3", "D3", "D#3", "E3", "F3", "G3", "Gb3", "G3", "G#3", "A3", "C4", "B3", "D4", "Db4", "B3", "Bb3", "B3", "Bb3")) == Clef.Treble8vb,
+      "auto clef: the B2-D4 voice take -> treble 8vb");
+Check(Theory.ClefForRange(M("E2", "G2", "A2", "C3", "B2", "A2", "G2", "E2")) == Clef.Bass, "auto clef: E2-C3 -> bass");
+Check(Theory.ClefForRange(M("C3", "E3", "G3", "A3", "C4", "D4", "E4", "G3", "F3")) == Clef.Treble8vb, "auto clef: tenor -> treble 8vb");
+Check(Theory.ClefForRange(M("D4", "G4", "A4", "B4", "C5", "D5", "A4")) == Clef.Treble, "auto clef: soprano -> treble");
+Check(Theory.ClefForRange(M("D3", "E3", "D3"), Clef.Treble8vb) == Clef.Treble8vb && Theory.ClefForRange(M("C3", "D3", "C3"), Clef.Treble8vb) == Clef.Bass,
+      "auto clef: hysteresis at E3 (D3 stays treble 8vb, C3 goes to bass)");
+
 // Crossing the bar line: beat 4 to beat 2 of the next bar -> tied quarters.
 var s1 = B(T((1.5, 2.5, "C4")));
 Check(Durs(s1.Measures[0]) == "r36 n12~" && Durs(s1.Measures[1]) == "n12 r12 r24", $"bar line tie: {Durs(s1.Measures[0])} | {Durs(s1.Measures[1])}");

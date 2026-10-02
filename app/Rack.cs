@@ -364,7 +364,7 @@ public sealed class LcdModule : RackModule
 
         // Lower line (chord modes): bass, spelled and clef-shifted.
         bool valid = f.BassValid;
-        var written = f.Bass.WithOctaveShift(Session.Clef.OctaveShift());
+        var written = f.Bass.WithOctaveShift(Session.DisplayClef.OctaveShift());
         double y = split + 2, noteDot = 4.2;
         Plasma.Text(ctx, "BASS", inner.X, y, 10, false, Ui.SansBold);
         Plasma.DotText(ctx, valid ? written.Name : "", inner.X, y + 16, noteDot, cells: 4);
@@ -373,21 +373,21 @@ public sealed class LcdModule : RackModule
         Plasma.Text(ctx, f.BassSettled ? "settled" : f.BassSettleRemainingMs > 0 ? $"settling {f.BassSettleRemainingMs:0} ms" : "settling",
             infoX + 18, y + 18, 13, f.BassSettled, Ui.Mono);
         Plasma.Text(ctx, valid ? $"{f.Bass.Hz():0.0} Hz" : "— Hz", infoX, y + 40, 13, false);
-        if (Session.Clef == Clef.Treble8vb) Plasma.Text(ctx, "written 8vb", inner.X, y + 22 + noteDot * 1.3 * 7, 10, false);
+        if (Session.DisplayClef == Clef.Treble8vb) Plasma.Text(ctx, "written 8vb", inner.X, y + 22 + noteDot * 1.3 * 7, 10, false);
         if (Session.GrandStaff) DrawGrandStaff(ctx, new Rect(inner.Right - 170, y + 2, 170, Math.Max(80, inner.Bottom - y - 4)), f.Bass, valid);
-        else DrawStaff(ctx, new Rect(inner.Right - 160, y + 10, 160, 56), Session.Clef, written, valid);
+        else DrawStaff(ctx, new Rect(inner.Right - 160, y + 10, 160, 56), Session.DisplayClef, written, valid);
     }
 
     /// Mono modes: the whole display is the note — big spelled name, staff, full-width cents meter.
     void DrawNoteScreen(DrawingContext ctx, Rect inner, LiveFrame f)
     {
-        var written = f.Note.WithOctaveShift(Session.Clef.OctaveShift());
+        var written = f.Note.WithOctaveShift(Session.DisplayClef.OctaveShift());
         double staffW = Math.Min(230, inner.Width * 0.38);
         double dot = Math.Min((inner.Width - staffW - 24) / (4 * 6 * 1.3), (inner.Height * 0.5) / (7 * 1.3));
         double noteH = dot * 1.3 * 7;
         Plasma.Text(ctx, "NOTE", inner.X, inner.Y, 10, false, Ui.SansBold);
         Plasma.DotText(ctx, f.NoteValid ? written.Name : "", inner.X, inner.Y + 16, dot, cells: 4);
-        DrawStaff(ctx, new Rect(inner.Right - staffW, inner.Y + 10, staffW, noteH + 6), Session.Clef, written, f.NoteValid);
+        DrawStaff(ctx, new Rect(inner.Right - staffW, inner.Y + 10, staffW, noteH + 6), Session.DisplayClef, written, f.NoteValid);
 
         double y = inner.Y + 16 + noteH + 22;
         var meter = new Rect(inner.X, y, inner.Width, 34);
@@ -399,7 +399,7 @@ public sealed class LcdModule : RackModule
         Plasma.Text(ctx, f.NoteValid ? $"{f.Cents:+0;-0} ¢" : "— ¢", inner.X, ty, 20);
         Plasma.Text(ctx, f.NoteValid ? $"{f.Hz:0.0} Hz" : "— Hz", inner.X + inner.Width * 0.36, ty, 20);
         Plasma.Text(ctx, Ui.Ms(f.NoteLatencyMs), inner.Right, ty, 20, true, Ui.Mono, Ui.Align.Right);
-        if (Session.Clef == Clef.Treble8vb) Plasma.Text(ctx, "written 8vb", inner.X + inner.Width * 0.36, inner.Y, 10, false);
+        if (Session.DisplayClef == Clef.Treble8vb) Plasma.Text(ctx, "written 8vb", inner.X + inner.Width * 0.36, inner.Y, 10, false);
     }
 
     static void DrawCents(DrawingContext ctx, Rect r, float cents, bool valid)
@@ -616,7 +616,7 @@ public sealed class StageView : RackModule
         Plasma.Panel(ctx, r, ref _grid, ref _gridSize);
         double h = r.Height;
         bool chords = Session.IsChordMode;
-        var p = (chords ? f.Bass : f.Note).WithOctaveShift(Session.Clef.OctaveShift());
+        var p = (chords ? f.Bass : f.Note).WithOctaveShift(Session.DisplayClef.OctaveShift());
 
         // Big dot-matrix readout, centred: chord (7 cells) or note (4 cells).
         int cells = chords ? 7 : 4;

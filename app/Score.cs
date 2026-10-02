@@ -29,6 +29,7 @@ public sealed class Take
     {
         get
         {
+            if (Environment.GetEnvironmentVariable("DISSONANCIA_TAKES") is { Length: > 0 } dir) return dir;   // tools and tests
             var music = Environment.GetFolderPath(Environment.SpecialFolder.MyMusic);   // "" when the folder does not exist
             return System.IO.Path.Combine(music.Length > 0 ? music : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Dissonancia");
         }

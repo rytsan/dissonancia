@@ -10,7 +10,7 @@ var w = new MainWindow();
 double t = double.Parse(args[3], System.Globalization.CultureInfo.InvariantCulture);
 w.Clock = () => t;
 var mode = Enum.Parse<AppMode>(args[2]);
-w.SetMode(mode, mode == AppMode.GuitarChords ? Clef.Treble8vb : Clef.Treble);
+w.SetMode(mode, mode == AppMode.GuitarChords ? Clef.Treble8vb : mode is AppMode.VoiceMono or AppMode.InstrumentMono ? null : Clef.Treble);   // voice / melody: Auto
 w.Show();
 w.SelectTab(int.Parse(args[1]));
 for (int i = 0; i < 40; i++)   // 2 s of frames so meters, scope and waterfall fill

@@ -142,6 +142,9 @@ public sealed class MainWindow : Window
     /// START (spec §5): options are fixed for the session; a new START replaces the running session.
     void StartSession()
     {
+        _recentNotes.Clear();
+        _lastNote = -1;
+        _session.ShownClef = Clef.Treble;
         if (_core is not null)
         {
             try
@@ -165,6 +168,23 @@ public sealed class MainWindow : Window
     {
         if (_rack.Mode != _session.Mode) _rack.Load(_session.Mode);
         _rack.SetLocked(_frame.Recording || _frame.CountingIn);
+        FollowClef();
+    }
+
+    // Clef "Auto": the last 16 notes (or bass notes in chord modes) decide, with hysteresis.
+    readonly List<int> _recentNotes = [];
+    int _lastNote = -1;
+
+    void FollowClef()
+    {
+        if (!_session.AutoClef) return;
+        bool valid = _session.IsChordMode ? _frame.BassValid && _frame.BassSettled : _frame.NoteValid;
+        int midi = valid ? (_session.IsChordMode ? _frame.Bass : _frame.Note).Midi : -1;
+        if (midi < 0 || midi == _lastNote) { if (midi < 0) _lastNote = -1; return; }
+        _lastNote = midi;
+        _recentNotes.Add(midi);
+        if (_recentNotes.Count > 16) _recentNotes.RemoveAt(0);
+        if (_recentNotes.Count >= 4) _session.ShownClef = Theory.ClefForRange(_recentNotes, _session.ShownClef);
     }
 
     /// Tap tempo (spec §22.6): mean interval of the last taps (up to 5, reset after a 2 s pause); not during REC.
@@ -184,7 +204,7 @@ public sealed class MainWindow : Window
     public void Step(double now) { _source.Read(_frame, now); SyncRack(); foreach (var m in _modules) m.InvalidateVisual(); _rack.CountIn.InvalidateVisual(); }
     public void Action(string name) => _actions[name]();
     public void SelectTab(int index) => _tabs.SelectedIndex = index;
-    public void SetMode(AppMode mode, Clef clef) { _session.Mode = mode; _session.Clef = clef; }
+    public void SetMode(AppMode mode, Clef? clef) { _session.Mode = mode; _session.AutoClef = clef is null; _session.Clef = clef ?? Clef.Treble; }
     public void ToggleRec(double now) => _source.ToggleRec(now);
 
     protected override void OnKeyDown(KeyEventArgs e)
@@ -212,14 +232,16 @@ public sealed class MainWindow : Window
         {
             try
             {
-                _score = Score.Build(Take.Load(path), _session.SmallestNote, _session.Triplets);
+                var take = Take.Load(path);
+                if (_session.AutoClef) take.Clef = Theory.ClefForRange(take.Notes.Select(n => n.Midi).ToList());   // the take's own range
+                _score = Score.Build(take, _session.SmallestNote, _session.Triplets);
                 var t = _score.Take;
                 var key = new KeyOption(t.KeyFifths, t.Minor);
                 string cadences = string.Join("\n", t.Cadences.Select(c => $"  {Display(c.From, true)} → {Display(c.To, true)}   {c.Evidence}   {c.Confidence:0.00}"));
                 _scoreTitle.Text = $"{Path.GetFileNameWithoutExtension(path)}  ·  {_score.Measures.Count} bars · {_score.QuantizedNotes.Count} notes · " +
                                    $"{_score.QuantizedChords.Count} chords{(t.EventLogComplete ? "" : "  ·  EVENT LOG INCOMPLETE")}";
                 _scoreText.Text = $"{(t.KeySet ? key.Label : "no key")}   ·   {t.BeatsPerBar}/{t.BeatUnit}   ·   ♩ = {t.Bpm:0}   ·   " +
-                                  $"smallest value {NoteValueName(Score.Divisions * 4 / _score.Step)}{(_session.Triplets ? " + triplets" : "")} (START → NOTATION)\n\n" +
+                                  $"clef {t.Clef.Name()}{(_session.AutoClef ? " (auto)" : "")}   ·   smallest value {NoteValueName(Score.Divisions * 4 / _score.Step)}{(_session.Triplets ? " + triplets" : "")}\n\n" +
                                   Display(_score.ChordChart()) + (_score.RomanLine().Length > 0 ? "\n\n" + Display(_score.RomanLine(), roman: true) : "") +
                                   (cadences.Length > 0 ? "\n\ncadences\n" + cadences : "") +
                                   (_score.QuantizedNotes.Count > 0 ? "\n\n" + string.Join("  ", _score.QuantizedNotes.Select(n => n.Note.Sounding.Name)) : "");
@@ -317,13 +339,20 @@ public sealed class MainWindow : Window
         var root = new StackPanel { Margin = new Thickness(24), Spacing = 18, MaxWidth = 1100, HorizontalAlignment = HorizontalAlignment.Left };
 
         // Mode buttons
-        var modes = new (AppMode Mode, string Label, Clef Clef)[]
+        // Clef per mode: voice and melody follow their range (Auto); guitar sounds an octave below
+        // what is written (treble 8vb); piano uses the grand staff.
+        var modes = new (AppMode Mode, string Label, Clef? Clef)[]
         {
-            (AppMode.VoiceMono, "🎤  Voice", Clef.Treble), (AppMode.InstrumentMono, "🎷  Instrument melody", Clef.Treble),
+            (AppMode.VoiceMono, "🎤  Voice", null), (AppMode.InstrumentMono, "🎷  Instrument melody", null),
             (AppMode.GuitarChords, "🎸  Guitar chords", Clef.Treble8vb), (AppMode.PianoChords, "🎹  Piano chords", Clef.Treble),
             (AppMode.GeneralChords, "🎼  General chords", Clef.Treble),
         };
-        var clefBox = new ComboBox { ItemsSource = Enum.GetValues<Clef>().Select(c => c.Name()).ToArray(), SelectedIndex = (int)_session.Clef, Width = 180 };
+        // Item 0 = Auto (by range), then the clefs in enum order.
+        var clefBox = new ComboBox
+        {
+            ItemsSource = new[] { "Auto (by range)" }.Concat(Enum.GetValues<Clef>().Select(c => c.Name())).ToArray(),
+            SelectedIndex = _session.AutoClef ? 0 : (int)_session.Clef + 1, Width = 180,
+        };
         var clefNote = new TextBlock { Text = "piano: grand staff (split at C4)", Foreground = Ui.Label, VerticalAlignment = VerticalAlignment.Center };
         void ClefForMode() { clefBox.IsEnabled = !_session.GrandStaff; clefNote.IsVisible = _session.GrandStaff; }
         ClefForMode();
@@ -336,7 +365,7 @@ public sealed class MainWindow : Window
             {
                 _session.Mode = mode;
                 foreach (var o in modeButtons) o.IsChecked = o == b;
-                clefBox.SelectedIndex = (int)clef;           // default clef per mode, user can change (not on piano)
+                clefBox.SelectedIndex = clef is { } c ? (int)c + 1 : 0;   // default clef per mode, user can change (not on piano)
                 ClefForMode();
             };
             modeButtons.Add(b);
@@ -366,7 +395,11 @@ public sealed class MainWindow : Window
             keyBox.SelectedItem = keys.First(k => k.Fifths == f);
         };
         keyBox.SelectionChanged += (_, _) => { if (keyBox.SelectedItem is KeyOption k) _session.Key = k; };
-        clefBox.SelectionChanged += (_, _) => _session.Clef = (Clef)Math.Max(0, clefBox.SelectedIndex);
+        clefBox.SelectionChanged += (_, _) =>
+        {
+            _session.AutoClef = clefBox.SelectedIndex <= 0;
+            if (!_session.AutoClef) _session.Clef = (Clef)(clefBox.SelectedIndex - 1);
+        };
         var useKey = new CheckBox { Content = "Key signature", IsChecked = _session.KeySet };
         void KeyEnabled() { modeBox.IsEnabled = keyBox.IsEnabled = _session.KeySet; }
         useKey.IsCheckedChanged += (_, _) => { _session.KeySet = useKey.IsChecked == true; KeyEnabled(); };

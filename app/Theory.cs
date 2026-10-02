@@ -51,6 +51,17 @@ public static class Theory
         Clef.Alto => "Alto", _ => "Tenor",
     };
 
+    /// Clef "Auto": by the median of the notes — below E3 the bass clef, below C4 treble 8vb (read an
+    /// octave up, tenor), else treble. current: the clef shown now; switching away from it needs the
+    /// median 2 semitones past the boundary (no flapping around E3 or C4).
+    public static Clef ClefForRange(IReadOnlyCollection<int> midis, Clef? current = null)
+    {
+        if (midis.Count == 0) return current ?? Clef.Treble;
+        int median = midis.Order().ElementAt(midis.Count / 2);
+        int Edge(int boundary, Clef above) => current is null ? boundary : current == above ? boundary - 2 : boundary + 2;
+        return median < Edge(52, Clef.Treble8vb) ? Clef.Bass : median < Edge(60, Clef.Treble) ? Clef.Treble8vb : Clef.Treble;
+    }
+
     /// Written octave shift applied to sounding pitch (Treble 8vb: written one octave above).
     public static int OctaveShift(this Clef c) => c == Clef.Treble8vb ? 1 : 0;
 

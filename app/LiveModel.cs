@@ -10,6 +10,11 @@ public sealed class Session
     public bool KeySet;
     public KeyOption Key = new(0, false);
     public Clef Clef = Clef.Treble8vb;
+    // Clef "Auto" (default in voice / melody modes): the clef follows the range sung or played.
+    public bool AutoClef;
+    public Clef ShownClef = Clef.Treble;            // live choice while AutoClef (set by the window)
+    public Clef CoreClef => AutoClef ? Clef.Treble : Clef;      // the core names notes as sounding
+    public Clef DisplayClef => AutoClef ? ShownClef : Clef;
     public int BeatsPerBar = 4, BeatUnit = 4;
     public float Bpm = 92;
     public int CountInBars = 1;
