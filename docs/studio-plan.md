@@ -28,6 +28,35 @@ take is never modified (edits are a list, outputs are cached); every result
 carries a confidence and the UI never presents it as certain; key and meter
 are the user's (STUDIO may suggest, never applies by itself).
 
+## Layout: a mixing console (decision 2026-10-02)
+
+STUDIO looks and works like LIVE's rack, as a mixing desk. Mockup:
+https://claude.ai/artifact/1cES4MCBM9otq1qSVa3ed5 (three screens).
+
+1. **Desk (overview):** stage bar (Library · Edit · Desk · Analyse ·
+   Review → Score), library on the left, track timeline on top
+   (non-destructive trim / cut / fades / normalize across all tracks), the
+   console below. One channel strip per track: the original mix, then
+   one per separated stem (voice, guitar, bass, drums, other), plus master.
+   Per strip: source and separation confidence, insert slots, analysis type
+   (notes / chords / bass / beats / off), staff assignment, pan, mute / solo,
+   meter, fader.
+2. **Channel:** the strip's insert chain as rack modules, in order and
+   reorderable (high-pass, parametric EQ with its curve over the stem's
+   spectrum, noise gate, + insert; VST3 later), ending in the channel's
+   analysis module (type, resolution, vocabulary, whole-take decoding) with
+   a preview of its result. Listening, export and analysis use the same
+   chain; re-running one stage re-runs only it and what follows.
+3. **Analysis and review:** one lane per channel on the bar grid (voice
+   piano roll, chord lane with confidences, bass notes, beats), click to
+   correct; a side panel where the user sets key (none by default), meter,
+   tempo and quantization — STUDIO only suggests — and a list of low-
+   confidence spots to review, then "Generate score".
+
+The milestones below map onto it: S1 library + analysis lanes, S2 the
+timeline editing, S3 the insert modules, S4 the stem channels, S5 the
+per-channel analysis, S6 the review panel, S7 the score.
+
 ## Milestones
 
 Each one compiles, tests and measures, and is usable on its own.
