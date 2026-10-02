@@ -261,6 +261,10 @@ notes, a sung melody with passing and neighbour tones, kick/snare/hi-hat),
   2026-10-02 (median G3) now engraves in treble 8vb instead of on ledger
   lines below the treble staff.
 - `DISSONANCIA_TAKES` overrides the takes folder (tools, tests).
+- Flow (decision 2026-10-02): LIVE → STUDIO → SCORE. TRANSPORT's button goes
+  to STUDIO; the score is made from the take treated there (normalize, trim,
+  EQ, Demucs separation). STUDIO is not built yet: it offers a SCORE preview
+  of the raw take.
 
 ### GUI (prototype, C# / Avalonia 12.1, .NET 10)
 - START: mode, quality, key cascade, clef, meter, BPM, count-in, audio

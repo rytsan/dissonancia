@@ -50,7 +50,7 @@ public sealed class MainWindow : Window
     };
     readonly List<double> _taps = [];
     readonly TabControl _tabs = new();
-    readonly TabItem _liveTab, _scoreTab;
+    readonly TabItem _liveTab, _studioTab, _scoreTab;
     readonly RackView _rack;
     readonly StageView _stage = new();
     readonly TextBlock _scoreTitle = new() { FontWeight = FontWeight.Bold, Foreground = Ui.Label };
@@ -101,21 +101,22 @@ public sealed class MainWindow : Window
             ["LeaveStage"] = () => SetStage(false),
             ["EditRack"] = _rack.ToggleEdit,
             ["Score"] = ShowScore,
+            ["Studio"] = () => _tabs.SelectedItem = _studioTab,
             ["ScopeTrigger"] = ((ScopeModule)catalog[ModuleKind.Scope]).ToggleTrigger,
         };
         transport.RecPressed += _actions["Rec"];
         transport.MetronomePressed += _actions["Metronome"];
         transport.TapPressed += _actions["TapTempo"];
-        transport.ScorePressed += _actions["Score"];
+        transport.StudioPressed += _actions["Studio"];
 
         _liveTab = new TabItem { Header = "LIVE", Content = _rack };
         _scoreTab = new TabItem { Header = "SCORE", Content = BuildScoreTab() };
+        _studioTab = new TabItem { Header = "STUDIO", Content = BuildStudioTab() };
         _tabs.ItemsSource = new[]
         {
             new TabItem { Header = "START", Content = new ScrollViewer { Content = BuildStartTab() } },
             _liveTab,
-            new TabItem { Header = "STUDIO", Content = Placeholder("STUDIO — v1.x",
-                "Library (REC takes + imported WAV/FLAC/MP3/OGG) · editor · multitrack stems · effects · separation (Demucs) · choir SATB · full reprocessing (stages 0–4).") },
+            _studioTab,
             _scoreTab,
         };
         Content = _tabs;
@@ -319,6 +320,30 @@ public sealed class MainWindow : Window
             },
         },
     } };
+
+    // STUDIO (spec §20, not built yet): where a REC take is treated before notation. The SCORE is
+    // made from the treated take; until STUDIO exists, the raw take can be previewed.
+    Control BuildStudioTab()
+    {
+        var preview = new Button { Content = "SCORE from the raw take (preview)", Height = 36 };
+        preview.Click += (_, _) => ShowScore();
+        return new Border
+        {
+            Margin = new Thickness(16), Padding = new Thickness(24), Background = Ui.Face, CornerRadius = new CornerRadius(6),
+            Child = new StackPanel
+            {
+                Spacing = 12,
+                Children =
+                {
+                    new TextBlock { Text = "STUDIO — v1.x", FontSize = 22, FontWeight = FontWeight.Bold },
+                    new TextBlock { Text = "REC take → normalize · trim / cut · EQ · source separation (Demucs: voice, guitar, bass, drums) · choir SATB · full reprocessing (stages 0–4) → SCORE (notation, export).", TextWrapping = TextWrapping.Wrap, Foreground = Ui.Label },
+                    new TextBlock { Text = "Library: REC takes and imported WAV / FLAC / MP3 / OGG.", Foreground = Ui.Label },
+                    new TextBlock { Text = "The score is made from the treated take, not from the raw recording. Not built yet:", Foreground = Ui.LabelBright },
+                    preview,
+                },
+            },
+        };
+    }
 
     static Control Placeholder(string title, string text) => new Border
     {

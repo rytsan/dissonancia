@@ -40,11 +40,11 @@ rate, buffer size, metronome output, latency calibration) — section 22.
    additionally saves a take for post-processing. Recording never changes the
    live pipeline; the take appears in the STUDIO library when REC stops.
    REC requires the metronome with count-in (bars come from its grid).
-6. LIVE → score / chord chart (fast path): the confirmed LIVE events (notes,
-   chords) of a REC take — or of the last N bars without REC — are sent
-   directly to STUDIO stages 5–8 (theory, rhythm, score, export) with NO audio
-   reprocessing. Result in seconds: lead sheet, chord chart (`| C | G | Am |`),
-   MusicXML/MIDI. "Refine from audio" re-runs the full STUDIO pipeline later.
+6. LIVE → STUDIO (decision 2026-10-02): a REC take goes to STUDIO, where it
+   is treated (normalize, trim / cut, EQ, source separation with Demucs) before
+   any notation; the SCORE is made from the treated take, never from the raw
+   recording. Until STUDIO exists, the raw take's LIVE events can be previewed
+   in SCORE (marked as a preview).
 The LIVE layer NEVER renders a score, never runs Verovio, never writes files,
 never separates sources. It offers only the fixed modes of section 5.
 
@@ -61,7 +61,7 @@ goal = accuracy and options):
 **SCORE tab = POST layer, notation side** (stages 5–8): key/mode, meter
 (default 4/4), ties across bar lines, accidental policy, clefs, transposition,
 melody score, chord chart, Roman numerals, cadences, score view,
-MusicXML/MIDI/JSON/text export. Input: LIVE fast path or STUDIO.
+MusicXML/MIDI/JSON/text export. Input: the STUDIO-treated take (raw-take preview until STUDIO exists).
 
 POST has no latency budget beyond "responsive UI"; it may be slow and allocate.
 

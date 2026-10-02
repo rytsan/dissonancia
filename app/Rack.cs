@@ -507,20 +507,20 @@ public sealed class TimelineModule : RackModule
     }
 }
 
-/// Transport: REC, 7-segment time counter, BPM + beat LEDs, metronome / count-in switches, → SCORE.
+/// Transport: REC, 7-segment time counter, BPM + beat LEDs, metronome / count-in switches, → STUDIO.
 public sealed class TransportModule : RackModule
 {
     public TransportModule() { Title = "TRANSPORT"; }
 
-    public event Action? RecPressed, MetronomePressed, ScorePressed, TapPressed;
-    Rect _rec, _metro, _score, _tap;
+    public event Action? RecPressed, MetronomePressed, StudioPressed, TapPressed;
+    Rect _rec, _metro, _studio, _tap;
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         var p = e.GetPosition(this);
         if (_rec.Contains(p)) RecPressed?.Invoke();
         else if (_metro.Contains(p)) MetronomePressed?.Invoke();
-        else if (_score.Contains(p)) ScorePressed?.Invoke();
+        else if (_studio.Contains(p)) StudioPressed?.Invoke();
         else if (_tap.Contains(p)) TapPressed?.Invoke();
     }
 
@@ -571,10 +571,10 @@ public sealed class TransportModule : RackModule
         string heard = f.DetectedBpm > 0 ? $"♩≈{f.DetectedBpm:0}  ({f.TempoConfidence:0.00})  ·  beat marks on the scope" : "listening…";
         Ui.Text(ctx, $"HEARD TEMPO  {heard}", r.X + 90, r.Y - 16, 10, Ui.Label, Ui.SansBold);
 
-        // → SCORE
-        _score = new Rect(r.Right - 110, cy - 18, 110, 36);
-        ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF1D3A2A)), new ImmutablePen(Ui.Green as IImmutableBrush, 1.2), _score, 4, 4);
-        Ui.Text(ctx, "→ SCORE", _score.Center.X, _score.Center.Y - 9, 14, Ui.Green, Ui.SansBold, Ui.Align.Center);
+        // → STUDIO (the take is treated there before any score)
+        _studio = new Rect(r.Right - 110, cy - 18, 110, 36);
+        ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF1D3A2A)), new ImmutablePen(Ui.Green as IImmutableBrush, 1.2), _studio, 4, 4);
+        Ui.Text(ctx, "→ STUDIO", _studio.Center.X, _studio.Center.Y - 9, 14, Ui.Green, Ui.SansBold, Ui.Align.Center);
     }
 
     static void DrawSwitch(DrawingContext ctx, Rect r, bool on, string label)
