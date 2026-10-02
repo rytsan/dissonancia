@@ -218,3 +218,32 @@ TEST_CASE("instrument in Treble 8vb: sounding E2 is written E3") {
     auto r = run(render({{-1, 0.2}, {40, 0.6}, {-1, 0.3}}), voice_session(AnalysisMode::InstrumentMono, 1, Clef::Treble8vb), AudioQuality::Balanced);
     CHECK(names(r) == "E3 ");
 }
+
+TEST_CASE("YIN: alternating-period amplitude (decay, breathiness) is not read an octave down") {
+    // Every other period 50% quieter: the dip at the double period beats the threshold first.
+    const double fs = 16000, f = 220;
+    std::vector<float> x(800);
+    for (size_t i = 0; i < x.size(); i++) {
+        double ph = 2 * kPi * f * double(i) / fs;
+        double g = std::fmod(ph / (2 * kPi), 2.0) < 1 ? 0.5 : 1.0;
+        x[i] = float(g * (std::sin(ph) + 0.5 * std::sin(2 * ph) + 0.25 * std::sin(3 * ph)));
+    }
+    Yin plain, guarded;
+    plain.init(fs, 800, 70, 1200);
+    guarded.init(fs, 800, 70, 1200, 0.15f, 0.25f);
+    float c = 0;
+    CHECK(plain.estimate(x.data(), c) == Approx(110).epsilon(0.01));   // the failure the guard exists for
+    CHECK(guarded.estimate(x.data(), c) == Approx(220).epsilon(0.01));
+}
+
+TEST_CASE("voice pipeline: a note after an unvoiced gap above the gate starts at its own onset") {
+    // A4, 0.3 s of breath noise (above the -50 dBFS gate, unvoiced), C5.
+    auto x = render({{-1, 0.2}, {69, 0.4}, {-1, 0.3}, {72, 0.4}, {-1, 0.3}});
+    std::mt19937 rng(3);
+    std::normal_distribution<float> noise(0, 0.03f);
+    for (size_t i = size_t(0.6 * kRate); i < size_t(0.9 * kRate); i++) x[i] += noise(rng);
+    auto notes = ended(run(x, voice_session(), AudioQuality::Balanced));
+    REQUIRE(notes.size() == 2);
+    CHECK(std::string(notes[1].writtenName) == "C5");
+    CHECK(notes[1].startTimeSeconds == Approx(0.9).margin(0.03));
+}

@@ -38,7 +38,8 @@ struct Biquad {
 // YIN over an unwindowed frame of `window` samples: lags up to rate/fMin, integration = window - maxLag.
 class Yin {
 public:
-    void init(double rate, uint32_t window, float fMin, float fMax, float threshold = 0.15f);
+    // halfThreshold > 0: prefer half the chosen lag when its CMND dip is below it (octave-down guard).
+    void init(double rate, uint32_t window, float fMin, float fMax, float threshold = 0.15f, float halfThreshold = 0);
     // Returns f0 in Hz, or 0 when unvoiced. clarity = 1 - CMND at the chosen lag.
     float estimate(const float* x, float& clarity);
     uint32_t window() const { return window_; }
@@ -46,7 +47,7 @@ public:
 private:
     double rate_ = 16000;
     uint32_t window_ = 0, tauMin_ = 2, tauMax_ = 0;
-    float threshold_ = 0.15f;
+    float threshold_ = 0.15f, halfThreshold_ = 0;
     std::vector<float> d_;
 };
 

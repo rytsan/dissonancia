@@ -64,8 +64,9 @@ void Biquad::highpass(double fc, double fs) {
 
 // ---------------------------------------------------------------- YIN
 
-void Yin::init(double rate, uint32_t window, float fMin, float fMax, float threshold) {
+void Yin::init(double rate, uint32_t window, float fMin, float fMax, float threshold, float halfThreshold) {
     rate_ = rate;
+    halfThreshold_ = halfThreshold;
     window_ = window;
     tauMax_ = std::min<uint32_t>(uint32_t(std::ceil(rate / fMin)) + 1, window / 2);
     tauMin_ = std::max<uint32_t>(2, uint32_t(rate / fMax));
@@ -99,6 +100,15 @@ float Yin::estimate(const float* x, float& clarity) {
         clarity = 1 - *std::min_element(d_.begin() + tauMin_, d_.begin() + tauMax_);
         return 0;
     }
+    // Octave-down guard: a decaying or breathy note can push the dip at the true period just over
+    // the threshold while the dip at twice the period stays under it. A clear dip at half the
+    // chosen lag means the chosen lag is that double period.
+    if (halfThreshold_ > 0 && best / 2 > tauMin_ + 1) {
+        uint32_t h = best / 2 - 1;
+        for (uint32_t k = h; k <= best / 2 + 1; k++)
+            if (d_[k] < d_[h]) h = k;
+        if (d_[h] < halfThreshold_) best = h;
+    }
     float a = d_[best - 1], b = d_[best], c = d_[best + 1];
     float den = a - 2 * b + c;
     float shift = den != 0 ? 0.5f * (a - c) / den : 0.f;
@@ -115,7 +125,7 @@ VoicePipeline::VoicePipeline(const SessionConfig& s, const LiveConfig& c, uint32
     delay_ = dec_.delay_native() / rate_;
     hp_.highpass(0.8 * c.fMin, liveRate_);
     const uint32_t window = uint32_t(std::lround(c.windowSeconds * liveRate_));
-    yin_.init(liveRate_, window, c.fMin, c.fMax);
+    yin_.init(liveRate_, window, c.fMin, c.fMax, 0.15f, 0.25f);
     windowNative_ = window * c.decimation;
     speller_.configure(s.keyFifths, s.keyMode);
     octaveShift_ = clef_octave_shift(s.clef);
@@ -222,6 +232,7 @@ void VoicePipeline::process(const float* x, uint32_t n, uint64_t endFrame, Voice
         if (unvoicedHops_ >= releaseHops_) { state_ = State::Silence; candMidi_ = -1; }
     } else {
         unvoicedHops_ = 0;
+        const uint64_t prevVoicedEnd = lastVoicedEnd_;
         lastVoicedEnd_ = endFrame;
         const bool holding = state_ != State::Silence && cur_.count > 0 && std::fabs(median - cur_.midi) < kHysteresisSemitones;
         if (holding) {
@@ -236,7 +247,9 @@ void VoicePipeline::process(const float* x, uint32_t n, uint64_t endFrame, Voice
                 candHops_ = 0;
                 // From silence the energy onset is sample-accurate to one hop; a pitch change
                 // is placed at the centre of the first window that showed it.
-                candStart_ = state_ == State::Silence ? energyOnset_ : endFrame - windowNative_ / 2;
+                // The energy onset counts only when it is newer than the last voiced hop: an unvoiced
+                // gap with the level still above the gate keeps the phrase's first onset.
+                candStart_ = state_ == State::Silence && energyOnset_ >= prevVoicedEnd ? energyOnset_ : endFrame - windowNative_ / 2;
                 if (state_ == State::Silence) state_ = State::Candidate;
             }
             if (++candHops_ >= minCandidateHops_) {
