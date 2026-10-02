@@ -153,9 +153,19 @@ unsafe struct LiveSnapshotNative
     public float ChordLatencyMs, ChordConfirmElapsedMs;
     public BassEstimateNative Bass;
     public double LastOnsetSeconds;
+    public ContextEstimateNative Context;
     public fixed float WaveMin[WaveColumns];
     public fixed float WaveMax[WaveColumns];
     public fixed float Scope[ScopeSamples];
+}
+
+[StructLayout(LayoutKind.Sequential)]
+struct ContextEstimateNative
+{
+    public float Bpm, TempoConfidence;
+    public sbyte KeyFifths;
+    public byte KeyMode, KeyValid, _pad0;
+    public float KeyConfidence;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -188,6 +198,7 @@ static partial class Ana
     [LibraryImport(Lib, EntryPoint = "ana_rec_start", StringMarshalling = StringMarshalling.Utf8)] public static partial int RecStart(nint h, string wavPath);
     [LibraryImport(Lib, EntryPoint = "ana_rec_stop")] public static partial int RecStop(nint h);
     [LibraryImport(Lib, EntryPoint = "ana_set_metronome")] public static partial int SetMetronome(nint h, byte on, float bpm, TimeSignatureNative meter);
+    [LibraryImport(Lib, EntryPoint = "ana_set_key")] public static partial int SetKey(nint h, sbyte fifths, byte mode);
     [LibraryImport(Lib, EntryPoint = "ana_clear_clip")] public static partial void ClearClip(nint h);
 
     public static string Error(nint h) => Marshal.PtrToStringUTF8(LastError(h)) ?? "";
@@ -261,7 +272,7 @@ public sealed class NativeCore : IDisposable
             Mode = (byte)s.Mode, Quality = (byte)s.Quality, KeySet = 1, KeyFifths = (sbyte)s.Key.Fifths,
             ReferenceA4 = 440, KeyMode = (byte)(s.Key.Minor ? 1 : 0), Clef = (byte)s.Clef,
             MeterNumerator = (byte)s.BeatsPerBar, MeterDenominator = (byte)s.BeatUnit, Bpm = s.Bpm,
-            Metronome = 1, CountInBars = (byte)s.CountInBars, GuitarStringCount = 6,
+            Metronome = (byte)(s.AutoTempo ? 0 : 1), CountInBars = (byte)s.CountInBars, GuitarStringCount = 6,
         };
         sbyte[] standard = [40, 45, 50, 55, 59, 64];
         unsafe { for (int i = 0; i < standard.Length; i++) cfg.GuitarOpenMidi[i] = standard[i]; }
@@ -323,6 +334,12 @@ public sealed class NativeLiveSource : ILiveSource
         f.CountingIn = _snap.CountingIn != 0;
         f.RecordedSeconds = _snap.RecordedSeconds;
         f.BarPhase = 0;
+        f.DetectedBpm = _snap.Context.Bpm;
+        f.TempoConfidence = _snap.Context.TempoConfidence;
+        f.DetectedKeyValid = _snap.Context.KeyValid != 0;
+        f.DetectedKeyFifths = _snap.Context.KeyFifths;
+        f.DetectedKeyMinor = _snap.Context.KeyMode != 0;
+        f.KeyConfidence = _snap.Context.KeyConfidence;
 
         f.CaptureMs = _snap.LatencyCaptureMs;
         f.ProcessingMs = _snap.LatencyProcessingMs;
@@ -426,6 +443,8 @@ public sealed class NativeLiveSource : ILiveSource
 
     public void ToggleMetronome() =>
         Check(Ana.SetMetronome(_h, (byte)(_metronome ? 0 : 1), _session.Bpm, new TimeSignatureNative { Numerator = (byte)_session.BeatsPerBar, Denominator = (byte)_session.BeatUnit }));
+
+    public void SetKey(int fifths, bool minor) => Check(Ana.SetKey(_h, (sbyte)fifths, (byte)(minor ? 1 : 0)));
 
     public void ClearClip() => Ana.ClearClip(_h);
 

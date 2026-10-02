@@ -264,3 +264,11 @@ void ChromaFrontEnd::update_tuning(const float* mag, uint16_t bins, Output&) {
 }
 
 }  // namespace dz
+
+namespace dz {
+void ChromaFrontEnd::set_key(int8_t fifths, KeyMode mode) {
+    session_.keyFifths = fifths;
+    session_.keyMode = mode;
+    if (bass_) bass_->set_key(fifths, mode);
+}
+}  // namespace dz

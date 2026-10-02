@@ -551,6 +551,13 @@ public sealed class TransportModule : RackModule
         ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF24272C)), Ui.FaceEdge, _tap, 4, 4);
         Ui.Text(ctx, "TAP", _tap.Center.X, _tap.Center.Y - 9, 14, canTap ? Ui.LabelBright : Ui.Label, Ui.SansBold, Ui.Align.Center);
 
+        // Dynamic session: what is heard, and whether it drives the session key / tempo.
+        string key = f.DetectedKeyValid ? $"{new KeyOption(f.DetectedKeyFifths, f.DetectedKeyMinor).Label} {f.KeyConfidence:0.00}" : "listening…";
+        string tempo = f.DetectedBpm > 0 ? $"♩≈{f.DetectedBpm:0} {f.TempoConfidence:0.00}" : "listening…";
+        bool locked = f.Recording || f.CountingIn;
+        Ui.Text(ctx, $"HEARD  key {key}{(Session.AutoKey ? " (auto)" : "")}   ·   tempo {tempo}{(Session.AutoTempo ? " (auto)" : "")}{(locked ? "   ·   locked by REC" : "")}",
+            r.X + 90, r.Y - 16, 10, Session.AutoKey || Session.AutoTempo ? Ui.Amber : Ui.Label, Ui.SansBold);
+
         // → SCORE
         _score = new Rect(r.Right - 110, cy - 18, 110, 36);
         ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF1D3A2A)), new ImmutablePen(Ui.Green as IImmutableBrush, 1.2), _score, 4, 4);

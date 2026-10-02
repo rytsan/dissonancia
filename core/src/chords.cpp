@@ -51,6 +51,14 @@ bool contains(const int8_t* a, int n, int v) {
 
 // ---------------------------------------------------------------- matcher
 
+void ChordMatcher::set_key(int8_t fifths, KeyMode mode) {
+    keySet_ = true;
+    fifths_ = fifths;
+    minor_ = mode != KeyMode::Major;
+    tonic_ = (7 * (fifths + 12) + (minor_ ? 9 : 0)) % 12;
+    speller_.configure(fifths, mode);
+}
+
 ChordMatcher::ChordMatcher(const SessionConfig& s)
     : keySet_(s.keySet != 0), fifths_(s.keyFifths), minor_(s.keyMode != KeyMode::Major),
       tonic_((7 * (s.keyFifths + 12) + (s.keyMode != KeyMode::Major ? 9 : 0)) % 12) {

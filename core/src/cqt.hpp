@@ -85,6 +85,7 @@ public:
     ~ChromaFrontEnd();
     void process(const float* x, uint32_t n, uint64_t endFrame, Output& out);
     const Cqt& cqt() const { return cqt_; }
+    void set_key(int8_t fifths, KeyMode mode);
 
 private:
     void update_tuning(const float* mag, uint16_t bins, Output& out);

@@ -27,6 +27,7 @@ string lastChord = "", lastNote = "";
 var log = new List<string>();
 var noteLat = new List<float>(); var chordLat = new List<float>(); var proc = new List<float>();
 float maxCpu = 0, maxPeak = -200;
+double nextContext = 1;
 while (Now() < endAt)
 {
     src.Read(f, Now());
@@ -37,6 +38,11 @@ while (Now() < endAt)
         playAt = Now();
     }
     if (play is { HasExited: true } && endAt == double.MaxValue) endAt = Now() + 1.5;
+    if (play is not null && Now() - playAt >= nextContext)   // dynamic-session estimates as they settle
+    {
+        nextContext += 1;
+        log.Add($"{Now() - playAt,6:0.000}s  heard key {(f.DetectedKeyValid ? new KeyOption(f.DetectedKeyFifths, f.DetectedKeyMinor).Label : "-")} {f.KeyConfidence:0.00}  tempo {f.DetectedBpm:0.0} {f.TempoConfidence:0.00}");
+    }
     maxPeak = Math.Max(maxPeak, f.PeakDbfs);
     if (f.Recording) { proc.Add(f.ProcessingMs); maxCpu = Math.Max(maxCpu, f.CpuPercent); }
     if (s.IsChordMode && f.ChordConfirmed && f.ChordSymbol != lastChord)

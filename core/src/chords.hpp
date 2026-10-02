@@ -47,6 +47,9 @@ public:
     // Returns false when no cadence applies.
     bool cadence(const ChordCandidate& previous, const ChordCandidate& last, bool phraseEnd, CadenceEvent& out) const;
 
+    // Session key changed before REC (dynamic session): spelling, roman numerals, context prior.
+    void set_key(int8_t fifths, KeyMode mode);
+
     static constexpr int kQualities = 15;
 
 private:
@@ -80,6 +83,7 @@ public:
     // backdate a new candidate to its attack.
     void process(const ChromaVector& chroma, double timestamp, double frameEnd, const BassEstimate& bass, double lastOnset, Output& out);
     void flush(Output& out);
+    void set_key(int8_t fifths, KeyMode mode) { matcher_.set_key(fifths, mode); }
 
 private:
     struct Chord {

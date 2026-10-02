@@ -56,6 +56,7 @@ Only the pipeline chosen on START exists in a session (`voice_` for mono modes,
 | `core/src/halfband.hpp` | IIR polyphase half-band decimator, analytic response, computed group delay |
 | `core/src/cqt.{hpp,cpp}` | Octave-decimated CQT, 11 tuning sets, chroma with leakage removal, tuning estimator, onset gating |
 | `core/src/bass.{hpp,cpp}` | Onset detector (spectral flux) and bass tracker (YIN preview + CQT confirmation) |
+| `core/src/context.{hpp,cpp}` | Dynamic session: key (Krumhansl-Kessler) and tempo (onset-envelope autocorrelation) heard before REC |
 | `core/src/chords.{hpp,cpp}` | Chord matcher (180 harmonic-aware templates, Occam, key/cadence context, bass), tracker, slash spelling |
 | `core/src/abi_check.cpp` | `static_assert` sizes/offsets, compiled with `-Wpadded -Werror` |
 | `core/tests/` | Catch2 tests + `rt_trap.cpp` (operator new aborts inside a real-time scope) |
@@ -203,6 +204,28 @@ Only the pipeline chosen on START exists in a session (`voice_` for mono modes,
   SkiaSharp 3.119 (Avalonia 12's version). Without the library the tab
   shows text only and says why.
 
+### Dynamic session — key and tempo heard before REC (`core/src/context.cpp`)
+- Key: a pitch-class histogram with a 30 s memory (chroma in chord modes, the
+  stable sung note in mono modes) correlated with the 24 Krumhansl-Kessler
+  profiles. Confidence is the margin over the best key with a different
+  signature (the relative key shares it). Needs ~3 s of pitched input.
+- Tempo: onset envelope (CQT flux in chord modes; level rise plus one pulse
+  per note start in mono modes) over the last 8 s, smoothed over 50 ms,
+  autocorrelated for 40–200 BPM with a log-normal prior around 110 BPM. Half
+  the period wins when it keeps 60 % of the periodicity (accents every bar);
+  the period is refined over its first four multiples; the result is folded
+  into 60–180 (strums on beats 1 and 3 count as the beat). No estimate when
+  the last 2 s are silent. The meter is not estimated.
+- `LiveSnapshot.context` publishes both every 0.5 s; `ana_set_key` changes
+  spelling, roman numerals and the chord prior from the next hop. Both
+  `ana_set_key` and `ana_set_metronome` are refused while REC is armed.
+- App: START → "Auto" for key and tempo (default on). A detected value is
+  applied after holding 2 s (key confidence ≥ 0.5, tempo ≥ 0.3); REC locks
+  both, the take's sidecar records the applied values. With auto tempo the
+  metronome starts off (the estimator would hear its own click); REC turns
+  it on for the count-in. Tap tempo switches auto tempo off. TRANSPORT shows
+  the heard key and tempo.
+
 ### GUI (prototype, C# / Avalonia 12.1, .NET 10)
 - START: mode, quality, key cascade, clef, meter, BPM, count-in, audio
   device/rate/period/exclusive/click output.
@@ -279,6 +302,8 @@ item).
 | Loopback (WSLg) | voice A3 → A♯3 → B3 at +0 ¢, 46–69 ms; CPU ≈ 2 % (voice), 0.16 % (chords) |
 | Live loopback, guitar (`tools/loopback`, 8 bars G Em C D7 G/B Am7 D G, 92 bpm, plucked strings) | 8/8 chords with inversions (Guitar and Piano pipelines), starts within ±20 ms of the strums, confirmed 0.40 s after the attack, V7→I6 imperfect and V→I perfect authentic cadences, chart and numerals exact, 8 bars engraved |
 | Live loopback, voice (13 notes, vibrato ±15 ¢, chromatic passing tone) | 13/13 pitches at +2…+3 ¢, D–D♭–C spelled by direction, stable-note latency median 50 ms; legato note changes start ≈ 28 ms late (first note after silence exact); score rhythm exact after quantization |
+| Dynamic session, synthetic | tempo within 2 BPM at 72/92/120/150 (10 % missing attacks, ±12 ms timing), eighth-note strumming at 92 → 92; Ode to Joy → G major, A minor line → A minor, B♭ scale → 2♭ |
+| Dynamic session, live loopback | guitar (strums on 1 and 3, 92 bpm): tempo 91.4–92.2 from 3 s, 1♯ from 5 s (E minor until bar 4, then G major); voice melody: 90.4–91.8 from 2 s, G major from 4 s |
 | Live loopback, pipeline | capture 15 ms (reported), processing median 4.8–5.1 ms, CPU ≤ 2.5 %, 0 xruns, 0 recorder gaps, 0 event gaps |
 
 ## Tests

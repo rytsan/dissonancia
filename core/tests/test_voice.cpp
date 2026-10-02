@@ -58,10 +58,11 @@ struct Run {
     std::vector<std::pair<uint64_t, NoteEstimate>> notes;
 };
 
-Run run(const std::vector<float>& x, const SessionConfig& s, AudioQuality q) {
+Run run(const std::vector<float>& x, const SessionConfig& s, AudioQuality q, int8_t newFifths = 99) {
     LiveConfig c = live_config(s.mode, q, kRate);
     uint32_t hop = uint32_t(std::lround(c.hopSeconds * kRate));
     VoicePipeline p(s, c, kRate, hop, 0.0);
+    if (newFifths != 99) p.set_key(newFifths, KeyMode::Major);   // dynamic session: key changed before REC
     Run r;
     VoiceOutput out{};
     for (size_t pos = 0; pos + hop <= x.size(); pos += hop) {
@@ -209,6 +210,9 @@ TEST_CASE("voice pipeline: chromatic notes spelled by melodic direction") {
     CHECK(names(up) == "A3 A#3 B3 ");
     auto down = run(render({{-1, 0.2}, {59, 0.25}, {58, 0.25}, {57, 0.25}, {-1, 0.3}}), voice_session(), AudioQuality::Balanced);
     CHECK(names(down) == "B3 Bb3 A3 ");
+    // Key changed to F major (set_key): Bb is now diatonic, also when ascending.
+    auto f = run(render({{-1, 0.2}, {57, 0.25}, {58, 0.25}, {-1, 0.3}}), voice_session(), AudioQuality::Balanced, -1);
+    CHECK(names(f) == "A3 Bb3 ");
     // Repeated pitch after silence = two notes.
     auto rep = run(render({{-1, 0.2}, {62, 0.3}, {-1, 0.2}, {62, 0.3}, {-1, 0.3}}), voice_session(), AudioQuality::Balanced);
     CHECK(names(rep) == "D4 D4 ");

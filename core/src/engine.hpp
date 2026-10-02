@@ -13,6 +13,7 @@
 #include "lockfree.hpp"
 #include "miniaudio.h"
 #include "chords.hpp"
+#include "context.hpp"
 #include "cqt.hpp"
 #include "voice.hpp"
 
@@ -35,6 +36,7 @@ public:
     int rec_start(const char* wavPath);
     int rec_stop();
     int set_metronome(bool on, float bpm, TimeSignature meter);
+    int set_key(int8_t fifths, KeyMode mode);   // before REC only; applied at the next hop
     void clear_clip() { clearClip_.store(true, std::memory_order_relaxed); }
 
     // Audio callback body; public for headless tests. in: interleaved captureChannels_, out: playbackChannels_ (may be null).
@@ -123,6 +125,12 @@ private:
     std::unique_ptr<ChromaFrontEnd> chroma_;
     ChromaFrontEnd::Output cout_{};
     std::unique_ptr<ChordTracker> chords_;
+    std::unique_ptr<ContextTracker> context_;
+    ContextEstimate contextOut_{};
+    float lastHopDb_ = -120;
+    // Key change requested by the API thread: (gen << 16) | (uint8 fifths << 8) | mode.
+    std::atomic<uint32_t> keyRequest_{0};
+    uint32_t keyApplied_ = 0;
     ChordTracker::Output chout_{};
     VoiceOutput vout_{};
 
