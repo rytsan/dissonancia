@@ -61,6 +61,8 @@ public sealed class StudioState
         (Session, Compensation, FromTake) = StudioProject.SessionFor(path, Defaults);
         Mode = Session.Mode;
         Edits = StudioProject.LoadEdits(path);
+        Mix = StudioProject.LoadMix(path);
+        Selected = 0;
         _undo.Clear();
         if (!Edits.IsEmpty) Player.Apply(Edits);
         Player.Refresh();
@@ -137,13 +139,55 @@ public sealed class StudioState
     void LoadStems()
     {
         Stems = [];
-        if (Current is null) return;
-        var dir = StudioProject.StemsDir(Current);
-        var key = Path.Combine(dir, "key.txt");
-        if (!File.Exists(key) || File.ReadAllText(key) != StemsKey) return;   // separated from other edits / model
-        foreach (var name in SeparationJob.StemOrder)
-            if (StemTrack.Load(name, Path.Combine(dir, name + ".wav")) is { } t) Stems.Add(t);
+        Player?.ClearTracks();
+        if (Current is not null)
+        {
+            var dir = StudioProject.StemsDir(Current);
+            var key = Path.Combine(dir, "key.txt");
+            if (File.Exists(key) && File.ReadAllText(key) == StemsKey)   // separated from these edits and this model
+                foreach (var name in SeparationJob.StemOrder)
+                    if (StemTrack.Load(name, Path.Combine(dir, name + ".wav")) is { } t && Player?.AddTrack(t.Path) > 0) Stems.Add(t);
+        }
+        if (Selected > Stems.Count) Selected = 0;
+        ApplyMix();
     }
+
+    // ---------------------------------------------------------------- S4 mixing
+
+    public TakeMix Mix = new();
+    public readonly MixMeters Meters = new();
+    public int Selected;   // channel on the chain unit: 0 = the take, 1.. = stems
+    public string NameOf(int track) => track == 0 ? "mix" : Stems[track - 1].Name;
+    public int Tracks => 1 + Stems.Count;
+    public ChannelMix Channel(int track) => Mix.For(NameOf(track), Stems.Count > 0);
+
+    void ApplyMix()
+    {
+        if (Player is null) return;
+        for (int t = 0; t < Tracks; t++) Player.SetChannel(t, Channel(t));
+        Player.SetMaster(Mix.Master);
+    }
+
+    /// A strip or the master changed in the UI: audible from the next block, kept with the take.
+    public void MixChanged()
+    {
+        if (Current is null) return;
+        ApplyMix();
+        StudioProject.SaveMix(Current, Mix);
+        RefreshResult();   // the analysis tap of an edited chain is another input
+        Changed?.Invoke();
+    }
+
+    public void Bounce()
+    {
+        if (Player is null || Current is null) return;
+        StudioProject.EnsureDir();
+        var path = StudioProject.BouncePath(Current);
+        Status = Player.Bounce(path) ? "bounce: " + path : "bounce falhou";
+        Changed?.Invoke();
+    }
+
+    public void PollMeters() { if (Player is not null) Player.ReadMeters(Meters); }
 
     /// Installs the weights if needed (one download, checksum-pinned), then separates the edited take.
     public async void Separate()
@@ -188,8 +232,8 @@ public sealed class StudioState
 
     // ---------------------------------------------------------------- analysis
 
-    /// One analysis of the queue: a session (mode), the audio it reads, its result suffix.
-    sealed record Pass(Session Session, string Input, string Suffix, string Options);
+    /// One analysis of the queue: a session (mode), the tracks whose analysis tap it reads, its result suffix.
+    sealed record Pass(Session Session, uint Mask, string Input, string Suffix, string Options);
     readonly Queue<Pass> _queue = new();
     Pass? _pass;
     string? _passSource;
@@ -214,14 +258,20 @@ public sealed class StudioState
     List<Pass> Plan()
     {
         if (Current is null) return [];
-        if (Stems.Count == 0) { var s = AnalysisSession(); return [new Pass(s, "", "", Options(s))]; }
-        var dir = StudioProject.StemsDir(Current);
+        if (Stems.Count == 0)
+        {
+            var s = AnalysisSession();
+            return [new Pass(s, 1, StudioProject.TapPath(Current, "mix"), "", Options(s, ";tap=" + Channel(0).TapKey))];
+        }
+        uint Mask(params string[] names) => (uint)Enumerable.Range(1, Stems.Count).Where(t => names.Contains(Stems[t - 1].Name)).Sum(t => 1 << t);
+        string Keys(uint mask) => string.Join("|", Enumerable.Range(0, Tracks).Where(t => (mask >> t & 1) != 0).Select(t => NameOf(t) + ":" + Channel(t).TapKey));
         var voice = AnalysisSession(AppMode.VoiceMono);
         var harmony = AnalysisSession(HarmonyMode);
+        uint vm = Mask("vocals"), hm = Mask("other", "bass", "guitar", "piano");
         return
         [
-            new Pass(voice, Path.Combine(dir, "vocals.wav"), ".voice", Options(voice, ";stem=vocals;" + StemsKey)),
-            new Pass(harmony, Path.Combine(dir, "harmony.wav"), ".harmony", Options(harmony, ";stem=harmony;" + StemsKey)),
+            new Pass(voice, vm, StudioProject.TapPath(Current, "voice"), ".voice", Options(voice, ";stems=" + StemsKey + ";tap=" + Keys(vm))),
+            new Pass(harmony, hm, StudioProject.TapPath(Current, "harmony"), ".harmony", Options(harmony, ";stems=" + StemsKey + ";tap=" + Keys(hm))),
         ];
     }
 
@@ -268,19 +318,10 @@ public sealed class StudioState
         foreach (var p in Plan())
         {
             if (StudioProject.Cached(Current, p.Options, p.Suffix) is not null) continue;
-            string input = p.Input;
-            if (input.Length == 0)
-            {
-                input = Current;
-                if (!Edits.IsEmpty) { input = StudioProject.EditedWavPath(Current); if (!Player.SaveWav(input)) { Status = "não foi possível gravar o áudio editado"; return; } }
-            }
-            else if (p.Suffix == ".harmony" && !File.Exists(input))
-            {
-                var dir = StudioProject.StemsDir(Current);
-                var parts = new[] { "other", "bass", "guitar", "piano" }.Select(n => Path.Combine(dir, n + ".wav")).Where(File.Exists);
-                if (!Wav.Mix(parts, input)) { Status = "não foi possível juntar a harmonia"; return; }
-            }
-            _queue.Enqueue(p with { Input = input });
+            // The transcription reads the channel at its tap: post-inserts, pre-fader (the edited
+            // take, through trim, filters, gate, EQ and compressor; stems summed when several).
+            if (!Player.RenderTap(p.Mask, p.Input)) { Status = "não foi possível renderizar o canal"; return; }
+            _queue.Enqueue(p);
         }
         _passSource = Current;
         Next();

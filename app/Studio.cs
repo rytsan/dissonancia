@@ -77,6 +77,23 @@ public sealed class StudioPlayer : IDisposable
 
     public bool SaveWav(string path) => PlayerApi.SaveWav(_p, path) == 0;
 
+    // S4 mixing.
+    public int AddTrack(string path) => MixApi.AddTrack(_p, path);
+    public void ClearTracks() => MixApi.ClearTracks(_p);
+    public void SetChannel(int track, ChannelMix c) => MixApi.SetChannel(_p, track, c.Native);
+    public void SetMaster(MasterMix m) => MixApi.SetMaster(_p, m.Native);
+    public bool RenderTap(uint mask, string path) => MixApi.RenderTap(_p, mask, path) == 0;
+    public bool Bounce(string path) => MixApi.Bounce(_p, path) == 0;
+    public unsafe void ReadMeters(MixMeters m)
+    {
+        MixApi.Meters(_p, out var n);
+        m.Tracks = n.Tracks;
+        for (int i = 0; i < 8; i++) { m.Peak[i] = n.PeakDb[i]; m.Rms[i] = n.RmsDb[i]; m.Gr[i] = n.CompGrDb[i]; m.GateOpen[i] = n.GateOpen[i] != 0; }
+        for (int c = 0; c < 2; c++) { m.MasterPeak[c] = n.MasterPeakDb[c]; m.MasterRms[c] = n.MasterRmsDb[c]; }
+        m.MasterGr = n.MasterCompGrDb;
+        m.LimiterGr = n.LimiterGrDb;
+    }
+
     public unsafe void Peaks(ulong a, ulong b, float[] mn, float[] mx, int columns)
     {
         fixed (float* pmn = mn, pmx = mx) PlayerApi.Peaks(_p, a, b, columns, pmn, pmx);
@@ -154,6 +171,21 @@ public static class StudioProject
     static string ProjectPath(string source, string suffix = "") => Stem(source) + suffix + ".studio.json";
     public static string StemsDir(string source) => Stem(source) + "-stems";
     public static string LeadSheetPath(string source) => Stem(source) + ".leadsheet.json";
+    public static string TapPath(string source, string channel) => Stem(source) + "." + channel + ".tap.wav";
+    public static string BouncePath(string source) => Stem(source) + ".bounce.wav";
+    static string MixPath(string source) => Stem(source) + ".mix.json";
+
+    public static TakeMix LoadMix(string source)
+    {
+        try { return File.Exists(MixPath(source)) ? JsonSerializer.Deserialize<TakeMix>(File.ReadAllText(MixPath(source))) ?? new() : new(); }
+        catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException) { return new(); }
+    }
+
+    public static void SaveMix(string source, TakeMix m)
+    {
+        EnsureDir();
+        File.WriteAllText(MixPath(source), JsonSerializer.Serialize(m));
+    }
 
     /// The options that change the result (the cache key).
     public static string Options(Session s, double comp) =>
@@ -261,68 +293,5 @@ public static class StudioLibrary
         list.Add(path);
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(FilePath)!);
         File.WriteAllText(FilePath, JsonSerializer.Serialize(list));
-    }
-}
-
-
-/// Small WAV helpers for the separated stems (float32 or 16-bit, any channels).
-public static class Wav
-{
-    public static (float[] Mono, int Rate)? ReadMono(string path)
-    {
-        try
-        {
-            var b = File.ReadAllBytes(path);
-            int ch = 1, bits = 16, rate = 44100;
-            for (int p = 12; p + 8 <= b.Length;)
-            {
-                string id = System.Text.Encoding.ASCII.GetString(b, p, 4);
-                int size = BitConverter.ToInt32(b, p + 4);
-                if (id == "fmt ") { ch = BitConverter.ToInt16(b, p + 10); rate = BitConverter.ToInt32(b, p + 12); bits = BitConverter.ToInt16(b, p + 22); }
-                if (id == "data")
-                {
-                    size = Math.Min(size, b.Length - p - 8);
-                    int frames = size / (bits / 8) / ch;
-                    var x = new float[frames];
-                    for (int i = 0; i < frames; i++)
-                        for (int c = 0; c < ch; c++)
-                        {
-                            int o = p + 8 + (i * ch + c) * (bits / 8);
-                            x[i] += (bits == 32 ? BitConverter.ToSingle(b, o) : BitConverter.ToInt16(b, o) / 32768f) / ch;
-                        }
-                    return (x, rate);
-                }
-                p += 8 + size + (size & 1);
-            }
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException) { }
-        return null;
-    }
-
-    public static void WriteMono(string path, float[] x, int rate)
-    {
-        using var f = File.Create(path);
-        using var w = new BinaryWriter(f);
-        w.Write("RIFF"u8); w.Write(36 + x.Length * 4); w.Write("WAVE"u8);
-        w.Write("fmt "u8); w.Write(16); w.Write((short)3); w.Write((short)1); w.Write(rate); w.Write(rate * 4); w.Write((short)4); w.Write((short)32);
-        w.Write("data"u8); w.Write(x.Length * 4);
-        foreach (float v in x) w.Write(v);
-    }
-
-    /// Sum of stems (e.g. the harmony = other + bass [+ guitar + piano]) into one mono WAV.
-    public static bool Mix(IEnumerable<string> inputs, string output)
-    {
-        float[]? sum = null;
-        int rate = 44100;
-        foreach (var path in inputs)
-        {
-            if (ReadMono(path) is not { } s) continue;
-            rate = s.Rate;
-            if (sum is null) sum = s.Mono;
-            else for (int i = 0; i < Math.Min(sum.Length, s.Mono.Length); i++) sum[i] += s.Mono[i];
-        }
-        if (sum is null) return false;
-        WriteMono(output, sum, rate);
-        return true;
     }
 }
