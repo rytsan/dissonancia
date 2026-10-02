@@ -41,29 +41,31 @@ take is never modified (edits are a list, outputs are cached per stage);
 every result carries a confidence and the UI never presents it as certain;
 key and meter are the user's (STUDIO may suggest, never applies by itself).
 
-## Layout: a mixing console
+## Layout: Ableton Live, effects and console as rack hardware (decision 2026-10-02)
 
-STUDIO looks and works like LIVE's rack, as a mixing desk. Mockup:
-https://claude.ai/artifact/1cES4MCBM9otq1qSVa3ed5 (three screens).
+Reference: Ableton Live's arrangement and device chain; the effects and the
+mixer drawn as rack hardware, like LIVE's rack (screwed faces, knobs, VU,
+LEDs, seven-segment readouts). Mockup:
+https://claude.ai/artifact/1cES4MCBM9otq1qSVa3ed5 (two screens).
 
-1. **Mixing (overview):** stage bar Session · Editing · Separation · Mixing ·
-   Transcription · Review · Delivery; library on the left; track timeline on
-   top (non-destructive trim / cut / fades / normalize across all tracks);
-   the console below. One channel strip per track — the original mix, one
-   per separated stem (voice, guitar, bass, drums, other) — plus master.
-   Per strip: source and separation confidence, the inserts in console
-   order, the analysis tap, analysis type (notes / chords / bass / beats /
-   off), staff assignment, pan, mute / solo, meter, fader.
-2. **Channel:** the strip as rack modules in console order (1 trim,
-   2 filters, 3 gate, 4 EQ with its curve over the stem's spectrum,
-   5 compressor), then the analysis module at the tap (type, resolution,
-   vocabulary, whole-take decoding) with a preview of its result, then
-   fader / pan. Re-running one stage re-runs only it and what follows.
-3. **Transcription and review:** one lane per channel on the bar grid
-   (voice piano roll, chord lane with confidences, bass notes, beats), click
-   to correct; a side panel where the user sets key (none by default),
-   meter, tempo and quantization — STUDIO only suggests — and a list of
-   low-confidence spots, then "Generate score".
+1. **Arrangement:** control bar on top (TAP, tempo, meter, metronome,
+   quantization, position in bars.beats.sixteenths, play / stop / record,
+   loop with its start and length, CPU, and the optional components present:
+   Demucs, Verovio, GPU); browser on the left (takes, imported files,
+   effects, analysers); tracks with coloured clips and waveforms on the bar
+   ruler, loop brace, playhead; track headers on the right (name, activator,
+   solo, arm, volume, pan). Each separated track has its transcription track
+   under it as a MIDI-like clip (voice notes, chord blocks with confidence,
+   bass notes, beats). Master at the bottom of the headers.
+2. **Track chain (bottom, Ableton's device view):** the selected track's
+   devices left to right in fixed studio order — 1 trim, 2 filter,
+   3 noise gate, 4 parametric EQ (curve on an LCD), 5 compressor (gain
+   reduction LEDs), then the analyser device at the tap (post-inserts,
+   pre-fader) — each a rack unit.
+3. **Mixer:** a hardware console — per channel: colour, name, source and
+   separation confidence, trim, insert slots in studio order with LEDs,
+   analysis type, pan, mute / solo, LED meters, fader, dB readout; master
+   strip with EQ, bus compressor, limiter and a pair of VU meters.
 
 ## Milestones (in studio order)
 
