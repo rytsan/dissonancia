@@ -330,7 +330,20 @@ notes, a sung melody with passing and neighbour tones, kick/snare/hi-hat),
 - Fixed on the way: the pitch timestamp of the first hops underflowed (an
   unsigned subtraction before the window filled) — LIVE and offline.
 
-### STUDIO S6 — review
+### STUDIO S7 — delivery
+- Score: the voice staff (clef auto) with chord symbols above, and a bass
+  staff (bass clef) from the bass line, same bar count (`Score.Bass`;
+  MusicXML part P2, XSD-valid, Verovio renders both).
+- MIDI type 1: tempo / meter / key, melody (ch 1), chords (ch 2), bass
+  line (ch 3, GM finger bass). With TEMPO BATERIA the tempo track follows
+  each real beat (`beatTimes`), so the file plays in time with the audio.
+- ENTREGAR writes `<takes>/entregas/<take>/`: MusicXML, MIDI, score JSON
+  (now with the bass), chord chart + roman numerals, the mix bounce
+  (through the master) and the separated stems.
+- Measured on the band mix: bass line F 0.78 (40/48, no octave errors);
+  the misses are the fifths on beat 3 at G3 / E3 / D3, which Demucs put in
+  "other" (bass stem at −53 dB there, "other" peaks at 196 Hz) — a synthetic
+  bass written an octave above a real one's range.
 - `Review.cs`, one `<take>.review.json`: key (the user's), tempo source,
   corrections. Applied over the analysis into `<take>.reviewed.json`, which
   SCORE reads; the analysis itself is never edited.

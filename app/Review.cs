@@ -147,6 +147,7 @@ public sealed class Review
                 if (e[key] is JsonValue v && v.TryGetValue<double>(out var t)) e[key] = Math.Round(Warp(t), 4);
         root["session"]!["bpm"] = Math.Round(bpm, 3);
         root["beats"] = new JsonArray(beats.Select((_, k) => (JsonNode)Math.Round(k * p, 4)).ToArray());
+        root["beatTimes"] = new JsonArray(beats.Select(b => (JsonNode)Math.Round(b - beats[0], 4)).ToArray());   // the real beats, for the MIDI tempo map
         root.Remove("beatDriftMs");
         root["tempoSource"] = "drums";
     }

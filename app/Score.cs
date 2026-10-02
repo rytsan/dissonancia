@@ -25,6 +25,7 @@ public sealed class Take
     public List<TakeChord> Chords = [];
     public List<TakeNote> BassNotes = [];   // STUDIO: the separated bass line
     public List<double> Beats = [];         // STUDIO: the drums' beats (event time) and tempo
+    public List<double> BeatTimes = [];     // STUDIO, tempo from the drums: where each grid beat really was (MIDI tempo map)
     public double TempoBpm;
     public double? MaxDriftMs;              // largest |drift| from the metronome, when there is one
     public List<TakeCadence> Cadences = [];
@@ -70,6 +71,7 @@ public sealed class Take
             if (root.TryGetProperty("beatDriftMs", out var drift) && drift.GetArrayLength() > 0)
                 t.MaxDriftMs = drift.EnumerateArray().Max(d => Math.Abs(d.GetDouble()));
         }
+        if (root.TryGetProperty("beatTimes", out var bt)) t.BeatTimes = bt.EnumerateArray().Select(b => b.GetDouble()).ToList();
         foreach (var e in root.GetProperty("events").EnumerateArray())
         {
             switch (e.GetProperty("type").GetString())
@@ -99,6 +101,15 @@ public sealed class Take
     }
 
     /// Core ASCII name ("C#4", "Db4", "Fx5", "Cbb3") -> pitch.
+    /// The bass line as a part of its own (bass clef, no chords): S7's bass staff.
+    public Take? BassPart()
+    {
+        if (BassNotes.Count == 0) return null;
+        var b = (Take)MemberwiseClone();
+        (b.Notes, b.Chords, b.Cadences, b.BassNotes, b.Clef) = (BassNotes, [], [], [], Clef.Bass);
+        return b;
+    }
+
     public static Pitch ParseName(string n)
     {
         int letter = "CDEFGAB".IndexOf(n[0]), i = 1, alter = 0;
@@ -133,14 +144,28 @@ public sealed class Score
     readonly HashSet<int> _triplets = [];   // quarters snapped to the triplet grid
     public int Step;                        // grid of the smallest notated value, in divisions
     bool _allowTriplets;
+    int _minBars;
 
     public double SecondsPerQuarter => 60 / Take.Bpm * Take.BeatUnit / 4.0;
 
     /// smallest: shortest notated value as a note-value denominator (4 = quarter, 8, 16); 0 = the
     /// meter's beat unit (quarter in 4/4, eighth in 6/8). triplets: eighth triplets where they fit.
+    public Score? Bass;   // STUDIO: the bass line's staff, same bars
+
     public static Score Build(Take t, int smallest = 0, bool triplets = false)
     {
-        var s = new Score { Take = t };
+        var s = Build(t, smallest, triplets, 0);
+        if (t.BassPart() is { } bt)
+        {
+            s.Bass = Build(bt, smallest, triplets, s.Measures.Count);
+            if (s.Bass.Measures.Count > s.Measures.Count) { var b = s.Bass; s = Build(t, smallest, triplets, b.Measures.Count); s.Bass = b; }
+        }
+        return s;
+    }
+
+    static Score Build(Take t, int smallest, bool triplets, int minBars)
+    {
+        var s = new Score { Take = t, _minBars = minBars };
         s.Step = Divisions * 4 / Math.Clamp(smallest > 0 ? smallest : t.BeatUnit, 4, 16);
         s.Compound = t.BeatUnit == 8 && t.BeatsPerBar % 3 == 0 && t.BeatsPerBar > 3;
         s._allowTriplets = triplets && !s.Compound;
@@ -197,7 +222,7 @@ public sealed class Score
     void Lay()
     {
         int end = Math.Max(QuantizedNotes.Count > 0 ? QuantizedNotes[^1].End : 0, QuantizedChords.Count > 0 ? QuantizedChords[^1].End : 0);
-        int bars = Math.Max(1, (end + MeasureDivs - 1) / MeasureDivs);
+        int bars = Math.Max(Math.Max(1, _minBars), (end + MeasureDivs - 1) / MeasureDivs);
         for (int i = 0; i < bars; i++) Measures.Add(new Measure { Number = i + 1 });
 
         // Contiguous timeline: notes and the rests between them.
@@ -322,33 +347,41 @@ public sealed class Score
             w.WriteEndElement();
             w.WriteEndElement();
             w.WriteStartElement("part-list");
-            w.WriteStartElement("score-part");
-            w.WriteAttributeString("id", "P1");
-            w.WriteElementString("part-name", Take.Mode switch { 0 => "Voice", 1 => "Melody", 2 => "Guitar", 3 => "Piano", _ => "Chords" });
-            w.WriteEndElement();
-            w.WriteEndElement();
-            w.WriteStartElement("part");
-            w.WriteAttributeString("id", "P1");
-            foreach (var m in Measures)
+            var parts = new List<(string Id, string Name, Score S)> { ("P1", Take.Mode switch { 0 => "Voice", 1 => "Melody", 2 => "Guitar", 3 => "Piano", _ => "Chords" }, this) };
+            if (Bass is not null) parts.Add(("P2", "Bass", Bass));
+            foreach (var (id, name, _) in parts)
             {
-                var shown = KeyAlters();   // accidentals in force in this bar, per letter and octave
-                w.WriteStartElement("measure");
-                w.WriteAttributeString("number", m.Number.ToString());
-                if (m.Number == 1) WriteAttributes(w);
-                foreach (var item in m.Items)
-                {
-                    if (item.Harmony is not null) WriteHarmony(w, item.Harmony);
-                    WriteNote(w, item, shown);
-                }
+                w.WriteStartElement("score-part");
+                w.WriteAttributeString("id", id);
+                w.WriteElementString("part-name", name);
                 w.WriteEndElement();
             }
             w.WriteEndElement();
+            foreach (var (id, _, part) in parts)
+            {
+                w.WriteStartElement("part");
+                w.WriteAttributeString("id", id);
+                foreach (var m in part.Measures)
+                {
+                    var shown = part.KeyAlters();   // accidentals in force in this bar, per letter and octave
+                    w.WriteStartElement("measure");
+                    w.WriteAttributeString("number", m.Number.ToString());
+                    if (m.Number == 1) part.WriteAttributes(w, tempo: part == this);
+                    foreach (var item in m.Items)
+                    {
+                        if (item.Harmony is not null) WriteHarmony(w, item.Harmony);
+                        part.WriteNote(w, item, shown);
+                    }
+                    w.WriteEndElement();
+                }
+                w.WriteEndElement();
+            }
             w.WriteEndElement();
         }
         return sb.ToString().Replace("encoding=\"utf-16\"", "encoding=\"UTF-8\"");
     }
 
-    void WriteAttributes(XmlWriter w)
+    void WriteAttributes(XmlWriter w, bool tempo = true)
     {
         w.WriteStartElement("attributes");
         w.WriteElementString("divisions", Divisions.ToString());
@@ -367,6 +400,7 @@ public sealed class Score
         if (Take.Clef == Clef.Treble8vb) w.WriteElementString("clef-octave-change", "-1");
         w.WriteEndElement();
         w.WriteEndElement();
+        if (!tempo) return;
 
         w.WriteStartElement("direction");
         w.WriteAttributeString("placement", "above");
@@ -514,16 +548,26 @@ public sealed class Score
         [0, 3, 6, 10], [0, 3, 6, 9], [0, 4, 7, 9], [0, 3, 7, 9], [0, 4, 7, 14],
     ];
 
-    /// Tempo/meter/key track, melody track (channel 1), chord track (channel 2, bass + close voicing).
+    /// Tempo/meter/key track, melody track (channel 1), chord track (channel 2, bass + close
+    /// voicing), the bass line (channel 3) when there is one. With the tempo from the drums the
+    /// tempo track follows where each beat really was, so the file plays in time with the audio.
     public byte[] Midi()
     {
         const int ppq = 480, tick = ppq / Divisions;
+        static byte[] Tempo(double secondsPerQuarter) => Meta(0x51, [.. BitConverter.GetBytes((int)Math.Round(secondsPerQuarter * 1e6)).Take(3).Reverse()]);
         var tempo = new List<(int, byte[])>
         {
-            (0, Meta(0x51, [.. BitConverter.GetBytes((int)Math.Round(SecondsPerQuarter * 1e6)).Take(3).Reverse()])),
+            (0, Tempo(SecondsPerQuarter)),
             (0, Meta(0x58, [(byte)Take.BeatsPerBar, (byte)Math.Log2(Take.BeatUnit), 24, 8])),
             (0, Meta(0x59, [(byte)(sbyte)Take.KeyFifths, (byte)(Take.Minor ? 1 : 0)])),
         };
+        var bt = Take.BeatTimes;
+        if (bt.Count >= 2)
+        {
+            tempo.RemoveAt(0);
+            int ticksPerBeat = ppq * 4 / Take.BeatUnit;
+            for (int k = 0; k + 1 < bt.Count; k++) tempo.Add((k * ticksPerBeat, Tempo((bt[k + 1] - bt[k]) * Take.BeatUnit / 4.0)));
+        }
         var melody = new List<(int, byte[])>();
         foreach (var (a, b, n) in QuantizedNotes)
         {
@@ -538,10 +582,21 @@ public sealed class Score
             foreach (int k in keys) chords.Add((a * tick, [0x91, (byte)k, 70]));
             foreach (int k in keys) chords.Add((b * tick, [0x81, (byte)k, 0]));
         }
+        var tracks = new List<List<(int, byte[])>> { tempo, melody, chords };
+        if (Bass is not null)
+        {
+            var bass = new List<(int, byte[])> { (0, [0xC2, 33]) };   // GM electric bass (finger)
+            foreach (var (a, b, n) in Bass.QuantizedNotes)
+            {
+                bass.Add((a * tick, [0x92, (byte)n.Midi, 90]));
+                bass.Add((b * tick, [0x82, (byte)n.Midi, 0]));
+            }
+            tracks.Add(bass);
+        }
         using var ms = new MemoryStream();
         ms.Write("MThd"u8);
-        ms.Write([0, 0, 0, 6, 0, 1, 0, 3, (byte)(ppq >> 8), (byte)(ppq & 0xFF)]);
-        foreach (var track in new[] { tempo, melody, chords }) WriteTrack(ms, track);
+        ms.Write([0, 0, 0, 6, 0, 1, 0, (byte)tracks.Count, (byte)(ppq >> 8), (byte)(ppq & 0xFF)]);
+        foreach (var track in tracks) WriteTrack(ms, track);
         return ms.ToArray();
     }
 
@@ -597,6 +652,7 @@ public sealed class Score
             start = q.Start, end = q.End, observedStart = q.Chord.Start, observedEnd = q.Chord.End,
             symbol = q.Chord.Symbol, roman = q.Chord.Roman, root = q.Chord.Root, bass = q.Chord.Bass, confidence = q.Chord.Confidence,
         }),
+        bass = Bass?.QuantizedNotes.Select(q => new { start = q.Start, end = q.End, observedStart = q.Note.Start, observedEnd = q.Note.End, midi = q.Note.Midi, name = q.Note.Sounding.Name, confidence = q.Note.Confidence }),
         cadences = Take.Cadences.Select(c => new { time = c.Time, type = c.Type, from = c.From, to = c.To, confidence = c.Confidence, evidence = c.Evidence }),
         measures = Measures.Select(m => new
         {
@@ -609,10 +665,10 @@ public sealed class Score
         }),
     }, new JsonSerializerOptions { WriteIndented = true });
 
-    /// Writes .musicxml, .mid, .score.json and .txt next to the take; returns the paths.
-    public string[] Export()
+    /// Writes .musicxml, .mid, .score.json and .txt next to the take (or at stem); returns the paths.
+    public string[] Export(string? stem = null)
     {
-        string stem = System.IO.Path.ChangeExtension(Take.Path, null);
+        stem ??= System.IO.Path.ChangeExtension(Take.Path, null);
         var files = new[] { stem + ".musicxml", stem + ".mid", stem + ".score.json", stem + ".txt" };
         File.WriteAllText(files[0], MusicXml());
         File.WriteAllBytes(files[1], Midi());

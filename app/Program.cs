@@ -113,6 +113,7 @@ public sealed class MainWindow : Window
             ["StudioFixQuality"] = () => _studio.ReviewAction("quality"),
             ["StudioApplyKey"] = () => _studio.ReviewAction("key"),
             ["StudioClearReview"] = () => _studio.ReviewAction("clear"),
+            ["StudioDeliver"] = () => _studio.ReviewAction("deliver"),
             ["StudioScore"] = () => _studio.ScoreCurrent(),
             ["StudioSelectDemo"] = () => _studio.SelectRange(1.0, 6.0),   // screenshot tool: a selection to edit
             ["StudioTrim"] = () => _studio.EditAction("trim"),

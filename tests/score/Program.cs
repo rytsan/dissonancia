@@ -241,8 +241,29 @@ Check(RackCatalog.Load(AppMode.VoiceMono).SequenceEqual(RackCatalog.Default(AppM
 Check(RackCatalog.Default(AppMode.GuitarChords).Any(e => e.Module == ModuleKind.Fretboard) && !RackCatalog.Default(AppMode.VoiceMono).Any(e => e.Module == ModuleKind.Timeline), "per-mode defaults");
 Directory.Delete(config, true);
 
+// STUDIO S7: a lead sheet with a bass line -> voice staff with symbols + bass staff, same bars;
+// MIDI with a bass track and, with the tempo from the drums, a tempo map.
+var lead = T((0, 1.0, "E4"), (1.0, 2.0, "G4"));
+lead.Bpm = 120;
+lead.Chords.Add(new TakeChord(0, 4, "C", "", 0, -1, 0, 0.9f));
+foreach (var (a, b, m, n) in new[] { (0.0, 1.0, 36, "C2"), (1.0, 2.0, 43, "G2"), (2.0, 4.0, 36, "C2"), (4.0, 6.0, 41, "F2") })
+    lead.BassNotes.Add(new TakeNote(a, b, m, Take.ParseName(n), 0.8f));
+var ls = Score.Build(lead, 8);
+var lx = new XmlDocument { XmlResolver = null };
+lx.Load(new XmlTextReader(new StringReader(ls.MusicXml())) { DtdProcessing = DtdProcessing.Ignore });
+int m1 = lx.SelectNodes("//part[@id='P1']/measure")!.Count, m2 = lx.SelectNodes("//part[@id='P2']/measure")!.Count;
+Check(ls.Bass is not null && m1 == m2 && m1 == 3 && lx.SelectSingleNode("//part[@id='P2']//clef/sign")?.InnerText == "F" && lx.SelectNodes("//part[@id='P2']//harmony")!.Count == 0,
+      $"lead sheet: voice + bass staves, {m1}/{m2} bars, bass clef, symbols only on the voice");
+lead.BeatTimes = [0, 0.5, 1.02, 1.5];
+byte[] lmid = Score.Build(lead, 8).Midi();
+int ltracks = 0, tempos = 0;
+for (int i = 0; i + 4 <= lmid.Length; i++) if (lmid[i] == 'M' && lmid[i + 1] == 'T' && lmid[i + 2] == 'r' && lmid[i + 3] == 'k') ltracks++;
+for (int i = 0; i + 2 <= lmid.Length; i++) if (lmid[i] == 0xFF && lmid[i + 1] == 0x51) tempos++;
+Check(ltracks == 4 && tempos == 3 && lmid.AsSpan().IndexOf(new byte[] { 0xFF, 0x51, 3, 0x07, 0xEF, 0x40 }) > 0,   // 0.52 s per beat = 520000 us
+      $"lead sheet midi: {ltracks} tracks (bass), tempo map {tempos} events");
+
 // Every MusicXML we write validates against the MusicXML 4.0 XSD (downloaded once, cached next to the binary).
-var samples = new[] { s1, s2, s4, s5, s6, s7, B(t8), B(take) }.Select(x => x.MusicXml()).ToArray();
+var samples = new[] { s1, s2, s4, s5, s6, s7, B(t8), B(take), ls }.Select(x => x.MusicXml()).ToArray();
 if (Schema() is { } schema)
     for (int i = 0; i < samples.Length; i++)
     {

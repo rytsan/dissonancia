@@ -142,7 +142,7 @@ this order because each stage needs the one before it, as in a studio.
 - Corrections by clicking a note or chord; kept in the take project and
   preserved when upstream stages re-run. Low-confidence spots listed.
 
-### S7 — Delivery: score and export (spec stages 7–8, M10)
+### S7 — Delivery: score and export (spec stages 7–8, M10) — done 2026-10-03 (piano / guitar note staves wait for a polyphonic note transcriber; stems delivered as separated)
 - Staves per channel: voice (clef auto by range), chord symbols above,
   guitar (treble 8vb), piano grand staff, bass (bass clef).
 - Roman numerals and cadences only with a key set.

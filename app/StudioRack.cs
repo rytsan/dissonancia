@@ -486,6 +486,27 @@ public sealed class StudioState
         else Status = "analise primeiro (DA · ANALISAR)";
     }
 
+    /// S7 delivery: everything for the take in one folder — score (MusicXML, MIDI with a track per
+    /// part, JSON, chord chart), the mix bounce and the separated stems.
+    public string? Deliver()
+    {
+        if (Current is null || ResultTake is null || Player is null) return null;
+        var dir = Path.Combine(Take.Folder, "entregas", Path.GetFileNameWithoutExtension(Current));
+        try
+        {
+            Directory.CreateDirectory(dir);
+            var name = Path.Combine(dir, Path.GetFileNameWithoutExtension(Current));
+            var files = Score.Build(ResultTake, Defaults.SmallestNote, Defaults.Triplets).Export(name).ToList();
+            if (Player.Bounce(name + ".mix.wav")) files.Add(name + ".mix.wav");
+            // ponytail: stems as separated (before their strips); a per-channel bounce needs a track mask in the core's bounce.
+            foreach (var st in Stems) { var to = $"{name}.{st.Name}.wav"; File.Copy(st.Path, to, true); files.Add(to); }
+            Status = $"entregue: {files.Count} arquivos em {dir}";
+            Changed?.Invoke();
+            return dir;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Status = "entrega falhou: " + e.Message; Changed?.Invoke(); return null; }
+    }
+
     public void Close() { Cancel(); Player?.Stop(); Player?.Dispose(); Job?.Dispose(); }
 }
 
@@ -1149,7 +1170,8 @@ public sealed class ChainUnit : StudioUnit
         Key(ctx, new Rect(ix + 94, iy, 104, 28), sepLabel, S.Separate, S.Stems.Count > 0 || S.Separating, Ui.Amber, DemucsModel.HelperPresent && S.Current is not null && !S.Separating && !S.Running);
         Key(ctx, new Rect(ix, iy + 34, 100, 28), "ANALISAR", S.Analyze, S.Running, Ui.Green, S.Current is not null && !S.Running && !S.Separating);
         Key(ctx, new Rect(ix + 106, iy + 34, 92, 28), "CANCELAR", S.Cancel, false, Ui.Red, S.Running || S.Separating);
-        Key(ctx, new Rect(ix + 204, iy, 76, 62), "SCORE", S.OpenScore, S.Result is not null, Ui.Green, S.Current is not null);
+        Key(ctx, new Rect(ix + 204, iy, 84, 28), "SCORE", S.OpenScore, S.Result is not null, Ui.Green, S.Current is not null);
+        Key(ctx, new Rect(ix + 204, iy + 34, 84, 28), "ENTREGAR", () => S.Deliver(), false, Ui.Amber, S.Result is not null && !S.Running);
         if (sepLabel == "SEPARAR*") Ui.Text(ctx, $"* baixa o Demucs ({S.Variant.Size / 1_000_000} MB) uma vez", ix, iy + 66, 8, Ui.Label, Ui.Mono);
         // Progress as an LED bar (separation amber, analysis green).
         bool sep = S.Separating;
@@ -1351,6 +1373,7 @@ public sealed class StudioView : DockPanel
             case "quality": _s.FixChord(nextQuality: true); break;
             case "key": if (_s.Suggestion is { } sg) _s.ApplyKey(sg.Key); break;
             case "clear": _s.ClearFixes(); _s.ApplyKey(null); break;
+            case "deliver": _s.Deliver(); break;
         }
         Refresh();
     }
