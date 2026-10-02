@@ -48,9 +48,16 @@ public:
     bool cadence(const ChordCandidate& previous, const ChordCandidate& last, bool phraseEnd, CadenceEvent& out) const;
 
     static constexpr int kQualities = 15;
+    static constexpr int kTemplates = kQualities * 12;   // index = quality * 12 + root
+    static constexpr float kRuledOut = -1.f;
+    // Acoustic score of every template (out[kTemplates]): cosine + Occam + colour cost + settled
+    // bass, without the tonal context (offline decoding brings its own sequence model). Silence
+    // and ruled-out templates: kRuledOut.
+    void score_all(const float* chromaEnergy, int bassPc, float* out) const;
 
 private:
     Spelled root_spelling(int root) const;
+    float acoustic(int t, const float* amp, float mx, float inv, int bassPc) const;
 
     float templates_[kQualities * 12][12];
     uint16_t masks_[kQualities * 12];

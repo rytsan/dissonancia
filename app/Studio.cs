@@ -90,7 +90,7 @@ static partial class PostApi
     [LibraryImport(Lib, EntryPoint = "ana_post_destroy")] public static partial void Destroy(nint h);
     [LibraryImport(Lib, EntryPoint = "ana_post_last_error")] public static partial nint LastError(nint h);
     [LibraryImport(Lib, EntryPoint = "ana_post_start", StringMarshalling = StringMarshalling.Utf8)]
-    public static partial int Start(nint h, in SessionConfigNative s, double compensationSeconds, string inPath, string outJson);
+    public static partial int Start(nint h, in SessionConfigNative s, double compensationSeconds, string inPath, string outJson, byte metronomeGrid);
     [LibraryImport(Lib, EntryPoint = "ana_post_status")] public static partial void Status(nint h, out PostStatusNative s);
     [LibraryImport(Lib, EntryPoint = "ana_post_cancel")] public static partial void Cancel(nint h);
 }
@@ -109,8 +109,9 @@ public sealed class StudioJob : IDisposable
 
     public enum State { Idle, Running, Done, Failed, Cancelled }
 
-    public string? Start(Session s, double compensationSeconds, string input, string outJson) =>
-        PostApi.Start(_h, NativeCore.Config(s), compensationSeconds, input, outJson) == 0 ? null : Error;
+    /// metronomeGrid: the file starts on a downbeat of the session's tempo and meter (a REC take).
+    public string? Start(Session s, double compensationSeconds, string input, string outJson, bool metronomeGrid) =>
+        PostApi.Start(_h, NativeCore.Config(s), compensationSeconds, input, outJson, (byte)(metronomeGrid ? 1 : 0)) == 0 ? null : Error;
 
     public (State State, float Progress) Poll()
     {
@@ -490,7 +491,7 @@ public sealed class StudioView : DockPanel
         _title.Text = Path.GetFileName(path);
         var (s, comp, fromTake) = StudioProject.SessionFor(path, _session);
         _mode.SelectedIndex = (int)s.Mode;
-        _result = StudioProject.Cached(path, StudioProject.Options(s, comp));
+        _result = StudioProject.Cached(path, StudioProject.Options(s, comp) + (fromTake ? ";grid" : "") + ";decoder=2");
         _progress.Value = _result is null ? 0 : 1;
         _analysis.Text = (fromTake ? "sessão do take" : "sessão da START") + (_result is null ? " · não analisado" : " · resultado em cache");
         _info.Text = err ?? $"{_player.Frames / (double)Math.Max(1, _player.Rate):0.00} s · {_player.Rate} Hz · {(_player.Channels == 1 ? "mono" : "estéreo")}";
@@ -498,11 +499,12 @@ public sealed class StudioView : DockPanel
         _wave.Fit();
     }
 
-    Session AnalysisSession(out double comp)
+    Session AnalysisSession(out double comp, out bool fromTake)
     {
-        var (s, c, _) = StudioProject.SessionFor(_current!, _session);
+        var (s, c, take) = StudioProject.SessionFor(_current!, _session);
         s.Mode = (AppMode)Math.Max(0, _mode.SelectedIndex);
         comp = c;
+        fromTake = take;
         return s;
     }
 
@@ -511,11 +513,11 @@ public sealed class StudioView : DockPanel
     void Analyze()
     {
         if (_job is null || _current is null || _running) return;
-        var s = AnalysisSession(out double comp);
-        var options = StudioProject.Options(s, comp);
+        var s = AnalysisSession(out double comp, out bool fromTake);
+        var options = StudioProject.Options(s, comp) + (fromTake ? ";grid" : "") + ";decoder=2";   // decoder 2: whole-take Viterbi
         if (StudioProject.Cached(_current, options) is { } cached) { _result = cached; _analysis.Text = "resultado em cache (mesmas opções)"; _progress.Value = 1; return; }
         StudioProject.EnsureDir();
-        var err = _job.Start(s, comp, _current, StudioProject.ResultPath(_current));
+        var err = _job.Start(s, comp, _current, StudioProject.ResultPath(_current), fromTake);   // a REC take is on its metronome grid
         if (err is not null) { _analysis.Text = "falhou: " + err; return; }
         (_running, _jobOptions, _jobSource, _result) = (true, options, _current, null);
         _analyze.IsEnabled = false;

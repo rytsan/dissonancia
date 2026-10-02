@@ -3,8 +3,7 @@
 #include <cmath>
 #include <cstdio>
 
-#include "chords.hpp"
-#include "cqt.hpp"
+#include "decode.hpp"
 #include "live_config.hpp"
 #include "miniaudio.h"
 #include "sidecar.hpp"
@@ -31,7 +30,7 @@ void PostJob::status(PostStatus& out) const {
     out.state = PostState(state_.load());
 }
 
-int PostJob::start(const SessionConfig& s, double comp, const char* in, const char* out) {
+int PostJob::start(const SessionConfig& s, double comp, const char* in, const char* out, bool grid) {
     if (state_.load() == uint8_t(PostState::Running)) { set_error("a job is already running"); return ANA_ERR_STATE; }
     join();
     cancel_ = false;
@@ -39,15 +38,15 @@ int PostJob::start(const SessionConfig& s, double comp, const char* in, const ch
     set_error("");
     state_ = uint8_t(PostState::Running);
     std::string i = in, o = out;
-    thread_ = std::thread([this, s, comp, i, o] {
+    thread_ = std::thread([this, s, comp, i, o, grid] {
         int r = ANA_ERR_STATE;
-        try { r = run(s, comp, i, o); } catch (const std::exception& e) { set_error(e.what()); }
+        try { r = run(s, comp, i, o, grid); } catch (const std::exception& e) { set_error(e.what()); }
         state_ = uint8_t(r == ANA_OK ? PostState::Done : cancel_.load() ? PostState::Cancelled : PostState::Failed);
     });
     return ANA_OK;
 }
 
-int PostJob::run(const SessionConfig& session, double comp, const std::string& in, const std::string& out) {
+int PostJob::run(const SessionConfig& session, double comp, const std::string& in, const std::string& out, bool grid) {
     // Decode to mono float at the file's rate (miniaudio mixes the channels down).
     ma_decoder dec;
     ma_decoder_config dc = ma_decoder_config_init(ma_format_f32, 1, 0);
@@ -87,18 +86,15 @@ int PostJob::run(const SessionConfig& session, double comp, const std::string& i
         vp.flush(o);
         for (uint32_t i = 0; i < o.eventCount; i++) keep(o.events[i]);
     } else {
-        ChromaFrontEnd fe(s, c.decimation, rate, c.fMin, c.fMax, c.binsPerOctave, hop, c.bassMin, c.bassMax, c.windowSeconds);
-        ChordTracker tr(s, c.hopSeconds, comp);
-        ChromaFrontEnd::Output o{};
-        ChordTracker::Output t{};
-        for (size_t pos = 0; pos + hop <= x.size(); pos += hop) {
-            fe.process(x.data() + pos, hop, pos + hop, o);
-            tr.process(o.chroma, o.chroma.timestampSeconds, double(pos + hop) / rate, o.bass, o.lastOnset, t);
-            for (uint32_t i = 0; i < t.eventCount; i++) keep(t.events[i]);
-            if ((pos / hop) % 64 == 0 && !step(pos)) { set_error("cancelled"); return ANA_ERR_STATE; }
-        }
-        tr.flush(t);
-        for (uint32_t i = 0; i < t.eventCount; i++) keep(t.events[i]);
+        // Whole-take decoding (decode.hpp): the chord sequence decided with the future in view.
+        bool cancelled = false;
+        auto ev = decode_chords(s, x.data(), x.size(), rate, comp, grid, [&](double f) {
+            progress_.store(float(f), std::memory_order_relaxed);
+            cancelled = cancel_.load(std::memory_order_relaxed);
+            return !cancelled;
+        });
+        if (cancelled) { set_error("cancelled"); return ANA_ERR_STATE; }
+        for (const AnalyzerEvent& e : ev) keep(e);
     }
 
     FILE* f = std::fopen(out.c_str(), "w");

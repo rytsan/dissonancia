@@ -118,7 +118,7 @@ this order because each stage needs the one before it, as in a studio.
   (post-inserts, pre-fader) exposed per channel.
 - Built-in processors only; VST3 is S8.
 
-### S5 — Transcription per channel (spec stage 4, §21)
+### S5 — Transcription per channel (spec stage 4, §21) — chords' whole-take decoding done 2026-10-02
 - Reads each channel at its tap, by its analysis type:
   - Voice / melody: YIN + MPM cross-check, Viterbi smoothing over the whole
     take (pYIN-style), note segmentation with look-ahead, vibrato and

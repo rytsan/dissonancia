@@ -7,7 +7,7 @@ NAMES = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
 def parse(sym):
     sym = sym.split("/")[0]
     m = re.match(r"([A-G])([#b]?)(.*)", sym); root = (NAMES[m[1]] + {"#": 1, "b": -1, "": 0}[m[2]]) % 12; q = m[3]
-    fam = "m" if q.startswith("m") and not q.startswith("maj") else "dim" if "dim" in q or "h" in q else "5" if q == "5" else "sus" if "sus" in q else "M"
+    fam = "dim" if "dim" in q or "h" in q or "b5" in q else "m" if q.startswith("m") and not q.startswith("maj") else "5" if q == "5" else "sus" if "sus" in q else "M"
     return root, fam
 events, stats, frames, ended = [], "", [], []
 for line in open(sys.argv[2]):

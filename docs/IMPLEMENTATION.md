@@ -58,6 +58,7 @@ Only the pipeline chosen on START exists in a session (`voice_` for mono modes,
 | `core/src/bass.{hpp,cpp}` | Onset detector (spectral flux) and bass tracker (YIN preview + CQT confirmation) |
 | `core/src/player.{hpp,cpp}` | STUDIO player: file decoded to memory, own output device, loop, min/max peak mipmap |
 | `core/src/post.{hpp,cpp}` | STUDIO offline analysis job: whole file through the mode's pipeline, progress, cancel, take JSON out |
+| `core/src/decode.{hpp,cpp}` | STUDIO whole-take chord decoding: Viterbi over the matcher's scores, segment labels, onset snap, metronome grid |
 | `core/src/sidecar.hpp` | Take JSON event writer shared by the REC sidecar and the offline result |
 | `app/Studio.cs` | STUDIO tab (S1): library, waveform, transport, offline analysis, take project cache |
 | `core/src/tempo.{hpp,cpp}` | Tempo heard (onset-envelope autocorrelation + beat phase): beat marks on the scope only |
@@ -299,7 +300,20 @@ notes, a sung melody with passing and neighbour tones, kick/snare/hi-hat),
   by the shared `sidecar.hpp`), so SCORE loads it like any take.
 - Quality: the session's. HighPrecision was measured on the band mix and is
   not better (take labels 89 % vs 91 % Balanced), so offline does not force
-  it; precision grows with the S5 whole-take decoders.
+  it.
+- Chords offline (whole-take decoding, `decode.cpp`): pass 1 keeps every
+  frame's chroma, settled bass and the onsets; pass 2 runs Viterbi over the
+  180 templates + silence with the matcher's acoustic scores (no tonal
+  context) and a cost per change (10 summed score units), so a chord lasts
+  until the harmony changes and every decision sees what follows. Each
+  segment is labelled on its persistence-weighted mean chroma (normalised
+  frames, a pitch class weighs by its share of strong frames), its bass is
+  the settled bass that held for 30 % of it, its start the latest attack in
+  the 0.25 s before the boundary, and the previous chord ends there.
+  Cadences between segments as in LIVE. On a REC take the metronome grid is
+  known: a change costs half on a downbeat and 1.2× off the beats.
+- Melody offline is still the LIVE note pipeline over the file (next:
+  whole-take note decoding).
 - A REC take is analysed with its own session (mode, key, clef, meter, BPM)
   and round-trip compensation from its sidecar; an imported file with the
   START session and no compensation. The mode can be changed per file.
@@ -391,6 +405,8 @@ item).
 | Live loopback, voice (13 notes, vibrato ±15 ¢, chromatic passing tone) | 13/13 pitches at +2…+3 ¢, D–D♭–C spelled by direction, stable-note latency median 50 ms; legato note changes started ≈ 28 ms late (now +4…+9 ms; first note after silence exact); score rhythm exact after quantization |
 | Band mix, before → after (offline, `dz_wav`) | live confirmed chord correct 72.3 → 80.0 % of the time, wrong confirmations 15 → 6, matcher frames 50 → 76 %; take labels 91 %. Stems after: guitar 95 %, guitar + voice 87 % (take 94 %), guitar + bass 94 %, guitar + drums 96 %; clean plucked guitar unchanged at 99.5 % |
 | Band mix, live loopback (engine, `tools/loopback`) | take labels 86 % correct |
+| STUDIO offline chords vs LIVE (band mix and stems, `dz_wav … offline 96 4`) | mix 91.2 → 99.2 %, guitar 95.0 → 99.0, guitar + voice 94.0 → 99.2, guitar + bass 94.5 → 99.3, guitar + drums 97.5 → 99.2; 16 chords for 16 bars every time (LIVE: 21–37); the mix's one miss is Dm/A (passing bass read as an inversion) |
+| STUDIO offline chords, validation (6 progressions not used for tuning: V/V + dim7, harmonic minor, B♭ jazz with tritone sub, V/vi, Neapolitan, blues) | 100 % on all six; clean plucked guitar 99.5 %, G Em C D7 G/B Am7 D G exact |
 | Tempo heard, synthetic | within 2 BPM at 72/92/120/150 (10 % missing attacks, ±12 ms timing), eighth-note strumming at 92 → 92; beat phase within 30 ms |
 | Tempo heard, live loopback (guitar, strums on 1 and 3, 92 bpm) | 91.5–92.3 from 3 s; beat marks hold their phase within ±15 ms over 13 s |
 | Live loopback, pipeline | capture 15 ms (reported), processing median 4.8–5.1 ms, CPU ≤ 2.5 %, 0 xruns, 0 recorder gaps, 0 event gaps |

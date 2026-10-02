@@ -1,7 +1,9 @@
 // Offline chord run over a WAV file (16-bit PCM or float32, any channel count, mixed to mono):
 // the same front end and tracker as the live engine, hop by hop, without a device. Prints the
 // confirmed chords and how often the live preview would change on screen.
-//   dz_wav file.wav [guitar|piano|general] [low|balanced|high]
+//   dz_wav file.wav [guitar|piano|general] [low|balanced|high] [offline [bpm beatsPerBar]]
+// offline: the STUDIO whole-take decoder instead of the live tracker; with a bpm, the file is taken
+// to start on a downbeat of that metronome grid (a REC take).
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -10,6 +12,7 @@
 #include <vector>
 
 #include "chords.hpp"
+#include "decode.hpp"
 #include "cqt.hpp"
 #include "live_config.hpp"
 
@@ -62,6 +65,18 @@ int main(int argc, char** argv) {
     s.keySet = 1;
     s.meter = {4, 4};
     s.bpm = 120;
+    if (argc > 4 && std::string(argv[4]) == "offline") {
+        int chords = 0;
+        const bool grid = argc > 5;
+        if (grid) { s.bpm = float(std::atof(argv[5])); s.meter.numerator = uint8_t(argc > 6 ? std::atoi(argv[6]) : 4); }
+        for (const AnalyzerEvent& e : decode_chords(s, x.data(), x.size(), rate, 0.0, grid)) {
+            if (e.type != AnalyzerEventType::ChordEnded) continue;
+            std::printf("ended %8.3f %8.3f %s\n", e.data.chord.startTimeSeconds, e.data.chord.endTimeSeconds, e.data.chord.symbol);
+            chords++;
+        }
+        std::printf("offline: %d chords, %.1f s\n", chords, double(x.size()) / rate);
+        return 0;
+    }
     const LiveConfig c = live_config(s.mode, s.quality, rate);
     const uint32_t hop = uint32_t(std::lround(c.hopSeconds * rate));
     ChromaFrontEnd fe(s, c.decimation, rate, c.fMin, c.fMax, c.binsPerOctave, hop, c.bassMin, c.bassMax, c.windowSeconds);

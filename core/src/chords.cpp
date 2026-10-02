@@ -324,6 +324,41 @@ void ChordMatcher::slash(int root, ChordQuality q, int bassPc, char (&out)[16]) 
     if (alter >= -2 && alter <= 2) std::snprintf(out + n, sizeof out - n, "/%c%s", "CDEFGAB"[letter], acc[alter + 2]);
 }
 
+float ChordMatcher::acoustic(int t, const float* amp, float mx, float inv, int bassPc) const {
+    float dot = 0;
+    for (int k = 0; k < 12; k++) dot += templates_[t][k] * amp[k];
+    float score = dot * inv;
+    // Occam: a strong pitch class the template does not contain (and that is too strong to be a
+    // partial) costs, and so does a template note that is absent. Keeps Cm6 from reading as
+    // Adim + harmonic, and a triad from growing a phantom seventh.
+    for (int k = 0; k < 12; k++) {
+        bool in = masks_[t] >> k & 1;
+        if (!in && amp[k] >= 0.6f * mx) score -= 0.04f;
+        if (in && amp[k] < 0.3f * mx) score -= 0.04f;
+    }
+    // A power chord is the absence of a third, not a weak one: a barre F has one A among five
+    // strings, an Am one C. Any audible third (minor or major) rules the "5" out.
+    if (kDefs[t / 12].q == ChordQuality::Power) {
+        const int r = t % 12;
+        if (std::max(amp[(r + 3) % 12], amp[(r + 4) % 12]) >= 0.15f * mx) return kRuledOut;
+    }
+    score -= kColourCost[size_t(kDefs[t / 12].q)];
+    // Settled bass (§11): the bass as root scores most, as another chord tone half.
+    if (bassPc >= 0) score += kBassWeight * (t % 12 == bassPc ? 1.f : (masks_[t] >> bassPc & 1) ? 0.5f : 0.f);
+    return score;
+}
+
+void ChordMatcher::score_all(const float* energy, int bassPc, float* out) const {
+    float amp[12], mx = 0;
+    double norm = 0;
+    for (int i = 0; i < 12; i++) {
+        amp[i] = std::sqrt(std::max(0.f, energy[i]));
+        mx = std::max(mx, amp[i]);
+        norm += double(amp[i]) * amp[i];
+    }
+    for (int t = 0; t < kTemplates; t++) out[t] = mx > 0 ? acoustic(t, amp, mx, float(1 / std::sqrt(norm)), bassPc) : kRuledOut;
+}
+
 void ChordMatcher::match(const float* energy, const ChordHistory& h, int bassPc, ChordRecognitionResult& out) const {
     auto previous = [&](int root, ChordQuality q, ChordQuality& pq) {
         bool isCurrent = root == h.currentRoot && q == h.currentQuality;
@@ -350,29 +385,11 @@ void ChordMatcher::match(const float* energy, const ChordHistory& h, int bassPc,
     struct Scored { int t; float score; };
     Scored top[4] = {{-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}};
     for (int t = 0; t < kQualities * 12; t++) {
-        float dot = 0;
-        for (int k = 0; k < 12; k++) dot += templates_[t][k] * amp[k];
-        float score = dot * inv;
-        // Occam: a strong pitch class the template does not contain (and that is too strong to be a
-        // partial) costs, and so does a template note that is absent. Keeps Cm6 from reading as
-        // Adim + harmonic, and a triad from growing a phantom seventh.
-        for (int k = 0; k < 12; k++) {
-            bool in = masks_[t] >> k & 1;
-            if (!in && amp[k] >= 0.6f * mx) score -= 0.04f;
-            if (in && amp[k] < 0.3f * mx) score -= 0.04f;
-        }
-        // A power chord is the absence of a third, not a weak one: a barre F has one A among five
-        // strings, an Am one C. Any audible third (minor or major) rules the "5" out.
-        if (kDefs[t / 12].q == ChordQuality::Power) {
-            const int r = t % 12;
-            if (std::max(amp[(r + 3) % 12], amp[(r + 4) % 12]) >= 0.15f * mx) continue;
-        }
+        float score = acoustic(t, amp, mx, inv, bassPc);
+        if (score <= kRuledOut) continue;
         // Context (key function + cadence) weighs less than one Occam penalty: it decides only
         // what the audio leaves open (identical sets, C+E dyad), never overrides a clear chord.
         score += kContextWeight * ctx(t % 12, kDefs[t / 12].q, nullptr);
-        score -= kColourCost[size_t(kDefs[t / 12].q)];
-        // Settled bass (§11): the bass as root scores most, as another chord tone half.
-        if (bassPc >= 0) score += kBassWeight * (t % 12 == bassPc ? 1.f : (masks_[t] >> bassPc & 1) ? 0.5f : 0.f);
         for (int i = 0; i < 4; i++)
             if (score > top[i].score) {
                 for (int j = 3; j > i; j--) top[j] = top[j - 1];

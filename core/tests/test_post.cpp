@@ -68,7 +68,7 @@ TEST_CASE("post: a chord file becomes a take JSON of its chords, and a job can b
 
     // Asynchronous: cancelled at once, it ends Cancelled and writes nothing.
     PostJob slow;
-    REQUIRE(slow.start(session(AnalysisMode::GuitarChords), 0.0, in.c_str(), "dz_post_cancel.json") == ANA_OK);
+    REQUIRE(slow.start(session(AnalysisMode::GuitarChords), 0.0, in.c_str(), "dz_post_cancel.json", false) == ANA_OK);
     slow.cancel();
     PostStatus st{};
     for (int i = 0; i < 500; i++) {

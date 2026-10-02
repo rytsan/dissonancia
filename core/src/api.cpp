@@ -199,9 +199,9 @@ const char* ana_post_last_error(PostHandle* h) {
     return h->error.c_str();
 }
 
-int32_t ana_post_start(PostHandle* h, const SessionConfig* s, double comp, const char* in, const char* out) {
+int32_t ana_post_start(PostHandle* h, const SessionConfig* s, double comp, const char* in, const char* out, uint8_t grid) {
     if (!h || !s || !in || !out) return ANA_ERR_ARG;
-    try { return h->job.start(*s, comp, in, out); } catch (const std::exception&) { return ANA_ERR_STATE; }
+    try { return h->job.start(*s, comp, in, out, grid != 0); } catch (const std::exception&) { return ANA_ERR_STATE; }
 }
 
 void ana_post_status(PostHandle* h, PostStatus* out) { if (h && out) h->job.status(*out); }
