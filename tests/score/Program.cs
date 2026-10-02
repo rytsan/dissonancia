@@ -41,6 +41,8 @@ System.Text.Json.Nodes.JsonNode BassNote(int midi, string name, double a, double
 var dm = Chord("Dm/A", 2, 1);
 LeadSheet.ApplyBass(dm, [BassNote(38, "D2", 0.02, 0.9), BassNote(45, "A2", 1.0, 1.7), BassNote(42, "F#2", 1.75, 1.95)]);   // root on 1, fifth on 3, a passing note
 Check((string?)dm["symbol"] == "Dm", $"bass: the root on the downbeat -> root position, the fifth on 3 is not an inversion ({dm["symbol"]})");
+Check(LeadSheet.Refigure("ii64", 1, 0) == "ii" && LeadSheet.Refigure("V7", 7, 1) == "V65" && LeadSheet.Refigure("V7/V", 7, 2) == "V43/V" && LeadSheet.Refigure("I", 0, 1) == "I6",
+      $"bass: roman figures follow the bass ({LeadSheet.Refigure("ii64", 1, 0)} {LeadSheet.Refigure("V7", 7, 1)} {LeadSheet.Refigure("V7/V", 7, 2)})");
 var ce = Chord("C", 0, 0);
 LeadSheet.ApplyBass(ce, [BassNote(40, "E2", 0, 1.6)]);
 Check((string?)ce["symbol"] == "C/E" && (int)ce["inversion"]! == 1, $"bass: E under C -> C/E ({ce["symbol"]})");
@@ -60,6 +62,54 @@ Check(drift.SequenceEqual([0.0, 0.0, 60.0, -50.0]), $"beats: drift from the 120 
 var noGrid = new System.Text.Json.Nodes.JsonObject();
 LeadSheet.AddBeats(noGrid, new System.Text.Json.Nodes.JsonObject { ["tempoBpm"] = 96.0, ["beats"] = new System.Text.Json.Nodes.JsonArray(0.0, 0.625) }, 0);
 Check(noGrid["beatDriftMs"] is null && (double)noGrid["tempoBpm"]! == 96, "beats: an imported file has no click to drift from");
+
+// STUDIO S6 review: key suggestion, corrections, tempo from the drums.
+Take Progression(params (int Root, int Quality)[] chords)
+{
+    var t = new Take();
+    for (int i = 0; i < chords.Length; i++) t.Chords.Add(new TakeChord(i * 2.5, (i + 1) * 2.5, "", "", chords[i].Root, -1, chords[i].Quality, 0.9f));
+    return t;
+}
+var popC = Review.SuggestKey(Progression((0, 0), (9, 1), (5, 0), (7, 0), (4, 1), (9, 1), (2, 1), (7, 7)));
+Check(popC is { } kc && kc.Key == new KeyOption(0, false), $"review: C Am F G Em Am Dm G7 -> C major ({popC?.Key}, r {popC?.Correlation:0.00}, margin {popC?.Margin:0.00})");
+var amin = Review.SuggestKey(Progression((9, 1), (2, 1), (4, 7), (9, 1), (5, 0), (2, 1), (4, 7), (9, 1)));
+Check(amin is { } ka && ka.Key == new KeyOption(0, true), $"review: Am Dm E7 Am F Dm E7 Am -> A minor ({amin?.Key})");
+var ebM = Review.SuggestKey(Progression((3, 0), (8, 0), (10, 7), (3, 0), (0, 1), (8, 0), (10, 7), (3, 0)));
+Check(ebM is { } ke && ke.Key == new KeyOption(-3, false), $"review: Eb Ab Bb7 Eb Cm Ab Bb7 Eb -> Eb major ({ebM?.Key})");
+Check(Review.SuggestKey(new Take()) is null, "review: nothing to hear, no suggestion");
+
+var rv = new Review();
+rv.Add(new Review.Fix("chord", 2.53, Root: 2));        // Am -> Dm
+rv.Add(new Review.Fix("chord", 2.5, Quality: 7));      // ... -> D7: merges with the root fix
+rv.Add(new Review.Fix("note", 1.0, Midi: 67));
+rv.Add(new Review.Fix("bass", 5.0, Delete: true));
+var rdoc = System.Text.Json.Nodes.JsonNode.Parse("""
+{"session": {"keySet": false, "keyFifths": 0, "keyMode": 0, "bpm": 92},
+ "events": [
+  {"type": "chord", "start": 2.48, "end": 5.0, "symbol": "Am", "root": 9, "quality": 1, "bass": 9, "roman": "vi", "confidence": 0.4},
+  {"type": "note", "start": 1.05, "end": 1.4, "midi": 66, "name": "F#4", "confidence": 0.5},
+  {"type": "note", "part": "bass", "start": 5.02, "end": 6.0, "midi": 40, "name": "E2", "confidence": 0.5},
+  {"type": "note", "part": "bass", "start": 6.02, "end": 7.0, "midi": 43, "name": "G2", "confidence": 0.5}]}
+""")!.AsObject();
+rv.Apply(rdoc);
+var evs = rdoc["events"]!.AsArray();
+Check(rv.Fixes.Count == 3 && (string?)evs[0]!["symbol"] == "D7" && (int)evs[0]!["bass"]! == 2 && (string?)evs[0]!["roman"] == "" && (bool)evs[0]!["corrected"]!,
+      $"review: chord fixes merge, root position follows the root ({evs[0]!["symbol"]})");
+Check((string?)evs[1]!["name"] == "G4" && (double)evs[1]!["confidence"]! == 1, "review: a note fix renames it and marks it certain");
+Check(evs.Count == 3 && (int)evs[2]!["midi"]! == 43, "review: the deleted bass note is gone, the other stays");
+var wr = System.Text.Json.Nodes.JsonNode.Parse("""
+{"session": {"bpm": 92}, "tempoBpm": 100.0, "beats": [0.1, 0.7, 1.3, 1.85, 2.4],
+ "events": [{"type": "note", "start": 0.7, "end": 1.575, "midi": 60}]}
+""")!.AsObject();
+Review.WarpToBeats(wr, [0.1, 0.7, 1.3, 1.85, 2.4]);
+var we = wr["events"]![0]!;
+Check(Review.ChordSymbol(10, 7, 10, 0) == "Bb7" && Review.ChordSymbol(6, 1, 6, 0) == "F#m" && Review.ChordSymbol(6, 0, 1, 2) == "F#/C#" && Review.ChordSymbol(3, 0, 3, -3) == "Eb",
+      $"review: spelling of corrected chords ({Review.ChordSymbol(10, 7, 10, 0)} {Review.ChordSymbol(6, 1, 6, 0)} {Review.ChordSymbol(6, 0, 1, 2)})");
+var rt2 = new Review { KeySet = true, KeyFifths = -3, TempoFromDrums = true };
+var back = System.Text.Json.JsonSerializer.Deserialize<Review>(System.Text.Json.JsonSerializer.Serialize(rt2))!;
+Check(back.KeySet == true && back.KeyFifths == -3 && back.TempoFromDrums, "review: key and tempo choices are saved");
+Check(Math.Abs((double)we["start"]! - 0.6) < 1e-6 && Math.Abs((double)we["end"]! - 1.5) < 1e-6 && (double)wr["session"]!["bpm"]! == 100,
+      $"review: tempo from the drums puts beat k on k beats of 100 BPM ({we["start"]} {we["end"]})");
 
 // STUDIO S2 edit list: trim, cut and clip gain on the edited timeline (frames).
 var el = new EditList();

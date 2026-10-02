@@ -11,7 +11,7 @@ public static class LeadSheet
 {
     // ChordQuality order of the core: Major, Minor, Diminished, Augmented, Sus2, Sus4, Power, Dom7,
     // Maj7, Min7, HalfDim7, Dim7, Maj6, Min6, Add9.
-    static readonly int[][] Intervals =
+    public static readonly int[][] Intervals =
     [
         [0, 4, 7], [0, 3, 7], [0, 3, 6], [0, 4, 8], [0, 2, 7], [0, 5, 7], [0, 7], [0, 4, 7, 10],
         [0, 4, 7, 11], [0, 3, 7, 10], [0, 3, 6, 10], [0, 3, 6, 9], [0, 4, 7, 9], [0, 3, 7, 9], [0, 4, 7, 2],
@@ -72,8 +72,26 @@ public static class LeadSheet
         var tones = quality >= 0 && quality < Intervals.Length ? Intervals[quality].Select(i => (rootPc + i) % 12).ToArray() : [rootPc];
         string symbol = (string)chord["symbol"]!;
         string plain = symbol.Contains('/') ? symbol[..symbol.IndexOf('/')] : symbol;
-        if (best == rootPc) { chord["symbol"] = plain; chord["bass"] = rootPc; chord["inversion"] = 0; }
-        else if (Array.IndexOf(tones, best) is int i and > 0) { chord["symbol"] = plain + "/" + names[best]; chord["bass"] = best; chord["inversion"] = i; }
-        // A bass outside the chord (a passing tone that held) is left to the review.
+        int inv;
+        if (best == rootPc) { chord["symbol"] = plain; inv = 0; }
+        else if (Array.IndexOf(tones, best) is int i and > 0) { chord["symbol"] = plain + "/" + names[best]; inv = i; }
+        else return;   // a bass outside the chord (a passing tone that held) is left to the review
+        chord["bass"] = best;
+        chord["inversion"] = inv;
+        if (chord["roman"] is JsonValue rv && rv.TryGetValue<string>(out var roman) && roman.Length > 0) chord["roman"] = Refigure(roman, quality, inv);
+    }
+
+    /// The roman numeral with the figure of the new inversion (the core's: triads "", 6, 64;
+    /// sevenths 7, 65, 43, 42), e.g. ii64 -> ii, V7 -> V65, V7/V -> V43/V.
+    public static string Refigure(string roman, int quality, int inversion)
+    {
+        bool triad = quality is 0 or 1 or 2 or 3, seventh = quality is 7 or 8 or 9 or 10 or 11;
+        if (!triad && !seventh) return roman;
+        string[] figs = triad ? ["", "6", "64"] : ["7", "65", "43", "42"];
+        int slash = roman.IndexOf('/');
+        string head = slash < 0 ? roman : roman[..slash], tail = slash < 0 ? "" : roman[slash..];
+        foreach (var f in figs.Where(f => f.Length > 0).OrderByDescending(f => f.Length))
+            if (head.EndsWith(f)) { head = head[..^f.Length]; break; }
+        return head + figs[Math.Min(inversion, figs.Length - 1)] + tail;
     }
 }

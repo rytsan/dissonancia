@@ -108,6 +108,11 @@ public sealed class MainWindow : Window
             ["StudioSeparate"] = () => _studio.SeparateCurrent(),
             ["StudioTick"] = () => _studio.Tick(),
             ["StudioConsole"] = () => _studio.ShowConsole(true),
+            ["StudioPick"] = () => _studio.ReviewAction("pick"),
+            ["StudioFixRoot"] = () => _studio.ReviewAction("root"),
+            ["StudioFixQuality"] = () => _studio.ReviewAction("quality"),
+            ["StudioApplyKey"] = () => _studio.ReviewAction("key"),
+            ["StudioClearReview"] = () => _studio.ReviewAction("clear"),
             ["StudioScore"] = () => _studio.ScoreCurrent(),
             ["StudioSelectDemo"] = () => _studio.SelectRange(1.0, 6.0),   // screenshot tool: a selection to edit
             ["StudioTrim"] = () => _studio.EditAction("trim"),

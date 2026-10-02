@@ -133,7 +133,7 @@ this order because each stage needs the one before it, as in a studio.
 - Conflicts between channels (voice note vs chord, bass vs chord root)
   lower confidence, never forced.
 
-### S6 — Review (spec stages 5–6)
+### S6 — Review (spec stages 5–6) — done 2026-10-03 (meter suggestion, swing and pickup left for later)
 - Key and meter set by the user; STUDIO shows its suggestion (key profile
   over the whole take, meter from the downbeats) with a confidence.
 - Tempo: session metronome by default; the tempo map from S5 as an option.

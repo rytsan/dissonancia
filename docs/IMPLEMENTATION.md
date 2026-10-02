@@ -330,7 +330,26 @@ notes, a sung melody with passing and neighbour tones, kick/snare/hi-hat),
 - Fixed on the way: the pitch timestamp of the first hops underflowed (an
   unsigned subtraction before the window filled) — LIVE and offline.
 
-### STUDIO S5 — transcription per channel
+### STUDIO S6 — review
+- `Review.cs`, one `<take>.review.json`: key (the user's), tempo source,
+  corrections. Applied over the analysis into `<take>.reviewed.json`, which
+  SCORE reads; the analysis itself is never edited.
+- Key suggestion over the whole take: Temperley profiles correlated with
+  voice and bass notes by duration and chord tones by chord duration; shown
+  as APLICAR <key> with its correlation ("incerta" under r 0.6 or a margin
+  under 0.05 over the next non-relative key). Band mix: C major, r 0.88.
+  Applying sets the session key and the analysis runs again (the key weighs
+  chord choices and spells notes, roman numerals appear); SEM TOM removes it.
+- Tempo: the metronome by default; TEMPO BATERIA warps every event so beat k
+  of the drums lands on k beats of their global tempo (piecewise linear).
+- Corrections: click a chord (lane), a note (lane) or a bass note (bass row);
+  the recorder's keys become ◀ RAIZ / RAIZ ▶ / QUALIDADE / BAIXO / APAGAR or
+  −8ª / −½ / +½ / +8ª / APAGAR; DÚVIDA ▶ jumps to the next spot under 0.5
+  confidence. A fix matches its event by type and start (±0.12 s), merges
+  with an earlier fix of the same event, marks it certain, and is re-applied
+  after every re-run (kept across a key change: Am -> Bb7 survived it).
+- Roman figures follow the bass line's inversion (ii64 -> ii when the bass
+  plays D on 1 and A on 3).
 - Passes per separated take, each at its channel's tap: voice (notes),
   harmony (other + bass: chords), bass (instrument melody, high precision,
   bass clef), drums (beats). One lead sheet for SCORE (`LeadSheet.cs`).

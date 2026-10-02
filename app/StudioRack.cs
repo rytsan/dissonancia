@@ -30,8 +30,102 @@ public sealed class StudioState
     readonly Stack<EditList> _undo = new();
     public double ViewStart, ViewEnd, SelStart = -1, SelEnd = -1;   // edited frames
     public AppMode Mode;
-    public string? Result;           // take JSON of the offline analysis (or the stems' lead sheet) of the current edits
+    public string? Result;           // take JSON of the offline analysis (or the stems' lead sheet) of the current edits, reviewed
     public Take? ResultTake;
+
+    // ---------------------------------------------------------------- S6 review
+    public Review Review = new();
+    public (KeyOption Key, double Correlation, double Margin)? Suggestion;
+    public (string Kind, double Start)? Picked;   // the event being corrected
+
+    void SaveReview() { StudioProject.EnsureDir(); Review.Save(StudioProject.ReviewPath(Current!)); }
+
+    /// Key and meter are the user's: the suggestion becomes the key only here, and the analysis
+    /// runs again with it (the key weighs chord choices and spells the notes).
+    public void ApplyKey(KeyOption? key)
+    {
+        if (Current is null) return;
+        Review.KeySet = key is not null;
+        if (key is not null) (Review.KeyFifths, Review.KeyMinor) = (key.Fifths, key.Minor);
+        SaveReview();
+        OverlayReview();
+        RefreshResult();
+        Status = (key is null ? "sem armadura" : "tom " + key.Label) + (Result is null ? " · ANALISAR para transcrever com ele" : "");
+        Changed?.Invoke();
+    }
+
+    public void ToggleTempoSource()
+    {
+        if (Current is null || ResultTake is null && !Review.TempoFromDrums) return;
+        Review.TempoFromDrums = !Review.TempoFromDrums;
+        SaveReview();
+        RefreshResult();
+        Changed?.Invoke();
+    }
+
+    void OverlayReview()
+    {
+        if (Review.KeySet is bool k) { Session.KeySet = k; if (k) Session.Key = new KeyOption(Review.KeyFifths, Review.KeyMinor); }
+    }
+
+    public void Pick(string? kind, double start = 0) { Picked = kind is null ? null : (kind, start); Changed?.Invoke(); }
+
+    TakeChord? PickedChord => Picked is ("chord", var s) ? ResultTake?.Chords.MinBy(c => Math.Abs(c.Start - s)) : null;
+    TakeNote? PickedNote => Picked is (var k, var s) && k != "chord" ? (k == "bass" ? ResultTake?.BassNotes : ResultTake?.Notes)?.MinBy(n => Math.Abs(n.Start - s)) : null;
+    public string PickedLabel => PickedChord is { } c ? c.Symbol : PickedNote is { } n ? n.Sounding.Name : "";
+
+    public void FixChord(int rootStep = 0, bool nextQuality = false, bool nextBass = false)
+    {
+        if (PickedChord is not { } c || Picked is not { } p) return;
+        int root = (c.Root + rootStep + 12) % 12;
+        int[] cycle = [0, 1, 7, 9, 8, 2, 10, 11, 5, 4, 6, 12, 13, 3, 14];   // common first: maj, m, 7, m7, maj7, dim, m7b5, dim7, sus4, sus2, 5, 6, m6, aug, add9
+        int q = nextQuality ? cycle[(Array.IndexOf(cycle, c.Quality) + 1) % cycle.Length] : c.Quality;
+        int? bass = null;
+        if (nextBass)
+        {   // root position -> each chord tone in turn
+            var tones = LeadSheet.Intervals[Math.Clamp(q, 0, LeadSheet.Intervals.Length - 1)].Select(i => (root + i) % 12).ToArray();
+            int at = Array.IndexOf(tones, c.Bass < 0 ? root : c.Bass);
+            bass = tones[(at + 1) % tones.Length];
+        }
+        Review.Add(new Review.Fix("chord", p.Start, Root: rootStep != 0 ? root : null, Quality: nextQuality ? q : null, Bass: bass));
+        AfterFix();
+    }
+
+    public void FixNote(int semitones)
+    {
+        if (PickedNote is not { } n || Picked is not { } p) return;
+        Review.Add(new Review.Fix(p.Kind, p.Start, Midi: n.Midi + semitones));
+        AfterFix();
+    }
+
+    public void DeletePicked()
+    {
+        if (Picked is not { } p) return;
+        Review.Add(new Review.Fix(p.Kind, p.Start, Delete: true));
+        Picked = null;
+        AfterFix();
+    }
+
+    /// Back to the analysis for every event (key and tempo stay).
+    public void ClearFixes() { Review.Fixes.Clear(); AfterFix(); }
+
+    void AfterFix() { SaveReview(); RefreshResult(); Status = $"{Review.Fixes.Count} correções guardadas neste take"; Changed?.Invoke(); }
+
+    /// The next spot to check (confidence under 0.5, not yet corrected), after the playhead.
+    public void NextDoubt()
+    {
+        if (ResultTake is not { } t || Player is null) return;
+        double now = Player.Position / Rate - Compensation + 0.05;
+        var spots = t.Chords.Where(c => c.Confidence < 0.5f).Select(c => ("chord", c.Start))
+            .Concat(t.Notes.Where(n => n.Confidence < 0.5f).Select(n => ("note", n.Start))).OrderBy(x => x.Start).ToList();
+        if (spots.Count == 0) { Status = "nenhum ponto duvidoso"; Changed?.Invoke(); return; }
+        var next = spots.FirstOrDefault(x => x.Start > now, spots[0]);
+        Picked = next;
+        Player.Seek((ulong)Math.Max(0, (next.Start + Compensation) * Rate));
+        Status = $"{spots.Count} pontos duvidosos · este: {PickedLabel}";
+        Changed?.Invoke();
+    }
+    public int Doubts => ResultTake is { } t ? t.Chords.Count(c => c.Confidence < 0.5f) + t.Notes.Count(n => n.Confidence < 0.5f) : 0;
     public bool Running;
     public float Progress;
     public string Status = "";
@@ -62,6 +156,9 @@ public sealed class StudioState
         Mode = Session.Mode;
         Edits = StudioProject.LoadEdits(path);
         Mix = StudioProject.LoadMix(path);
+        Review = Review.Load(StudioProject.ReviewPath(path));
+        OverlayReview();
+        Picked = null;
         Selected = 0;
         _undo.Clear();
         if (!Edits.IsEmpty) Player.Apply(Edits);
@@ -297,7 +394,21 @@ public sealed class StudioState
         var done = plan.Select(p => StudioProject.Cached(Current, p.Options, p.Suffix)).ToList();
         if (done.Any(d => d is null)) return;
         Result = done.Count == 1 ? done[0] : MergeLeadSheet(plan.Zip(done, (p, d) => (p.Suffix, d!)).ToDictionary());
-        if (Result is not null) try { ResultTake = Take.Load(Result); } catch (Exception e) when (e is IOException or JsonException or KeyNotFoundException) { }
+        Suggestion = null;
+        if (Result is null) return;
+        try
+        {
+            Suggestion = Review.SuggestKey(Take.Load(Result));   // from the analysis, before any correction
+            if (!Review.IsEmpty)
+            {   // S6: key, tempo and corrections over the analysis, never in it
+                var root = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Result))!.AsObject();
+                Review.Apply(root);
+                File.WriteAllText(StudioProject.ReviewedPath(Current), root.ToJsonString());
+                Result = StudioProject.ReviewedPath(Current);
+            }
+            ResultTake = Take.Load(Result);
+        }
+        catch (Exception e) when (e is IOException or JsonException or KeyNotFoundException or InvalidOperationException) { }
     }
 
     /// Melody (voice notes) + harmony (chords) of the separated stems in one take JSON for SCORE.
@@ -584,22 +695,35 @@ public sealed class TransportUnit : StudioUnit
         x += Readout(ctx, x, y, mus < 0 ? "0.0.0" : $"{bar + 1}.{beat + 1}.{six + 1}", 7, 3.4, "POSIÇÃO") + 12;
         var t = TimeSpan.FromSeconds(Math.Max(0, sec));
         x += Readout(ctx, x, y, $"{(int)t.TotalMinutes}:{t.Seconds:00}.{t.Milliseconds / 10:00}", 7, 2.6, "TEMPO") + 12;
-        x += Readout(ctx, x, y, $"{S.Session.Bpm:0.0}", 5, 2.6, "BPM") + 12;
+        x += Readout(ctx, x, y, $"{(S.Review.TempoFromDrums && S.ResultTake is { } rt ? rt.Bpm : S.Session.Bpm):0.0}", 5, 2.6, S.Review.TempoFromDrums ? "BPM BATERIA" : "BPM") + 12;
         x += Readout(ctx, x, y, $"{S.Session.BeatsPerBar}/{S.Session.BeatUnit}", 3, 2.6, "COMPASSO") + 12;
+        // S6: the key is the user's; STUDIO only suggests. Tempo: the metronome, or the drums' map.
+        string KeyShort(KeyOption k) => k.Tonic.Replace("♭", "b").Replace("♯", "#") + (k.Minor ? "m" : "");
+        x += Readout(ctx, x, y, S.Session.KeySet ? KeyShort(S.Session.Key) : "--", 3, 2.6, "TOM") + 8;
+        if (S.Suggestion is { } sg && !(S.Session.KeySet && S.Session.Key == sg.Key))
+        {
+            bool unsure = sg.Margin < 0.05 || sg.Correlation < 0.6;
+            Key(ctx, new Rect(x, y, 112, 20), $"APLICAR {KeyShort(sg.Key)}", () => S.ApplyKey(sg.Key), false, Ui.Amber, !S.Running);
+            Ui.Text(ctx, $"sugestão {sg.Correlation * 100:0}%{(unsure ? " · incerta" : "")}", x + 56, y + 22, 7, unsure ? Ui.Label : Ui.Amber, Ui.SansBold, Ui.Align.Center);
+        }
+        else if (S.Session.KeySet)
+            Key(ctx, new Rect(x, y, 112, 20), "SEM TOM", () => S.ApplyKey(null), false, Ui.Amber, !S.Running);
+        if (S.ResultTake is { Beats.Count: > 0 } || S.Review.TempoFromDrums)
+            Key(ctx, new Rect(x, y + 34, 112, 20), S.Review.TempoFromDrums ? "TEMPO BATERIA" : "TEMPO CLICK", S.ToggleTempoSource, S.Review.TempoFromDrums, Ui.Amber);
         if (p is { Looping: true } && S.HasSelection)
         {
             x += Readout(ctx, x, y, $"{S.SelStart / S.Rate:0.00}", 5, 2.2, "LOOP INÍCIO") + 8;
             x += Readout(ctx, x, y, $"{(S.SelEnd - S.SelStart) / S.Rate:0.00}", 5, 2.2, "TAMANHO") + 12;
         }
         // Optional components present (any environment: everything optional, used when there).
-        double lx = r.Right - 250;
+        double lx = r.Right - 216;
         (string, bool)[] parts = [("PLAYER", p is not null), ("ANÁLISE", S.Job is not null), ("VEROVIO", Directory.Exists(Path.Combine(AppContext.BaseDirectory, "verovio-data"))), ("DEMUCS", S.DemucsReady), ("GPU", false)];
         for (int i = 0; i < parts.Length; i++)
         {
-            Ui.Led(ctx, new Point(lx + 6 + i * 50, y + 12), 4, parts[i].Item2, Ui.Green, Ui.GreenOff);
-            Ui.Text(ctx, parts[i].Item1, lx + 6 + i * 50, y + 22, 7, parts[i].Item2 ? Ui.LabelBright : Ui.Label, Ui.SansBold, Ui.Align.Center);
+            Ui.Led(ctx, new Point(lx + 16 + i * 44, y + 12), 4, parts[i].Item2, Ui.Green, Ui.GreenOff);
+            Ui.Text(ctx, parts[i].Item1, lx + 16 + i * 44, y + 22, 7, parts[i].Item2 ? Ui.LabelBright : Ui.Label, Ui.SansBold, Ui.Align.Center);
         }
-        Ui.Text(ctx, S.Session.KeySet ? S.Session.Key.Label : "sem armadura", lx, y + 40, 10, Ui.Label, Ui.Mono);
+        Ui.Text(ctx, S.Session.KeySet ? S.Session.Key.Label : "sem armadura", lx + 16, y + 40, 10, Ui.Label, Ui.Mono);
     }
 }
 
@@ -669,6 +793,7 @@ public sealed class RecorderUnit : StudioUnit
     float[] _mn = new float[4096], _mx = new float[4096];
     Rect _screen, _lane;
     readonly List<(Rect R, int Track)> _cards = [];
+    readonly List<(Rect R, string Kind, double Start)> _events = [];   // S6: what a click picks for review
     double _dragFrom = -1;
 
     public RecorderUnit(StudioState s) : base(s, "DS-A", "GRAVADOR DE FAIXAS") { }
@@ -678,10 +803,21 @@ public sealed class RecorderUnit : StudioUnit
 
     protected override void DrawContent(DrawingContext ctx, Rect r)
     {
-        // Edit keys (S2): the selection is in the edited take.
+        // Edit keys (S2): the selection is in the edited take. With an event picked, the review keys (S6).
         double kx = r.X, ky = r.Y;
         bool sel = S.HasSelection;
-        (string, Action, bool, bool)[] keys =
+        _events.Clear();
+        (string, Action, bool, bool)[] keys = S.Picked is ("chord", _) ?
+        [
+            ("◀ RAIZ", () => S.FixChord(rootStep: -1), false, true), ("RAIZ ▶", () => S.FixChord(rootStep: 1), false, true),
+            ("QUALIDADE", () => S.FixChord(nextQuality: true), false, true), ("BAIXO", () => S.FixChord(nextBass: true), false, true),
+            ("APAGAR", S.DeletePicked, false, true), ("DÚVIDA ▶", S.NextDoubt, false, S.Doubts > 0), ("OK", () => S.Pick(null), true, true),
+        ] : S.Picked is not null ?
+        [
+            ("−8ª", () => S.FixNote(-12), false, true), ("−½", () => S.FixNote(-1), false, true), ("+½", () => S.FixNote(1), false, true),
+            ("+8ª", () => S.FixNote(12), false, true), ("APAGAR", S.DeletePicked, false, true), ("DÚVIDA ▶", S.NextDoubt, false, S.Doubts > 0),
+            ("OK", () => S.Pick(null), true, true),
+        ] :
         [
             ("APARAR", S.Trim, false, sel), ("CORTAR", S.Cut, false, sel), ("−3 dB", () => S.Gain(-3), false, sel), ("+3 dB", () => S.Gain(3), false, sel),
             ("FADE IN", S.FadeIn, S.Edits.FadeIn > 0, sel), ("FADE OUT", S.FadeOut, S.Edits.FadeOut > 0, sel),
@@ -694,6 +830,13 @@ public sealed class RecorderUnit : StudioUnit
             Key(ctx, new Rect(kx, ky, w, 28), label, () => { act(); InvalidateVisual(); }, lit, Ui.Amber, en);
             kx += w + 6;
         }
+        if (S.Picked is not null)
+        {
+            Plasma.DotText(ctx, S.PickedLabel, kx + 8, ky + 6, 2.4, 6);
+            Ui.Text(ctx, $"REVISÃO · {S.Review.Fixes.Count} correções", kx + 8 + Plasma.CellWidth(2.4) * 6 + 8, ky + 9, 8, Ui.Amber, Ui.SansBold);
+        }
+        else if (S.ResultTake is not null && kx + 150 < r.Right)
+            Key(ctx, new Rect(kx, ky, 110, 28), S.Doubts > 0 ? $"DÚVIDAS {S.Doubts}" : "DÚVIDAS", S.NextDoubt, false, Ui.Amber, S.Doubts > 0);
 
         // Channel card + screen.
         var area = new Rect(r.X, r.Y + 38, r.Width, r.Height - 38);
@@ -791,7 +934,10 @@ public sealed class RecorderUnit : StudioUnit
                     double a = XAt((n.Start + o) * S.Rate), b = XAt((n.End + o) * S.Rate);
                     if (b < row.X || a > row.Right) continue;
                     double ny = row.Bottom - 3 - (row.Height - 6) * Math.Clamp((n.Midi - 28) / 27.0, 0, 1);
-                    ctx.DrawRectangle(Ui.Amber, null, new Rect(Math.Max(a, row.X), ny - 1.5, Math.Max(2, Math.Min(b, row.Right) - Math.Max(a, row.X) - 1), 3));
+                    var nr = new Rect(Math.Max(a, row.X), ny - 1.5, Math.Max(2, Math.Min(b, row.Right) - Math.Max(a, row.X) - 1), 3);
+                    bool picked = S.Picked is ("bass", var ps) && Math.Abs(ps - n.Start) < Review.MatchSeconds;
+                    ctx.DrawRectangle(picked ? Ui.LabelBright : Ui.Amber, picked ? new ImmutablePen((IImmutableBrush)Ui.Amber, 1) : null, picked ? nr.Inflate(1.5) : nr);
+                    _events.Add((nr.Inflate(new Thickness(0, 4)), "bass", n.Start));
                 }
             if (st.Name == "drums")
             {
@@ -817,7 +963,10 @@ public sealed class RecorderUnit : StudioUnit
                 if (b < _lane.X || a > _lane.Right) continue;
                 var box = new Rect(Math.Max(a, _lane.X) + 1, _lane.Y + 4, Math.Max(2, Math.Min(b, _lane.Right) - Math.Max(a, _lane.X) - 2), _lane.Height - 8);
                 bool low = ch.Confidence < 0.5f;
-                ctx.DrawRectangle(null, new ImmutablePen((IImmutableBrush)(low ? Ui.Amber : Ui.Green), 1), box, 2, 2);
+                bool picked = S.Picked is ("chord", var ps) && Math.Abs(ps - ch.Start) < Review.MatchSeconds;
+                if (picked) ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0x33FFB000)), null, box, 2, 2);
+                ctx.DrawRectangle(null, new ImmutablePen((IImmutableBrush)(picked ? Ui.LabelBright : low ? Ui.Amber : Ui.Green), picked ? 2 : 1), box, 2, 2);
+                _events.Add((box, "chord", ch.Start));
                 if (box.Width > 26) Plasma.DotText(ctx, ch.Symbol.Length > 6 ? ch.Symbol[..6] : ch.Symbol, box.X + 4, box.Y + 6, 2.6, dim: low);
             }
             if (take.Notes.Count > 0)
@@ -828,7 +977,10 @@ public sealed class RecorderUnit : StudioUnit
                     double a = XAt((n.Start + off) * S.Rate), b = XAt((n.End + off) * S.Rate);
                     if (b < _lane.X || a > _lane.Right) continue;
                     double yy = _lane.Bottom - 6 - (n.Midi - lo) / (double)(hi - lo) * (_lane.Height - 12);
-                    ctx.DrawRectangle(Plasma.Lit, null, new Rect(Math.Max(a, _lane.X), yy - 2, Math.Max(2, b - a - 1), 4), 1, 1);
+                    var nr = new Rect(Math.Max(a, _lane.X), yy - 2, Math.Max(2, b - a - 1), 4);
+                    bool picked = S.Picked is ("note", var ps) && Math.Abs(ps - n.Start) < Review.MatchSeconds;
+                    ctx.DrawRectangle(picked ? Ui.LabelBright : Plasma.Lit, picked ? new ImmutablePen((IImmutableBrush)Ui.Amber, 1) : null, picked ? nr.Inflate(1.5) : nr, 1, 1);
+                    _events.Insert(0, (nr.Inflate(new Thickness(1, 4)), "note", n.Start));   // notes before the chord boxes they sit in
                 }
             }
         }
@@ -856,6 +1008,9 @@ public sealed class RecorderUnit : StudioUnit
     {
         foreach (var (row, track) in _cards)
             if (row.Contains(p) && S.Current is not null) { S.Selected = track; S.Select(); InvalidateVisual(); return; }   // the chain shows this channel
+        foreach (var (rr, kind, start) in _events)
+            if (rr.Contains(p)) { S.Pick(kind, start); InvalidateVisual(); return; }
+        if (S.Picked is not null) S.Pick(null);
         if (!_screen.Union(_lane).Contains(p) || S.Player is null) return;
         _dragFrom = FrameAt(p.X);
         S.SelStart = S.SelEnd = -1;
@@ -1186,6 +1341,19 @@ public sealed class StudioView : DockPanel
     public void AnalyzeCurrent() => _s.Analyze();
     public void SeparateCurrent() => _s.Separate();
     public void ScoreCurrent() => _s.OpenScore();
+    /// Review actions for tests and screenshots: pick the n-th chord, fix it, apply the suggested key.
+    public void ReviewAction(string name)
+    {
+        switch (name)
+        {
+            case "pick": if (_s.ResultTake?.Chords.ElementAtOrDefault(1) is { } c) _s.Pick("chord", c.Start); break;
+            case "root": _s.FixChord(rootStep: 1); break;
+            case "quality": _s.FixChord(nextQuality: true); break;
+            case "key": if (_s.Suggestion is { } sg) _s.ApplyKey(sg.Key); break;
+            case "clear": _s.ClearFixes(); _s.ApplyKey(null); break;
+        }
+        Refresh();
+    }
     public void SelectRange(double fromSeconds, double toSeconds) { _s.SelStart = fromSeconds * _s.Rate; _s.SelEnd = toSeconds * _s.Rate; Refresh(); }
     public void EditAction(string name)
     {

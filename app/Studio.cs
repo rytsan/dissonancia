@@ -174,6 +174,8 @@ public static class StudioProject
     public static string TapPath(string source, string channel) => Stem(source) + "." + channel + ".tap.wav";
     public static string BouncePath(string source) => Stem(source) + ".bounce.wav";
     static string MixPath(string source) => Stem(source) + ".mix.json";
+    public static string ReviewPath(string source) => Stem(source) + ".review.json";
+    public static string ReviewedPath(string source) => Stem(source) + ".reviewed.json";
 
     public static TakeMix LoadMix(string source)
     {
