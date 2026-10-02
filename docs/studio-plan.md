@@ -94,7 +94,7 @@ this order because each stage needs the one before it, as in a studio.
   (`ana_post_*`: start, progress, cancel, results as POD arrays); C# tasks;
   progress and cancel in the tab.
 
-### S2 — Editing (spec M7b, §20.1)
+### S2 — Editing (spec M7b, §20.1) — done 2026-10-02
 - Waveform from a peak mipmap (O(visible pixels) zoom), selection, bar/beat
   grid from the take's metronome, snap.
 - Non-destructive edit list: trim, cut, delete, split, mute region, fades

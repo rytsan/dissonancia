@@ -106,6 +106,11 @@ public sealed class MainWindow : Window
             ["StudioOpenFirst"] = () => _studio.OpenFirst(),
             ["StudioAnalyze"] = () => _studio.AnalyzeCurrent(),
             ["StudioScore"] = () => _studio.ScoreCurrent(),
+            ["StudioSelectDemo"] = () => _studio.SelectRange(1.0, 6.0),   // screenshot tool: a selection to edit
+            ["StudioTrim"] = () => _studio.EditAction("trim"),
+            ["StudioCut"] = () => _studio.EditAction("cut"),
+            ["StudioNormalize"] = () => _studio.EditAction("normalize"),
+            ["StudioUndo"] = () => _studio.EditAction("undo"),
             ["ScopeTrigger"] = ((ScopeModule)catalog[ModuleKind.Scope]).ToggleTrigger,
         };
         transport.RecPressed += _actions["Rec"];

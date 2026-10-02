@@ -30,7 +30,7 @@ static class Plasma
     public static readonly IPen TextGlow = P(0x2EFF5A1A, 3.2);
     public static readonly IPen TextGlowWide = P(0x14FF5A1A, 6);
 
-    // 5x7 font (rows top to bottom, bit 4 = leftmost column). Chord symbols and note names only.
+    // 5x7 font (rows top to bottom, bit 4 = leftmost column). Chord symbols, note names, numbers.
     static readonly Dictionary<char, byte[]> Font = new()
     {
         ['0'] = [0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110],
@@ -71,6 +71,8 @@ static class Plasma
         ['('] = [0b00010, 0b00100, 0b01000, 0b01000, 0b01000, 0b00100, 0b00010],
         [')'] = [0b01000, 0b00100, 0b00010, 0b00010, 0b00010, 0b00100, 0b01000],
         ['?'] = [0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b00000, 0b00100],
+        ['.'] = [0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b01100, 0b01100],   // STUDIO readouts (position, BPM)
+        [':'] = [0b00000, 0b01100, 0b01100, 0b00000, 0b01100, 0b01100, 0b00000],
         [' '] = [0, 0, 0, 0, 0, 0, 0],
     };
 

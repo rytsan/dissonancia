@@ -60,7 +60,8 @@ Only the pipeline chosen on START exists in a session (`voice_` for mono modes,
 | `core/src/post.{hpp,cpp}` | STUDIO offline analysis job: whole file through the mode's pipeline, progress, cancel, take JSON out |
 | `core/src/decode.{hpp,cpp}` | STUDIO whole-take chord decoding: Viterbi over the matcher's scores, segment labels, onset snap, metronome grid |
 | `core/src/sidecar.hpp` | Take JSON event writer shared by the REC sidecar and the offline result |
-| `app/Studio.cs` | STUDIO tab (S1): library, waveform, transport, offline analysis, take project cache |
+| `app/Studio.cs` | STUDIO native wrappers (player, job), take project cache, library, edit list |
+| `app/StudioRack.cs` | STUDIO tab as a 19" rack: DS-T transport, DS-L library, DS-A track recorder with the edit keys, DS-C chain + analyser |
 | `core/src/tempo.{hpp,cpp}` | Tempo heard (onset-envelope autocorrelation + beat phase): beat marks on the scope only |
 | `core/src/chords.{hpp,cpp}` | Chord matcher (180 harmonic-aware templates, Occam, key/cadence context, bass), tracker, slash spelling |
 | `core/src/abi_check.cpp` | `static_assert` sizes/offsets, compiled with `-Wpadded -Werror` |
@@ -314,6 +315,28 @@ notes, a sung melody with passing and neighbour tones, kick/snare/hi-hat),
   known: a change costs half on a downbeat and 1.2× off the beats.
 - Melody offline is still the LIVE note pipeline over the file (next:
   whole-take note decoding).
+
+### STUDIO S2 — editing, and the tab as a rack
+- Core (`ana_player_apply_edits`, `ana_player_save_wav`): the edited take is
+  rendered from the original (never changed) — source segments in order,
+  each with clip gain, 2 ms crossfades at the joins, fade in / out over the
+  edited take, peak normalisation to −1 dBFS; playback, peaks and info
+  follow it.
+- Edit list (`EditList`, `<takes>/studio/<name>.edits.json`): APARAR (keep
+  the selection), CORTAR (remove it), −3 / +3 dB on the selection, FADE IN
+  (start → selection end), FADE OUT (selection start → end), NORMALIZAR,
+  DESFAZER (undo stack), ORIGINAL. The analysis reads the edited take
+  (written to `<name>.edited.wav`); the edit list is part of the cache key;
+  the metronome grid is used only while the take still starts where the
+  original did without cuts.
+- The tab is the approved rack: rails, DS-T transport (keys with LEDs,
+  plasma position in bars.beats.sixteenths, time, BPM, meter, loop, LEDs of
+  the optional components), DS-L library on a phosphor screen, DS-A track
+  recorder (tape-labelled channel card, phosphor screen with the bar ruler
+  on the session grid, waveform, selection, loop, playhead, scanlines, the
+  transcription lane: chord blocks in plasma or the note roll), DS-C chain
+  (DS-1 … DC-5 mounted and cabled, waiting for S4, then the analyser: mode,
+  ANALISAR, CANCELAR, SCORE, LED progress, plasma result).
 - A REC take is analysed with its own session (mode, key, clef, meter, BPM)
   and round-trip compensation from its sidecar; an imported file with the
   START session and no compensation. The mode can be changed per file.
