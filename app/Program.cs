@@ -51,6 +51,7 @@ public sealed class MainWindow : Window
     readonly List<double> _taps = [];
     readonly TabControl _tabs = new();
     readonly TabItem _liveTab, _studioTab, _scoreTab;
+    readonly StudioView _studio = new();
     readonly RackView _rack;
     readonly StageView _stage = new();
     readonly TextBlock _scoreTitle = new() { FontWeight = FontWeight.Bold, Foreground = Ui.Label };
@@ -75,7 +76,7 @@ public sealed class MainWindow : Window
         Clock = () => _clock.Elapsed.TotalSeconds;
         _source = new FakeLiveSource(_session);   // design data until START opens the core
         _core = NativeCore.TryLoad(out _coreError);
-        Closed += (_, _) => { _core?.Dispose(); _verovio?.Dispose(); };
+        Closed += (_, _) => { _core?.Dispose(); _verovio?.Dispose(); _studio.Close(); };
 
         var transport = new TransportModule();
         var catalog = new Dictionary<ModuleKind, RackModule>
@@ -100,8 +101,9 @@ public sealed class MainWindow : Window
             ["StageMode"] = () => SetStage(!_stageMode),
             ["LeaveStage"] = () => SetStage(false),
             ["EditRack"] = _rack.ToggleEdit,
-            ["Score"] = ShowScore,
+            ["Score"] = () => ShowScore(),
             ["Studio"] = () => _tabs.SelectedItem = _studioTab,
+            ["StudioOpenFirst"] = () => _studio.OpenFirst(),
             ["ScopeTrigger"] = ((ScopeModule)catalog[ModuleKind.Scope]).ToggleTrigger,
         };
         transport.RecPressed += _actions["Rec"];
@@ -111,7 +113,8 @@ public sealed class MainWindow : Window
 
         _liveTab = new TabItem { Header = "LIVE", Content = _rack };
         _scoreTab = new TabItem { Header = "SCORE", Content = BuildScoreTab() };
-        _studioTab = new TabItem { Header = "STUDIO", Content = BuildStudioTab() };
+        _studio.ScorePreview += wav => ShowScore(Path.ChangeExtension(wav, ".json"));
+        _studioTab = new TabItem { Header = "STUDIO", Content = _studio };
         _tabs.ItemsSource = new[]
         {
             new TabItem { Header = "START", Content = new ScrollViewer { Content = BuildStartTab() } },
@@ -131,6 +134,7 @@ public sealed class MainWindow : Window
         _lastFrame = now;
         _source.Read(_frame, now);
         SyncRack();
+        if (_tabs.SelectedItem == _studioTab) _studio.Tick();
         if (_tabs.SelectedItem == _liveTab)
         {
             if (_stageMode) _stage.InvalidateVisual();
@@ -210,6 +214,7 @@ public sealed class MainWindow : Window
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
+        if (_tabs.SelectedItem == _studioTab && e.Key == Key.Space) { _studio.TogglePlay(); e.Handled = true; return; }
         if (_tabs.SelectedItem != _liveTab) { base.OnKeyDown(e); return; }
         if (!_keys.TryGetValue(e.Key, out var action)) { base.OnKeyDown(e); return; }
         _actions[action]();
@@ -223,12 +228,13 @@ public sealed class MainWindow : Window
         WindowState = on ? WindowState.FullScreen : WindowState.Normal;
     }
 
-    void ShowScore()
+    /// sidecarPath: a take's JSON (STUDIO preview); null = the newest take.
+    void ShowScore(string? sidecarPath = null)
     {
         _tabs.SelectedItem = _scoreTab;
         _score = null;
         _scoreStatus.Text = "";
-        var path = Take.Latest();
+        var path = sidecarPath is not null && File.Exists(sidecarPath) ? sidecarPath : Take.Latest();
         if (path is not null)
         {
             try
@@ -320,30 +326,6 @@ public sealed class MainWindow : Window
             },
         },
     } };
-
-    // STUDIO (spec §20, not built yet): where a REC take is treated before notation. The SCORE is
-    // made from the treated take; until STUDIO exists, the raw take can be previewed.
-    Control BuildStudioTab()
-    {
-        var preview = new Button { Content = "SCORE from the raw take (preview)", Height = 36 };
-        preview.Click += (_, _) => ShowScore();
-        return new Border
-        {
-            Margin = new Thickness(16), Padding = new Thickness(24), Background = Ui.Face, CornerRadius = new CornerRadius(6),
-            Child = new StackPanel
-            {
-                Spacing = 12,
-                Children =
-                {
-                    new TextBlock { Text = "STUDIO — v1.x", FontSize = 22, FontWeight = FontWeight.Bold },
-                    new TextBlock { Text = "REC take → normalize · trim / cut · EQ · source separation (Demucs: voice, guitar, bass, drums) · choir SATB · full reprocessing (stages 0–4) → SCORE (notation, export).", TextWrapping = TextWrapping.Wrap, Foreground = Ui.Label },
-                    new TextBlock { Text = "Library: REC takes and imported WAV / FLAC / MP3 / OGG.", Foreground = Ui.Label },
-                    new TextBlock { Text = "The score is made from the treated take, not from the raw recording. Not built yet:", Foreground = Ui.LabelBright },
-                    preview,
-                },
-            },
-        };
-    }
 
     static Control Placeholder(string title, string text) => new Border
     {

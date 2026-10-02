@@ -303,11 +303,22 @@ struct AbiLayout {
     uint32_t snapshotPitchOffset, snapshotNoteOffset, snapshotChromaOffset, snapshotCqtOffset, snapshotChordOffset, chordResultSize, snapshotBassOffset;
 };
 
+// ---------------------------------------------------------------- STUDIO player (studio-plan S1)
+
+struct PlayerInfo {
+    uint64_t frames;                   // file length
+    uint64_t positionFrame;            // playback cursor
+    uint32_t sampleRate;               // the file's rate
+    uint16_t channels;                 // 1 or 2 (more are mixed down to the first two)
+    uint8_t playing, looping;          // bool
+};
+
 // ---------------------------------------------------------------- functions
 
 enum AnaResult : int32_t { ANA_OK = 0, ANA_ERR_STATE = -1, ANA_ERR_DEVICE = -2, ANA_ERR_ARG = -3, ANA_ERR_IO = -4 };
 
 struct AnalyzerHandle;
+struct PlayerHandle;
 
 extern "C" {
 ANA_API AnalyzerHandle* ana_create(void);
@@ -329,4 +340,17 @@ ANA_API int32_t ana_rec_start(AnalyzerHandle* h, const char* wavPathUtf8);  // a
 ANA_API int32_t ana_rec_stop(AnalyzerHandle* h);     // finalizes WAV + JSON sidecar
 ANA_API int32_t ana_set_metronome(AnalyzerHandle* h, uint8_t on, float bpm, TimeSignature meter);  // refused while REC
 ANA_API void ana_clear_clip(AnalyzerHandle* h);
+
+// STUDIO player: its own audio context and output device, independent of the LIVE engine.
+ANA_API PlayerHandle* ana_player_create(void);
+ANA_API void ana_player_destroy(PlayerHandle* p);
+ANA_API const char* ana_player_last_error(PlayerHandle* p);
+ANA_API int32_t ana_player_load(PlayerHandle* p, const char* pathUtf8);   // WAV / FLAC / MP3, decoded to memory; opens the output
+ANA_API void ana_player_info(PlayerHandle* p, PlayerInfo* out);
+ANA_API void ana_player_play(PlayerHandle* p);
+ANA_API void ana_player_stop(PlayerHandle* p);
+ANA_API void ana_player_seek(PlayerHandle* p, uint64_t frame);
+ANA_API void ana_player_set_loop(PlayerHandle* p, uint64_t startFrame, uint64_t endFrame);   // end <= start: off
+// min/max of the mono mix per column over [startFrame, endFrame), from a peak mipmap (any zoom).
+ANA_API int32_t ana_player_peaks(PlayerHandle* p, uint64_t startFrame, uint64_t endFrame, int32_t columns, float* minOut, float* maxOut);
 }

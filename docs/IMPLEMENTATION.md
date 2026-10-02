@@ -56,6 +56,8 @@ Only the pipeline chosen on START exists in a session (`voice_` for mono modes,
 | `core/src/halfband.hpp` | IIR polyphase half-band decimator, analytic response, computed group delay |
 | `core/src/cqt.{hpp,cpp}` | Octave-decimated CQT, 11 tuning sets, chroma with leakage removal, tuning estimator, onset gating |
 | `core/src/bass.{hpp,cpp}` | Onset detector (spectral flux) and bass tracker (YIN preview + CQT confirmation) |
+| `core/src/player.{hpp,cpp}` | STUDIO player: file decoded to memory, own output device, loop, min/max peak mipmap |
+| `app/Studio.cs` | STUDIO tab (S1): library, waveform, transport |
 | `core/src/tempo.{hpp,cpp}` | Tempo heard (onset-envelope autocorrelation + beat phase): beat marks on the scope only |
 | `core/src/chords.{hpp,cpp}` | Chord matcher (180 harmonic-aware templates, Occam, key/cadence context, bass), tracker, slash spelling |
 | `core/src/abi_check.cpp` | `static_assert` sizes/offsets, compiled with `-Wpadded -Werror` |
@@ -272,6 +274,23 @@ notes, a sung melody with passing and neighbour tones, kick/snare/hi-hat),
   to STUDIO; the score is made from the take treated there (normalize, trim,
   EQ, Demucs separation). STUDIO is not built yet: it offers a SCORE preview
   of the raw take.
+
+### STUDIO S1 — session (first part: library and playback)
+- Core player (`ana_player_*`, its own audio context and output device,
+  never shared with LIVE): WAV / FLAC / MP3 decoded to float in memory at
+  the file's rate (more than two channels: the first two), play / stop /
+  seek / loop [a, b), stops at the end. A peak mipmap (min/max of the mono
+  mix per 256 frames, halving per level) answers the waveform at any zoom
+  from the coarsest level that fits a column, or from the samples when
+  zoomed in closer than 256 frames per column.
+- STUDIO tab: the seven stages in studio order (only Session active yet),
+  library (REC takes from the takes folder + imported files remembered by
+  path in `library.json`, never copied), waveform (click: cursor, drag:
+  selection, wheel: zoom around the pointer, shift + wheel: pan), PLAY /
+  STOP (space), LOOP of the selection, time readout, and the raw-take SCORE
+  preview of the take open.
+- Not yet in S1: the take project file, the job system and the offline
+  reanalysis.
 
 ### GUI (prototype, C# / Avalonia 12.1, .NET 10)
 - START: mode, quality, key cascade, clef, meter, BPM, count-in, audio

@@ -7,7 +7,15 @@
 
 #include "dissonancia.h"
 #include "engine.hpp"
+#include "player.hpp"
 #include "rt.hpp"
+
+struct PlayerHandle {
+    ma_context ctx{};
+    bool ctxOk = false;
+    dz::Player player;
+    std::string error;
+};
 
 struct AnalyzerHandle {
     ma_context ctx{};
@@ -134,6 +142,46 @@ int32_t ana_set_metronome(AnalyzerHandle* h, uint8_t on, float bpm, TimeSignatur
 
 void ana_clear_clip(AnalyzerHandle* h) {
     if (h) h->engine.clear_clip();
+}
+
+PlayerHandle* ana_player_create(void) {
+    auto* p = new (std::nothrow) PlayerHandle;
+    if (p) p->ctxOk = ma_context_init(nullptr, 0, nullptr, &p->ctx) == MA_SUCCESS;
+    return p;
+}
+
+void ana_player_destroy(PlayerHandle* p) {
+    if (!p) return;
+    p->player.close_device();
+    if (p->ctxOk) ma_context_uninit(&p->ctx);
+    delete p;
+}
+
+const char* ana_player_last_error(PlayerHandle* p) { return p ? p->error.c_str() : "null handle"; }
+
+int32_t ana_player_load(PlayerHandle* p, const char* pathUtf8) {
+    if (!p || !pathUtf8) return ANA_ERR_ARG;
+    try {
+        int32_t r = p->player.load(pathUtf8);
+        if (r == ANA_OK) r = p->player.open_device(p->ctxOk ? &p->ctx : nullptr);   // no backend: silent, still analysable
+        if (r < 0) p->error = p->player.error();
+        return r;
+    } catch (const std::exception& e) {
+        p->error = e.what();
+        return ANA_ERR_STATE;
+    }
+}
+
+void ana_player_info(PlayerHandle* p, PlayerInfo* out) { if (p && out) p->player.info(*out); }
+void ana_player_play(PlayerHandle* p) { if (p) p->player.play(); }
+void ana_player_stop(PlayerHandle* p) { if (p) p->player.stop(); }
+void ana_player_seek(PlayerHandle* p, uint64_t frame) { if (p) p->player.seek(frame); }
+void ana_player_set_loop(PlayerHandle* p, uint64_t a, uint64_t b) { if (p) p->player.set_loop(a, b); }
+
+int32_t ana_player_peaks(PlayerHandle* p, uint64_t a, uint64_t b, int32_t columns, float* mn, float* mx) {
+    if (!p || columns <= 0 || !mn || !mx) return ANA_ERR_ARG;
+    p->player.peaks(a, b, uint32_t(columns), mn, mx);
+    return ANA_OK;
 }
 
 }  // extern "C"
