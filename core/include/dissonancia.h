@@ -321,6 +321,54 @@ struct EditSegment {
     uint8_t _pad0[4];
 };
 
+// ---------------------------------------------------------------- STUDIO mixing (studio-plan S4)
+// One channel strip in the order of a real console: trim -> high-pass / low-pass -> gate -> EQ ->
+// compressor -> [analysis tap] -> fader -> pan. The master: EQ -> bus compressor -> limiter -> fader.
+
+constexpr int ANA_MAX_TRACKS = 8;       // track 0 = the edited take, 1.. = separated stems
+constexpr int ANA_EQ_BANDS = 4;
+
+enum class EqType : uint8_t { Peak, LowShelf, HighShelf };
+
+struct EqBand {
+    float freqHz, gainDb, q;
+    EqType type;
+    uint8_t on;                        // bool
+    uint8_t _pad0[2];
+};
+
+struct ChannelParams {
+    float trimDb;
+    float hpHz, lpHz;
+    uint8_t hpOn, lpOn, steep;         // bool; steep: 24 dB/oct filters (else 12)
+    uint8_t gateOn;
+    float gateThresholdDb, gateAttackMs, gateReleaseMs, gateRangeDb;
+    uint8_t eqOn, compOn, mute, solo;  // bool
+    EqBand eq[ANA_EQ_BANDS];
+    float compThresholdDb, compRatio, compAttackMs, compReleaseMs, compMakeupDb;
+    float faderDb, pan;                // pan -1 (left) .. +1 (right), constant power
+};
+
+struct MasterParams {
+    uint8_t eqOn, compOn, limiterOn;   // bool
+    uint8_t _pad0;
+    EqBand eq[ANA_EQ_BANDS];
+    float compThresholdDb, compRatio, compAttackMs, compReleaseMs, compMakeupDb;
+    float limiterCeilingDb, limiterReleaseMs;
+    float faderDb;
+};
+
+struct MixMeters {
+    float peakDb[ANA_MAX_TRACKS];      // post-fader, held peak of the last block
+    float rmsDb[ANA_MAX_TRACKS];
+    float compGrDb[ANA_MAX_TRACKS];    // compressor gain reduction (>= 0)
+    uint8_t gateOpen[ANA_MAX_TRACKS];  // bool
+    float masterPeakDb[2], masterRmsDb[2];
+    float masterCompGrDb, limiterGrDb;
+    int32_t tracks;
+    uint8_t _pad0[4];
+};
+
 // ---------------------------------------------------------------- STUDIO offline analysis (studio-plan S1)
 
 enum class PostState : uint8_t { Idle, Running, Done, Failed, Cancelled };
@@ -376,6 +424,21 @@ ANA_API void ana_player_set_loop(PlayerHandle* p, uint64_t startFrame, uint64_t 
 ANA_API int32_t ana_player_apply_edits(PlayerHandle* p, const EditSegment* segments, int32_t count, uint64_t fadeInFrames, uint64_t fadeOutFrames,
                                        float normalizePeakDbfs);
 ANA_API int32_t ana_player_save_wav(PlayerHandle* p, const char* pathUtf8);   // the edited take as float32 WAV
+// S4 mixing. Tracks: 0 = the edited take; add_track appends a stem (decoded to the take's rate and
+// length) and returns its index; clear_tracks keeps only track 0. Parameters take effect from the
+// next audio block, without blocking playback.
+ANA_API int32_t ana_player_add_track(PlayerHandle* p, const char* pathUtf8);
+ANA_API void ana_player_clear_tracks(PlayerHandle* p);
+ANA_API void ana_channel_defaults(ChannelParams* out);
+ANA_API void ana_master_defaults(MasterParams* out);
+ANA_API int32_t ana_player_set_channel(PlayerHandle* p, int32_t track, const ChannelParams* params);
+ANA_API void ana_player_set_master(PlayerHandle* p, const MasterParams* params);
+ANA_API void ana_player_meters(PlayerHandle* p, MixMeters* out);
+// Offline renders with the current settings: a track at its analysis tap (post-inserts, pre-fader,
+// mono float32 WAV) — what the transcription reads; tracks: a bitmask summed at their taps (e.g.
+// the harmony = other + bass); and the bounce of the whole mix through faders and master (stereo).
+ANA_API int32_t ana_player_render_tap(PlayerHandle* p, uint32_t trackMask, const char* pathUtf8);
+ANA_API int32_t ana_player_bounce(PlayerHandle* p, const char* pathUtf8);
 // min/max of the mono mix per column over [startFrame, endFrame), from a peak mipmap (any zoom).
 ANA_API int32_t ana_player_peaks(PlayerHandle* p, uint64_t startFrame, uint64_t endFrame, int32_t columns, float* minOut, float* maxOut);
 

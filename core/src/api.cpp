@@ -7,6 +7,7 @@
 
 #include "dissonancia.h"
 #include "engine.hpp"
+#include "mixdsp.hpp"
 #include "player.hpp"
 #include "post.hpp"
 #include "rt.hpp"
@@ -199,6 +200,39 @@ int32_t ana_player_apply_edits(PlayerHandle* p, const EditSegment* segs, int32_t
 int32_t ana_player_save_wav(PlayerHandle* p, const char* path) {
     if (!p || !path) return ANA_ERR_ARG;
     int32_t r = p->player.save_wav(path);
+    if (r < 0) p->error = std::string("cannot write ") + path;
+    return r;
+}
+
+int32_t ana_player_add_track(PlayerHandle* p, const char* path) {
+    if (!p || !path) return ANA_ERR_ARG;
+    try {
+        int32_t r = p->player.add_track(path);
+        if (r < 0) p->error = p->player.error();
+        return r;
+    } catch (const std::exception& e) {
+        p->error = e.what();
+        return ANA_ERR_STATE;
+    }
+}
+void ana_player_clear_tracks(PlayerHandle* p) { if (p) p->player.clear_tracks(); }
+void ana_channel_defaults(ChannelParams* out) { if (out) dz::mix::channel_defaults(*out); }
+void ana_master_defaults(MasterParams* out) { if (out) dz::mix::master_defaults(*out); }
+int32_t ana_player_set_channel(PlayerHandle* p, int32_t track, const ChannelParams* params) {
+    if (!p || !params) return ANA_ERR_ARG;
+    return p->player.set_channel(track, *params);
+}
+void ana_player_set_master(PlayerHandle* p, const MasterParams* params) { if (p && params) p->player.set_master(*params); }
+void ana_player_meters(PlayerHandle* p, MixMeters* out) { if (p && out) p->player.meters(*out); }
+int32_t ana_player_render_tap(PlayerHandle* p, uint32_t mask, const char* path) {
+    if (!p || !path) return ANA_ERR_ARG;
+    int32_t r = p->player.render_tap(mask, path);
+    if (r < 0) p->error = std::string("cannot write ") + path;
+    return r;
+}
+int32_t ana_player_bounce(PlayerHandle* p, const char* path) {
+    if (!p || !path) return ANA_ERR_ARG;
+    int32_t r = p->player.bounce(path);
     if (r < 0) p->error = std::string("cannot write ") + path;
     return r;
 }
