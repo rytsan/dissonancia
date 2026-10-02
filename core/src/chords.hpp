@@ -93,6 +93,7 @@ private:
         uint32_t frames;
     };
     void emit(Output& out, AnalyzerEventType type, const Chord& ch, double end);
+    void emit_ended(Output& out, const Chord& ch, double end);   // relabelled on its whole duration
     void emit_cadence(Output& out, const ChordCandidate& previous, const Chord& last, bool phraseEnd);
 
     ChordMatcher matcher_;
@@ -106,6 +107,15 @@ private:
     ChordHistory history_;
     ChordCandidate previous_{};      // confirmed chord before cur_ (symbol "" = none): cadence context
     float acc_[12]{};                // arpeggio accumulator (decaying max-hold of chroma energy)
+    // Chroma of the last kSegFrames hops (5 s at 20 ms): a candidate is confirmed on its segment
+    // since the attack, and a chord is relabelled on its whole duration when it ends.
+    static constexpr int kSegFrames = 256;
+    // persistence: weigh each pitch class by its share of strong frames (whole chords; a 0.4 s
+    // confirmation window is too short to tell a melody note from a chord tone that way).
+    bool segment_chord(double from, double to, int bassPc, bool persistence, ChordRecognitionResult& out) const;
+    float seg_[kSegFrames][12]{};
+    double segTime_[kSegFrames]{};
+    int segPos_ = 0;
     bool bassSettledNow_ = false;
 };
 

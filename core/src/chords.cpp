@@ -38,6 +38,13 @@ const QualityDef& def(ChordQuality q) {
 // Amplitude a single note puts on pitch classes relative to itself (partials 1..6, 1/h).
 constexpr float kContextWeight = 0.06f;
 constexpr float kBassWeight = 0.05f;   // settled bass: decides identical sets, never a clear chord
+// Colour cost (Occam on the chord vocabulary): a melody note over a triad reads as an add9, sus
+// or 6 frame after frame, a missing third as a "5". Triads cost nothing, sevenths a little, the
+// colours more; a clear colour chord still wins by its own notes.
+constexpr float kColourCost[16] = {
+    0, 0, 0.005f, 0.01f, 0.012f, 0.012f,           // Major Minor Diminished Augmented Sus2 Sus4
+    0.015f, 0.003f, 0.007f, 0.005f, 0.007f, 0.007f, // Power Dom7 Maj7 Min7 HalfDim7 Dim7
+    0.01f, 0.01f, 0.012f, 0};                      // Maj6 Min6 Add9 Unknown
 
 constexpr float kPartialPc[12] = {1.0f + 0.5f + 0.25f, 0, 0, 0, 0.2f, 0, 0, 0.33f + 0.17f, 0, 0, 0, 0};
 
@@ -362,9 +369,16 @@ void ChordMatcher::match(const float* energy, const ChordHistory& h, int bassPc,
             if (!in && amp[k] >= 0.6f * mx) score -= 0.04f;
             if (in && amp[k] < 0.3f * mx) score -= 0.04f;
         }
+        // A power chord is the absence of a third, not a weak one: a barre F has one A among five
+        // strings, an Am one C. Any audible third (minor or major) rules the "5" out.
+        if (kDefs[t / 12].q == ChordQuality::Power) {
+            const int r = t % 12;
+            if (std::max(amp[(r + 3) % 12], amp[(r + 4) % 12]) >= 0.15f * mx) continue;
+        }
         // Context (key function + cadence) weighs less than one Occam penalty: it decides only
         // what the audio leaves open (identical sets, C+E dyad), never overrides a clear chord.
         score += kContextWeight * ctx(t % 12, kDefs[t / 12].q, nullptr);
+        score -= kColourCost[size_t(kDefs[t / 12].q)];
         // Settled bass (§11): the bass as root scores most, as another chord tone half.
         if (bassPc >= 0) score += kBassWeight * (t % 12 == bassPc ? 1.f : (masks_[t] >> bassPc & 1) ? 0.5f : 0.f);
         for (int i = 0; i < 4; i++)
@@ -461,6 +475,41 @@ ChordTracker::ChordTracker(const SessionConfig& s, double hopSeconds, double lat
     : matcher_(s), hop_(hopSeconds), latencyComp_(latencyCompensation),
       confirmSeconds_(s.quality == AudioQuality::HighPrecision ? 0.6 : 0.4), releaseSeconds_(0.15) {}
 
+// Persistence-weighted mean chroma over [from, to]: each pitch class weighs by the share of frames
+// in which it is strong (>= 0.3 of the frame maximum in amplitude). Chord tones ring through the
+// segment; a melody note, a passing bass note or a fret squeak is there for a fraction of it.
+bool ChordTracker::segment_chord(double from, double to, int bassPc, bool persistence, ChordRecognitionResult& out) const {
+    float mean[12]{}, present[12]{};
+    int n = 0;
+    for (int i = 0; i < kSegFrames; i++) {
+        if (segTime_[i] <= 0 || segTime_[i] < from - 1e-9 || segTime_[i] > to + 1e-9) continue;
+        float mx = 0;
+        for (int k = 0; k < 12; k++) mx = std::max(mx, seg_[i][k]);
+        if (mx <= 0) continue;
+        for (int k = 0; k < 12; k++) {
+            // Persistence mode: frames normalised to their loudest pitch class, so a melody note
+            // far above the accompaniment saturates at 1 instead of outweighing the chord.
+            mean[k] += persistence ? seg_[i][k] / mx : seg_[i][k];
+            present[k] += seg_[i][k] >= 0.09f * mx;   // 0.3 in amplitude
+        }
+        n++;
+    }
+    if (n < 3) return false;
+    for (int k = 0; k < 12; k++) {
+        const float share = persistence ? present[k] / float(n) : 1.f;
+        mean[k] = mean[k] / float(n) * share * share;
+    }
+    matcher_.match(mean, history_, bassPc, out);
+    return out.best.symbol[0] != 0;
+}
+
+void ChordTracker::emit_ended(Output& out, const Chord& ch, double end) {
+    Chord whole = ch;
+    ChordRecognitionResult r;
+    if (segment_chord(ch.start, end, ch.c.hasBass ? ch.c.bassPitchClass : -1, true, r) && r.best.confidence >= 0.2f) whole.c = r.best;
+    emit(out, AnalyzerEventType::ChordEnded, whole, end);
+}
+
 void ChordTracker::emit(Output& out, AnalyzerEventType type, const Chord& ch, double end) {
     if (out.eventCount == 4) return;
     AnalyzerEvent& e = out.events[out.eventCount++];
@@ -504,6 +553,7 @@ void ChordTracker::emit_cadence(Output& out, const ChordCandidate& previous, con
 }
 
 namespace {
+constexpr float kHoldMargin = 0.04f;   // one Occam penalty: the confirmed chord holds within it
 // Same chord: root and quality equal, and the bass equal when both know it. A preview without a
 // settled bass (right after an onset) never splits a chord; two different settled basses do.
 bool same_chord(const ChordCandidate& a, const ChordCandidate& b) {
@@ -532,6 +582,9 @@ void ChordTracker::process(const ChromaVector& chroma, double t, double frameEnd
         mxAcc = std::max(mxAcc, acc_[i]);
     }
     if (silentFrame) std::fill(acc_, acc_ + 12, 0.f);
+    std::memcpy(seg_[segPos_], chroma.raw, sizeof seg_[0]);
+    segTime_[segPos_] = t;
+    segPos_ = (segPos_ + 1) % kSegFrames;
     const bool arpeggio = !silentFrame && strong(chroma.raw, mxNow) <= 2 && strong(acc_, mxAcc) >= 3;
     const int bassPc = bass.valid && bass.settled ? bass.pitchClass : -1;
     matcher_.match(arpeggio ? acc_ : chroma.raw, history_, bassPc, out.preview);
@@ -543,7 +596,7 @@ void ChordTracker::process(const ChromaVector& chroma, double t, double frameEnd
         if (silentSince_ < 0) silentSince_ = t;
         candidateOn_ = false;
         if (active_ && t - silentSince_ >= releaseSeconds_) {   // silence closes the chord at the release
-            emit(out, AnalyzerEventType::ChordEnded, cur_, lastSound_);
+            emit_ended(out, cur_, lastSound_);
             emit_cadence(out, previous_, cur_, true);   // silence = phrase end
             active_ = false;
             previous_ = {};
@@ -551,7 +604,15 @@ void ChordTracker::process(const ChromaVector& chroma, double t, double frameEnd
     } else {
         silentSince_ = -1;
         lastSound_ = t;
-        const bool same = active_ && same_chord(best, cur_.c);
+        // Hysteresis: the confirmed chord holds while it is still a close runner-up. An up-strum on
+        // the top strings, a passing melody note or a drum hit tilts one frame, not the harmony.
+        bool holds = false;
+        if (active_)
+            for (uint8_t i = 0; i < out.preview.alternativeCount; i++) {
+                const ChordCandidate& a = out.preview.alternatives[i];
+                holds |= a.rootPitchClass == cur_.c.rootPitchClass && a.quality == cur_.c.quality && best.totalScore - a.totalScore < kHoldMargin;
+            }
+        const bool same = active_ && (same_chord(best, cur_.c) || holds);
         if (same) {
             // The confirmed chord is still best: a passing tone never accumulated enough.
             candidateOn_ = false;
@@ -576,9 +637,23 @@ void ChordTracker::process(const ChromaVector& chroma, double t, double frameEnd
             }
             candTime_ = frameEnd - candStart_;   // measured from the onset estimate
             if (best.hasBass && !cand_.hasBass) cand_ = best;   // keep the settled bass once known
-            if (candTime_ + 1e-9 >= confirmSeconds_ && best.confidence >= 0.2f) {
+            // The same root in another colour (a "5", sus, add9, 6, a seventh added or dropped, another
+            // bass) is usually the strum, not the harmony: it must last three times as long. A changed
+            // third (Dm -> D7, C -> Cm) is harmony and confirms as fast as any change.
+            const auto third = [](ChordQuality q) { const Family f = family(q); return f == Family::Minor || f == Family::Diminished ? 1 : f == Family::Major || f == Family::Dominant ? 2 : 0; };
+            const int ta = third(cand_.quality), tb = third(cur_.c.quality);
+            const bool variant = active_ && cand_.rootPitchClass == cur_.c.rootPitchClass && !(ta && tb && ta != tb);
+            bool confirm = candTime_ + 1e-9 >= confirmSeconds_ * (variant ? 3 : 1) && best.confidence >= 0.2f;
+            ChordRecognitionResult segment;
+            // Decide on the segment, not this frame (an arpeggio already decides on its accumulator).
+            if (confirm && !cand_.arpeggiated && segment_chord(candStart_, t, bassPc, false, segment)) {
+                if (active_ && same_chord(segment.best, cur_.c)) { candidateOn_ = false; confirm = false; }   // it was the strum
+                else cand_ = segment.best;
+            }
+            if (confirm) {
+                const ChordCandidate& best = cand_;
                 // Confirmed: the previous chord ends exactly at the new chord's backdated onset.
-                if (active_) emit(out, AnalyzerEventType::ChordEnded, cur_, candStart_);
+                if (active_) emit_ended(out, cur_, candStart_);
                 previous_ = active_ ? cur_.c : ChordCandidate{};
                 cur_ = {best, candStart_, best.confidence, 1};
                 history_ = {best.rootPitchClass, best.quality, history_.currentRoot, history_.currentQuality};   // cadence context
@@ -609,7 +684,7 @@ void ChordTracker::process(const ChromaVector& chroma, double t, double frameEnd
 
 void ChordTracker::flush(Output& out) {
     out.eventCount = 0;
-    if (active_) emit(out, AnalyzerEventType::ChordEnded, cur_, lastSound_);
+    if (active_) emit_ended(out, cur_, lastSound_);
     active_ = candidateOn_ = false;
     previous_ = {};
 }

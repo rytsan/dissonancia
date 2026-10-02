@@ -42,7 +42,9 @@ public sealed class LiveFrame
     public float PeakDbfs = -90, PeakHoldDbfs = -90;
     public bool ClipLatched;
 
-    public string ChordSymbol = "";
+    public string ChordSymbol = "";        // matcher preview, every hop (flickers with every strum)
+    // What the display shows: the confirmed chord, steady; a candidate only once it has held 120 ms.
+    public string DisplayChord = "", CandidateChord = "", DisplayRoman = "";
     public float ChordConfidence;
     public bool ChordConfirmed;
     public string ChordAlternatives = "";
@@ -177,6 +179,9 @@ public sealed class FakeLiveSource(Session session) : ILiveSource
         for (long b = Math.Max(0, barIndex - 7); b < barIndex; b++) f.TimelineBars.Add(Progression[b % Progression.Length].Symbol);
         if (f.ChordConfirmed) f.TimelineBars.Add(chord.Symbol);
         f.ProvisionalChord = f.ChordConfirmed ? "" : chord.Symbol;
+        f.DisplayChord = chord.Symbol;
+        f.CandidateChord = "";
+        f.DisplayRoman = "";
         f.BarPhase = age / bar;
 
         // Voice: one melody note per beat, with vibrato.

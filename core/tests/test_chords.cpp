@@ -322,3 +322,13 @@ TEST_CASE("cadences from the tracker: authentic, plagal, deceptive, half") {
     CHECK(run({{C, 1.2}, {F, 1.2}}).cadences.empty());
     CHECK(run({{G7, 1.2}, {C, 1.2}}, session(0, false, false)).cadences.empty());   // no key, no function
 }
+
+TEST_CASE("guitar voicings: one third among six strings is still a triad, not a power chord") {
+    // Barre F (F2 C3 F3 A3 C4 F4), open Am (A2 E3 A3 C4 E4), barre G (G2 D3 G3 B3 D4 G4): the third
+    // sounds on one string only.
+    CHECK(std::string(run({{{41, 48, 53, 57, 60, 65}, 1.0}}).ended[0].symbol) == "F");
+    CHECK(std::string(run({{{45, 52, 57, 60, 64}, 1.0}}).ended[0].symbol) == "Am");
+    CHECK(std::string(run({{{43, 50, 55, 59, 62, 67}, 1.0}}).ended[0].symbol) == "G");
+    // A real power chord (no third at all) stays a "5".
+    CHECK(std::string(run({{{40, 47, 52}, 1.0}}).ended[0].symbol) == "E5");
+}

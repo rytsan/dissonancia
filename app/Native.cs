@@ -297,7 +297,7 @@ public sealed class NativeLiveSource : ILiveSource
     LiveSnapshotNative _snap;   // held in a field: ana_read_snapshot copies into it in place
     readonly AnalyzerEventNative[] _events = new AnalyzerEventNative[256];
     uint _nextSequence;
-    readonly TextCache _symbol = new(), _roman = new(), _alt0 = new(), _alt1 = new(), _alt2 = new(), _reason = new(), _event = new();
+    readonly TextCache _symbol = new(), _confirmed = new(), _roman = new(), _alt0 = new(), _alt1 = new(), _alt2 = new(), _reason = new(), _event = new();
     string _alternatives = "";
     readonly int[][] _pcSets = Enumerable.Range(0, 9).Select(n => new int[n]).ToArray();
     bool _metronome = true;
@@ -380,7 +380,12 @@ public sealed class NativeLiveSource : ILiveSource
         f.BassSettled = b.Settled != 0;
         f.BassSettleRemainingMs = b.SettleRemainingMs;
         if (f.BassValid) f.Bass = new Pitch(b.Letter, b.Alter, b.WrittenOctave - _session.Clef.OctaveShift());
-        f.ProvisionalChord = !f.ChordConfirmed && f.ChordSymbol.Length > 0 ? f.ChordSymbol : "";
+        fixed (byte* cs = _snap.ConfirmedSymbol) f.DisplayChord = _confirmed.Get(cs, 16, Display);
+        f.CandidateChord = !f.ChordConfirmed && f.ChordSymbol.Length > 0 && f.ChordConfirmElapsedMs >= 120 ? f.ChordSymbol : "";
+        if (f.DisplayChord.Length == 0) f.DisplayChord = f.CandidateChord;   // nothing confirmed yet: the candidate, dimmed
+        if (f.ChordConfirmed) f.DisplayRoman = f.ChordRoman;                 // the roman of the chord on display
+        else if (f.DisplayChord.Length == 0) f.DisplayRoman = "";
+        f.ProvisionalChord = f.CandidateChord;
         fixed (float* chroma = _snap.Chroma.Normalized) new ReadOnlySpan<float>(chroma, 12).CopyTo(f.Chroma);
         f.TuningValid = _snap.Tuning.Valid != 0;
         f.TuningCents = _snap.Tuning.OffsetCents;

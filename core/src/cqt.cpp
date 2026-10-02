@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 
 namespace dz {
@@ -154,6 +155,16 @@ ChromaFrontEnd::ChromaFrontEnd(const SessionConfig& s, uint32_t decimation, doub
         cqt_.ensure_history(bass_->history_samples());
     }
     gated_.assign(ANA_MAX_CQT_BINS, 0);
+    history_.assign(size_t(ANA_MAX_CQT_BINS) * kMedianHops, 0.f);
+    harmonic_.assign(ANA_MAX_CQT_BINS, 0.f);
+    // Register: the chord lives where its fundamentals are (guitar E2-E4, piano C2-C5); above
+    // ~1 kHz the CQT holds mostly partials, sibilance and cymbals. Gaussian on MIDI, centre A#3,
+    // sigma 20 semitones (swept on the band mix: narrower also drops a voiced chord's 7th or 9th).
+    registerWeight_.assign(ANA_MAX_CQT_BINS, 0.f);
+    for (int k = 0; k < cqt_.bins(); k++) {
+        double midi = cqt_.min_midi() + k * 12.0 / cqt_.bins_per_octave(), z = (midi - 58) / 20;
+        registerWeight_[size_t(k)] = float(std::exp(-0.5 * z * z));
+    }
 }
 
 ChromaFrontEnd::~ChromaFrontEnd() = default;
@@ -187,18 +198,40 @@ void ChromaFrontEnd::process(const float* x, uint32_t n, uint64_t endFrame, Outp
         out.gatedBins += gated_[size_t(k)];
     }
 
+    // Harmonic magnitudes (see cqt.hpp): time median per bin, then whitening (minus the noise
+    // floor around it, so a broadband snare or hiss cancels and tonal peaks stay).
+    const int bpo = cqt_.bins_per_octave(), pc0 = cqt_.min_midi() % 12;
+    for (int k = 0; k < bins; k++) history_[size_t(k) * kMedianHops + size_t(historyPos_)] = silent ? 0.f : out.magnitude[k];
+    historyPos_ = (historyPos_ + 1) % kMedianHops;
+    float med[ANA_MAX_CQT_BINS];
+    for (int k = 0; k < bins; k++) {
+        float w[kMedianHops];
+        std::memcpy(w, &history_[size_t(k) * kMedianHops], sizeof w);
+        std::nth_element(w, w + kMedianHops / 2, w + kMedianHops);
+        med[k] = w[kMedianHops / 2];
+    }
+    for (int k = 0; k < bins; k++) {
+        // Floor = median of the surrounding +-1 octave: a chord's 3-6 peaks among 25 bins do not
+        // move it, a broadband hit lifts it everywhere.
+        int a = std::max(0, k - bpo), b = std::min<int>(bins - 1, k + bpo), cnt = b - a + 1;
+        float w[ANA_MAX_CQT_BINS];
+        std::memcpy(w, med + a, size_t(cnt) * sizeof(float));
+        std::nth_element(w, w + cnt / 8, w + cnt);
+        harmonic_[size_t(k)] = std::max(0.f, med[k] - w[cnt / 8]) * registerWeight_[size_t(k)];
+    }
+
     // Chroma: inter-octave aggregation of energy; a bin between two semitones (24 bpo) is shared.
     // Main-lobe leakage into neighbour bins is removed first: a lone D must not light C# and D#,
     // while two real adjacent tones (B + C) both survive.
     ChromaVector& c = out.chroma;
     c = {};
-    const int bpo = cqt_.bins_per_octave(), pc0 = cqt_.min_midi() % 12;
     const float leak = 0.95f * cqt_.neighbour_leakage();
+    const float* hm = harmonic_.data();
     if (!silent) {
         for (int k = 0; k < bins; k++) {
             if (gated_[size_t(k)]) continue;
-            float left = k > 0 ? out.magnitude[k - 1] : 0, right = k + 1 < bins ? out.magnitude[k + 1] : 0;
-            float clean = std::max(0.f, out.magnitude[k] - leak * std::max(left, right));
+            float left = k > 0 ? hm[k - 1] : 0, right = k + 1 < bins ? hm[k + 1] : 0;
+            float clean = std::max(0.f, hm[k] - leak * std::max(left, right));
             double s = k * 12.0 / bpo;
             int lo = int(std::floor(s));
             float frac = float(s - lo), e = clean * clean;
@@ -222,11 +255,12 @@ void ChromaFrontEnd::process(const float* x, uint32_t n, uint64_t endFrame, Outp
         smoothed_[i] += 0.5f * (c.normalized[i] - smoothed_[i]);   // ~30 ms at 20 ms hops
         c.smoothed[i] = smoothed_[i];
     }
-    c.timestampSeconds = double(endFrame) / nativeRate_ - cqt_.octave_delay_seconds(0);
+    // Group delay: the top octave's CQT delay plus the time median's (half its span).
+    c.timestampSeconds = double(endFrame) / nativeRate_ - cqt_.octave_delay_seconds(0) - (kMedianHops - 1) / 2 * double(n) / nativeRate_;
     if (!silent) update_tuning(out.magnitude, bins, out);
     out.bass = {};
     if (bass_ && !silent) {
-        bass_->process(cqt_, out.magnitude, gated_.data(), now, lastOnset_, out.bass);
+        bass_->process(cqt_, med, gated_.data(), now, lastOnset_, out.bass);   // median: a kick or snare is not a bass note
         if (out.bass.valid && out.bass.settled) c.bass[out.bass.pitchClass] = out.bass.confidence;   // bass chroma (§9)
     }
     c.tuningOffsetCents = cqt_.tuning();

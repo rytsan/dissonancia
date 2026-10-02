@@ -104,6 +104,11 @@ private:
     std::unique_ptr<OnsetDetector> onsets_;   // forward-declared: keeps cqt.hpp free of bass.hpp
     std::unique_ptr<BassTracker> bass_;
     std::vector<uint8_t> gated_;
+    // Harmonic magnitudes for the chroma: per-bin median over the last kMedianHops hops (drums and
+    // attacks are short in time, chords are long), whitened across frequency, weighted by register.
+    static constexpr int kMedianHops = 3;
+    std::vector<float> history_, harmonic_, registerWeight_;
+    int historyPos_ = 0;
     double lastOnset_ = -1, hopSeconds_ = 0.02;
 };
 

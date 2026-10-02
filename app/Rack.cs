@@ -321,12 +321,16 @@ public sealed class LcdModule : RackModule
             // Chord symbol: 7 dot-matrix cells, unlit dots visible like a real gas-plasma panel.
             double rx = inner.Right, status = 150;
             double dot = Math.Min((inner.Width - status - 10) / (7 * 6 * 1.3), (split - inner.Y - 62) / (7 * 1.3));
-            Plasma.DotText(ctx, f.ChordSymbol, inner.X, inner.Y, dot, cells: 7, dim: !f.ChordConfirmed);   // provisional = dimmer
+            // The confirmed chord stays on the panel; a candidate that has held 120 ms shows beside it.
+            bool steady = f.DisplayChord.Length > 0 && f.DisplayChord != f.CandidateChord;
+            Plasma.DotText(ctx, f.DisplayChord, inner.X, inner.Y, dot, cells: 7, dim: !steady);
 
-            Plasma.Lamp(ctx, new Point(rx - 140, inner.Y + 8), 4.5, !f.ChordConfirmed && f.ChordSymbol.Length > 0);
-            Plasma.Text(ctx, "PROV", rx - 130, inner.Y + 1, 11, !f.ChordConfirmed, Ui.SansBold);
-            Plasma.Lamp(ctx, new Point(rx - 70, inner.Y + 8), 4.5, f.ChordConfirmed);
-            Plasma.Text(ctx, "CONF", rx - 60, inner.Y + 1, 11, f.ChordConfirmed, Ui.SansBold);
+            bool pending = f.CandidateChord.Length > 0;
+            Plasma.Lamp(ctx, new Point(rx - 140, inner.Y + 8), 4.5, pending);
+            Plasma.Text(ctx, "PROV", rx - 130, inner.Y + 1, 11, pending, Ui.SansBold);
+            Plasma.Lamp(ctx, new Point(rx - 70, inner.Y + 8), 4.5, steady && !pending);
+            Plasma.Text(ctx, "CONF", rx - 60, inner.Y + 1, 11, steady && !pending, Ui.SansBold);
+            if (steady && pending) Plasma.Text(ctx, $"→ {f.CandidateChord}?", rx, inner.Y + 76, 15, true, Ui.Mono, Ui.Align.Right);
 
             for (int i = 0; i < 10; i++)
                 Plasma.Lamp(ctx, new Point(rx - 136 + i * 13.5, inner.Y + 30), 3.6, i < f.ChordConfidence * 10);
@@ -338,7 +342,7 @@ public sealed class LcdModule : RackModule
             double textY = inner.Y + dot * 1.3 * 7 + 10;
             Plasma.Text(ctx, $"alt  {f.ChordAlternatives}", inner.X, textY, 13, false);
             if (f.ChordReason.Length > 0) Plasma.Text(ctx, f.ChordReason, inner.X, textY + 18, 12, false);
-            if (f.ChordRoman.Length > 0) Plasma.Text(ctx, f.ChordRoman, rx, textY - 4, 18, f.ChordConfirmed, Ui.Mono, Ui.Align.Right);
+            if (f.DisplayRoman.Length > 0) Plasma.Text(ctx, f.DisplayRoman, rx, textY - 4, 18, steady, Ui.Mono, Ui.Align.Right);
             if (f.Cadence.Length > 0) Plasma.Text(ctx, f.Cadence, rx, textY + 18, 12, false, Ui.Mono, Ui.Align.Right);
 
             ctx.DrawLine(Plasma.LineDim, new Point(inner.X, split - 6), new Point(inner.Right, split - 6));
@@ -608,8 +612,8 @@ public sealed class StageView : RackModule
         // Big dot-matrix readout, centred: chord (7 cells) or note (4 cells).
         int cells = chords ? 7 : 4;
         double dot = Math.Min(r.Width * 0.85 / (cells * 6 * 1.3), h * (chords ? 0.34 : 0.42) / (7 * 1.3));
-        string main = Centre(chords ? f.ChordSymbol : f.NoteValid ? p.Name : "", cells);
-        Plasma.DotText(ctx, main, r.Center.X - Plasma.CellWidth(dot) * cells / 2, r.Y + h * 0.08, dot, cells, dim: chords && !f.ChordConfirmed);
+        string main = Centre(chords ? f.DisplayChord : f.NoteValid ? p.Name : "", cells);
+        Plasma.DotText(ctx, main, r.Center.X - Plasma.CellWidth(dot) * cells / 2, r.Y + h * 0.08, dot, cells, dim: chords && f.DisplayChord == f.CandidateChord);
         if (chords)
         {
             double bassDot = dot * 0.42;

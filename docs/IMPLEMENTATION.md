@@ -144,6 +144,35 @@ Only the pipeline chosen on START exists in a session (`voice_` for mono modes,
 - Arpeggio accumulator: a decaying max-hold used only for sparse frames, so
   strummed changes are never smeared.
 
+### Chords in a real song (band mix: strummed guitar, bass, voice, drums)
+Measured with `tools/loopback/mix.py` (16 bars at 96 bpm: down/up eighth
+strumming where up-strums hit only the top strings, a bass line with passing
+notes, a sung melody with passing and neighbour tones, kick/snare/hi-hat),
+`core/build/dz_wav` (the engine's front end and tracker over a WAV) and
+`tools/loopback/chordscore.py`.
+- Chroma input (harmonic magnitudes): per-bin median over 3 hops (drum hits
+  and attacks are short), minus a noise floor (12.5th percentile of the
+  surrounding ±1 octave: a broadband hit lifts it, a chord's peaks do not),
+  times a register weight (Gaussian on MIDI, centre A♯3, σ 20 semitones:
+  fundamentals count more than partials, sibilance and cymbals). The bass
+  tracker reads the median magnitudes (a kick is not a bass note). The
+  chroma timestamp includes the median's group delay.
+- Matcher: a power chord needs the absence of a third (any third ≥ 0.15 of
+  the maximum rules the "5" out: a barre F has one A among six strings).
+  Colour cost: triads free, sevenths 0.003–0.007, sus/6/add9/aug 0.01–0.012,
+  "5" 0.015 — a melody note over a triad no longer reads as add9 or sus.
+- Tracker: hysteresis — the confirmed chord holds while it is a runner-up
+  within 0.04 of the best. The same root in another colour (5, sus, add9, 6,
+  a seventh, another bass) needs three times the confirmation time; a
+  changed third (Dm → D7) confirms at the normal speed. A candidate is
+  confirmed on the mean chroma since its attack, not on its last frame; a
+  chord is relabelled when it ends on its whole duration with each pitch
+  class weighted by its share of strong frames (chord tones ring, a melody
+  note passes) — that label goes into the take and the score.
+- Display: the analyzer shows the confirmed chord, steady; a candidate shows
+  only after holding 120 ms ("→ Am?"), and the timeline's provisional cell
+  likewise. The matcher's per-hop preview no longer reaches the panel.
+
 ### M5 — music theory
 - Key cascade, key-signature spelling, chord symbols with key-aware roots and
   chord-tone slash basses, LCD mini staff (from M1–M4).
@@ -279,7 +308,11 @@ Only the pipeline chosen on START exists in a session (`voice_` for mono modes,
   re-settles. MusicXML now writes `<accidental>` (D♭5 had none in Verovio).
 - `tools/loopback`: live test through PulseAudio — `gen.py` writes the test
   WAVs, the console plays one, captures the sink monitor with the real core,
-  records a take and engraves it.
+  records a take and engraves it. `mix.py` writes the band mix and its stems;
+  `chordscore.py` scores `dz_wav` output against the ground truth.
+- `core/build/dz_wav file.wav [guitar|piano|general]`: offline chord run over
+  any WAV (a REC take, a song) with the live front end and tracker;
+  `DZ_PREVIEW=1` adds the per-hop preview.
 - `tools/shot`: headless screenshots of any tab and mode, optionally after
   running actions (`dotnet run --project tools/shot -- out.png 1 VoiceMono 4.2 EditRack`).
 - Piano: the analyzer shows a grand staff (treble + bass joined by a system
@@ -312,6 +345,8 @@ item).
 | Loopback (WSLg) | voice A3 → A♯3 → B3 at +0 ¢, 46–69 ms; CPU ≈ 2 % (voice), 0.16 % (chords) |
 | Live loopback, guitar (`tools/loopback`, 8 bars G Em C D7 G/B Am7 D G, 92 bpm, plucked strings) | 8/8 chords with inversions (Guitar and Piano pipelines), starts within ±20 ms of the strums, confirmed 0.40 s after the attack, V7→I6 imperfect and V→I perfect authentic cadences, chart and numerals exact, 8 bars engraved |
 | Live loopback, voice (13 notes, vibrato ±15 ¢, chromatic passing tone) | 13/13 pitches at +2…+3 ¢, D–D♭–C spelled by direction, stable-note latency median 50 ms; legato note changes start ≈ 28 ms late (first note after silence exact); score rhythm exact after quantization |
+| Band mix, before → after (offline, `dz_wav`) | live confirmed chord correct 72.3 → 80.0 % of the time, wrong confirmations 15 → 6, matcher frames 50 → 76 %; take labels 91 %. Stems after: guitar 95 %, guitar + voice 87 % (take 94 %), guitar + bass 94 %, guitar + drums 96 %; clean plucked guitar unchanged at 99.5 % |
+| Band mix, live loopback (engine, `tools/loopback`) | take labels 86 % correct |
 | Dynamic session, synthetic | tempo within 2 BPM at 72/92/120/150 (10 % missing attacks, ±12 ms timing), eighth-note strumming at 92 → 92; Ode to Joy → G major, A minor line → A minor, B♭ scale → 2♭ |
 | Key stress set (`test_context.cpp`, chroma-like weights) | 11/11 tonal cases applied with the right signature, 0 wrong; blues, dorian, chromatic scale, augmented and dim7 cycles: nothing applied |
 | Key stress set, real CQT chroma (plucked-string synth: C with V/V + dim7, A harmonic minor, B♭ jazz, E with V/vi, D minor with Neapolitan, blues) | 5/5 applied right after 7.5–12 s; blues not applied (heard A major at 0.35) |

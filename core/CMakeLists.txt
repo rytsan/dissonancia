@@ -47,6 +47,10 @@ else()
 endif()
 add_dependencies(dissonancia dz_abi_check)
 
+# Offline chord run over a WAV (same front end and tracker as the engine), for real recordings.
+add_executable(dz_wav tools/dz_wav.cpp)
+target_link_libraries(dz_wav PRIVATE dz_core)
+
 if(DZ_TESTS)
   include(FetchContent)
   FetchContent_Declare(Catch2 GIT_REPOSITORY https://github.com/catchorg/Catch2.git GIT_TAG v3.7.1 GIT_SHALLOW TRUE)
