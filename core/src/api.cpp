@@ -184,6 +184,25 @@ void ana_player_stop(PlayerHandle* p) { if (p) p->player.stop(); }
 void ana_player_seek(PlayerHandle* p, uint64_t frame) { if (p) p->player.seek(frame); }
 void ana_player_set_loop(PlayerHandle* p, uint64_t a, uint64_t b) { if (p) p->player.set_loop(a, b); }
 
+int32_t ana_player_apply_edits(PlayerHandle* p, const EditSegment* segs, int32_t count, uint64_t fadeIn, uint64_t fadeOut, float norm) {
+    if (!p || (count > 0 && !segs)) return ANA_ERR_ARG;
+    try {
+        int32_t r = p->player.apply_edits(segs, count, fadeIn, fadeOut, norm);
+        if (r < 0) p->error = p->player.error();
+        return r;
+    } catch (const std::exception& e) {
+        p->error = e.what();
+        return ANA_ERR_STATE;
+    }
+}
+
+int32_t ana_player_save_wav(PlayerHandle* p, const char* path) {
+    if (!p || !path) return ANA_ERR_ARG;
+    int32_t r = p->player.save_wav(path);
+    if (r < 0) p->error = std::string("cannot write ") + path;
+    return r;
+}
+
 int32_t ana_player_peaks(PlayerHandle* p, uint64_t a, uint64_t b, int32_t columns, float* mn, float* mx) {
     if (!p || columns <= 0 || !mn || !mx) return ANA_ERR_ARG;
     p->player.peaks(a, b, uint32_t(columns), mn, mx);

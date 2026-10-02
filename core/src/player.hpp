@@ -28,6 +28,10 @@ public:
     void set_loop(uint64_t a, uint64_t b) { loopA_.store(a); loopB_.store(b > a ? std::min(b, frames()) : 0); }
     void info(PlayerInfo& out) const;
 
+    // S2: the edited take from the original (see ana_player_apply_edits); count 0 = the original.
+    int apply_edits(const EditSegment* segs, int count, uint64_t fadeIn, uint64_t fadeOut, float normalizePeakDbfs);
+    int save_wav(const char* path) const;
+
     // min/max of the mono mix in each of `columns` equal slices of [start, end).
     void peaks(uint64_t start, uint64_t end, uint32_t columns, float* mn, float* mx) const;
 
@@ -38,7 +42,9 @@ public:
     const std::string& error() const { return error_; }
 
 private:
-    std::vector<float> samples_;          // interleaved, channels_ per frame
+    void build_mipmap();
+    std::vector<float> original_;         // the decoded file, never changed
+    std::vector<float> samples_;          // interleaved, channels_ per frame: the edited take
     uint32_t rate_ = 0, channels_ = 0;
     // Peak mipmap of the mono mix: level k holds min/max per 2^(k + kBase) frames.
     static constexpr int kBase = 8;

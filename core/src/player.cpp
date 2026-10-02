@@ -1,6 +1,7 @@
 #include "player.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 namespace dz {
@@ -27,11 +28,72 @@ int Player::load(const char* path) {
     const bool reopen = deviceOpen_;
     ma_context* ctx = reopen ? device_.pContext : nullptr;
     close_device();
+    original_ = all;
     samples_.swap(all);
     channels_ = ch;
     pos_ = 0;
     loopA_ = loopB_ = 0;
+    build_mipmap();
+    if (reopen && open_device(ctx) != ANA_OK) return ANA_ERR_DEVICE;
+    return ANA_OK;
+}
 
+int Player::apply_edits(const EditSegment* segs, int count, uint64_t fadeIn, uint64_t fadeOut, float normDb) {
+    if (channels_ == 0) { error_ = "no file loaded"; return ANA_ERR_STATE; }
+    const uint64_t srcFrames = original_.size() / channels_;
+    std::vector<float> out;
+    if (count <= 0) out = original_;
+    const uint64_t xf = std::max<uint64_t>(1, rate_ / 500);   // 2 ms crossfade at every join
+    for (int k = 0; k < count; k++) {
+        const uint64_t a = std::min(segs[k].sourceStart, srcFrames), b = std::min(segs[k].sourceEnd, srcFrames);
+        if (b <= a) continue;
+        const float g = std::pow(10.f, segs[k].gainDb / 20.f);
+        for (uint64_t i = a; i < b; i++) {
+            float ramp = 1.f;   // fade both edges of an inner join so a cut never clicks
+            if (k > 0 && i - a < xf) ramp = float(i - a) / float(xf);
+            if (k + 1 < count && b - i <= xf) ramp = std::min(ramp, float(b - i) / float(xf));
+            for (uint32_t c = 0; c < channels_; c++) out.push_back(original_[i * channels_ + c] * g * ramp);
+        }
+    }
+    const uint64_t n = out.size() / channels_;
+    for (uint64_t i = 0; i < std::min(fadeIn, n); i++)
+        for (uint32_t c = 0; c < channels_; c++) out[i * channels_ + c] *= float(i) / float(fadeIn);
+    for (uint64_t i = 0; i < std::min(fadeOut, n); i++)
+        for (uint32_t c = 0; c < channels_; c++) out[(n - 1 - i) * channels_ + c] *= float(i) / float(fadeOut);
+    if (normDb <= 0) {
+        float peak = 0;
+        for (float v : out) peak = std::max(peak, std::fabs(v));
+        if (peak > 0) {
+            const float g = std::pow(10.f, normDb / 20.f) / peak;
+            for (float& v : out) v *= g;
+        }
+    }
+    const bool playing = playing_.load();
+    stop();
+    const bool reopen = deviceOpen_;
+    ma_context* ctx = reopen ? device_.pContext : nullptr;
+    close_device();   // the callback reads samples_
+    samples_.swap(out);
+    pos_ = std::min<uint64_t>(pos_.load(), frames());
+    loopA_ = loopB_ = 0;
+    build_mipmap();
+    if (reopen && open_device(ctx) != ANA_OK) return ANA_ERR_DEVICE;
+    if (playing) play();
+    return ANA_OK;
+}
+
+int Player::save_wav(const char* path) const {
+    if (channels_ == 0) return ANA_ERR_STATE;
+    ma_encoder enc;
+    ma_encoder_config c = ma_encoder_config_init(ma_encoding_format_wav, ma_format_f32, channels_, rate_);
+    if (ma_encoder_init_file(path, &c, &enc) != MA_SUCCESS) return ANA_ERR_IO;
+    ma_encoder_write_pcm_frames(&enc, samples_.data(), frames(), nullptr);
+    ma_encoder_uninit(&enc);
+    return ANA_OK;
+}
+
+void Player::build_mipmap() {
+    const uint32_t ch = channels_;
     // Mipmap: level 0 = 256-frame blocks of the mono mix, each next level halves.
     mipMin_.clear();
     mipMax_.clear();
@@ -61,8 +123,6 @@ int Player::load(const char* path) {
         mn.swap(a);
         mx.swap(z);
     }
-    if (reopen && open_device(ctx) != ANA_OK) return ANA_ERR_DEVICE;
-    return ANA_OK;
 }
 
 int Player::open_device(ma_context* ctx) {

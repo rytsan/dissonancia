@@ -313,6 +313,14 @@ struct PlayerInfo {
     uint8_t playing, looping;          // bool
 };
 
+// Non-destructive edit (studio-plan S2): the edited take is these source ranges in order, each with
+// its clip gain; the original file is never modified.
+struct EditSegment {
+    uint64_t sourceStart, sourceEnd;   // frames of the original file, [start, end)
+    float gainDb;                      // clip gain
+    uint8_t _pad0[4];
+};
+
 // ---------------------------------------------------------------- STUDIO offline analysis (studio-plan S1)
 
 enum class PostState : uint8_t { Idle, Running, Done, Failed, Cancelled };
@@ -362,6 +370,12 @@ ANA_API void ana_player_play(PlayerHandle* p);
 ANA_API void ana_player_stop(PlayerHandle* p);
 ANA_API void ana_player_seek(PlayerHandle* p, uint64_t frame);
 ANA_API void ana_player_set_loop(PlayerHandle* p, uint64_t startFrame, uint64_t endFrame);   // end <= start: off
+// Edits: renders the segments (joined with 2 ms crossfades), a fade-in / fade-out over the edited
+// take, and a peak normalisation (normalizePeakDbfs <= 0, e.g. -1; > 0 = off). count 0 = the
+// original. Playback, peaks, info and save_wav then use the edited take.
+ANA_API int32_t ana_player_apply_edits(PlayerHandle* p, const EditSegment* segments, int32_t count, uint64_t fadeInFrames, uint64_t fadeOutFrames,
+                                       float normalizePeakDbfs);
+ANA_API int32_t ana_player_save_wav(PlayerHandle* p, const char* pathUtf8);   // the edited take as float32 WAV
 // min/max of the mono mix per column over [startFrame, endFrame), from a peak mipmap (any zoom).
 ANA_API int32_t ana_player_peaks(PlayerHandle* p, uint64_t startFrame, uint64_t endFrame, int32_t columns, float* minOut, float* maxOut);
 
