@@ -313,8 +313,17 @@ notes, a sung melody with passing and neighbour tones, kick/snare/hi-hat),
   the 0.25 s before the boundary, and the previous chord ends there.
   Cadences between segments as in LIVE. On a REC take the metronome grid is
   known: a change costs half on a downbeat and 1.2× off the beats.
-- Melody offline is still the LIVE note pipeline over the file (next:
-  whole-take note decoding).
+- Notes offline (whole-take decoding, `decode_notes`): pass 1 keeps the
+  LIVE pitch estimate of every hop (YIN, clarity, level) and the LIVE note
+  starts; pass 2 runs Viterbi over MIDI 28–100 + unvoiced, emission
+  −(Δ/0.45 st)²/2 floored at −3 and weighted by clarity, 6 per note change,
+  2.5 per voiced ↔ unvoiced change; notes shorter than 80 ms are dropped;
+  the same pitch across a short gap with no dip in level (a stray octave
+  frame, a glitch read unvoiced) stays one note, while a sung repeat (a
+  consonant dips the level) stays two; starts snap to the nearest LIVE
+  onset; spelling by melodic direction in the key.
+- Fixed on the way: the pitch timestamp of the first hops underflowed (an
+  unsigned subtraction before the window filled) — LIVE and offline.
 
 ### STUDIO S2 — editing, and the tab as a rack
 - Core (`ana_player_apply_edits`, `ana_player_save_wav`): the edited take is
@@ -429,6 +438,7 @@ item).
 | Band mix, before → after (offline, `dz_wav`) | live confirmed chord correct 72.3 → 80.0 % of the time, wrong confirmations 15 → 6, matcher frames 50 → 76 %; take labels 91 %. Stems after: guitar 95 %, guitar + voice 87 % (take 94 %), guitar + bass 94 %, guitar + drums 96 %; clean plucked guitar unchanged at 99.5 % |
 | Band mix, live loopback (engine, `tools/loopback`) | take labels 86 % correct |
 | STUDIO offline chords vs LIVE (band mix and stems, `dz_wav … offline 96 4`) | mix 91.2 → 99.2 %, guitar 95.0 → 99.0, guitar + voice 94.0 → 99.2, guitar + bass 94.5 → 99.3, guitar + drums 97.5 → 99.2; 16 chords for 16 bars every time (LIVE: 21–37); the mix's one miss is Dm/A (passing bass read as an inversion) |
+| STUDIO offline notes vs LIVE (band-mix melody, 57 notes, `dz_wav … voice … offline`) | voice alone F 100 → 100 % (onsets 4 / 7 ms); voice over the drums F 42.3 → 70.2 % (99 → 57 notes); voice under the strummed guitar 0 % in both (one pitch tracker cannot hear a voice inside chords: S3 separation's job); the 2026-10-02 voice take: 25 → 16 notes (the wobbles and the G♯5 tail gone); loopback melody 13/13 |
 | STUDIO offline chords, validation (6 progressions not used for tuning: V/V + dim7, harmonic minor, B♭ jazz with tritone sub, V/vi, Neapolitan, blues) | 100 % on all six; clean plucked guitar 99.5 %, G Em C D7 G/B Am7 D G exact |
 | Tempo heard, synthetic | within 2 BPM at 72/92/120/150 (10 % missing attacks, ±12 ms timing), eighth-note strumming at 92 → 92; beat phase within 30 ms |
 | Tempo heard, live loopback (guitar, strums on 1 and 3, 92 bpm) | 91.5–92.3 from 3 s; beat marks hold their phase within ±15 ms over 13 s |

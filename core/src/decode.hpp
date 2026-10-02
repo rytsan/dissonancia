@@ -18,4 +18,11 @@ namespace dz {
 std::vector<AnalyzerEvent> decode_chords(const SessionConfig& s, const float* x, size_t n, uint32_t rate, double compensationSeconds,
                                          bool metronomeGrid, const std::function<bool(double)>& progress = {});
 
+// Whole-take note decoding (voice / melody): pass 1 = the LIVE pitch estimate of every hop (YIN,
+// clarity); pass 2 = Viterbi over MIDI notes + unvoiced with a cost per change and a robust
+// emission (a vibrato swing, a stray octave frame or a transition does not split a note); each note
+// is then spelled in the key by melodic direction, with its mean pitch, cents, vibrato, confidence.
+std::vector<AnalyzerEvent> decode_notes(const SessionConfig& s, const float* x, size_t n, uint32_t rate, double compensationSeconds,
+                                        const std::function<bool(double)>& progress = {});
+
 }  // namespace dz

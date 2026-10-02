@@ -1,7 +1,7 @@
 // Offline chord run over a WAV file (16-bit PCM or float32, any channel count, mixed to mono):
 // the same front end and tracker as the live engine, hop by hop, without a device. Prints the
 // confirmed chords and how often the live preview would change on screen.
-//   dz_wav file.wav [guitar|piano|general] [low|balanced|high] [offline [bpm beatsPerBar]]
+//   dz_wav file.wav [guitar|piano|general|voice] [low|balanced|high] [offline [bpm beatsPerBar]]
 // offline: the STUDIO whole-take decoder instead of the live tracker; with a bpm, the file is taken
 // to start on a downbeat of that metronome grid (a REC take).
 #include <cmath>
@@ -13,6 +13,7 @@
 
 #include "chords.hpp"
 #include "decode.hpp"
+#include "voice.hpp"
 #include "cqt.hpp"
 #include "live_config.hpp"
 
@@ -59,12 +60,33 @@ int main(int argc, char** argv) {
     if (!read_wav(argv[1], x, rate)) { std::fprintf(stderr, "cannot read %s\n", argv[1]); return 1; }
     const std::string mode = argc > 2 ? argv[2] : "guitar", q = argc > 3 ? argv[3] : "balanced";
     SessionConfig s{};
-    s.mode = mode == "piano" ? AnalysisMode::PianoChords : mode == "general" ? AnalysisMode::GeneralChords : AnalysisMode::GuitarChords;
+    s.mode = mode == "piano" ? AnalysisMode::PianoChords : mode == "general" ? AnalysisMode::GeneralChords : mode == "voice" ? AnalysisMode::VoiceMono : AnalysisMode::GuitarChords;
     s.quality = q == "low" ? AudioQuality::LowLatency : q == "high" ? AudioQuality::HighPrecision : AudioQuality::Balanced;
     s.referenceA4 = 440;
     s.keySet = 1;
     s.meter = {4, 4};
     s.bpm = 120;
+    if (s.mode == AnalysisMode::VoiceMono) {   // notes: the live pipeline, or the whole-take decoder
+        const bool offline = argc > 4 && std::string(argv[4]) == "offline";
+        std::vector<AnalyzerEvent> notes;
+        if (offline) notes = decode_notes(s, x.data(), x.size(), rate, 0.0);
+        else {
+            const LiveConfig lc = live_config(s.mode, s.quality, rate);
+            const uint32_t h = uint32_t(std::lround(lc.hopSeconds * rate));
+            VoicePipeline vp(s, lc, rate, h, 0.0);
+            VoiceOutput vo{};
+            for (size_t p = 0; p + h <= x.size(); p += h) {
+                vp.process(x.data() + p, h, p + h, vo);
+                for (uint32_t i = 0; i < vo.eventCount; i++) if (vo.events[i].type == AnalyzerEventType::NoteEnd) notes.push_back(vo.events[i]);
+            }
+            vp.flush(vo);
+            for (uint32_t i = 0; i < vo.eventCount; i++) if (vo.events[i].type == AnalyzerEventType::NoteEnd) notes.push_back(vo.events[i]);
+        }
+        for (const AnalyzerEvent& e : notes)
+            std::printf("note %8.3f %8.3f %d %s\n", e.data.note.startTimeSeconds, e.data.note.endTimeSeconds, e.data.note.midi, e.data.note.writtenName);
+        std::printf("%s: %zu notes\n", offline ? "offline" : "live", notes.size());
+        return 0;
+    }
     if (argc > 4 && std::string(argv[4]) == "offline") {
         int chords = 0;
         const bool grid = argc > 5;

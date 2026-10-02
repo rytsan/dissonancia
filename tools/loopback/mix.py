@@ -36,14 +36,14 @@ for b, (name, _) in enumerate(prog):
 mel = [(72, 1), (74, .5), (76, 1.5), (74, 1), (72, 2), (71, .5), (69, 1.5), (72, 1), (77, 1.5), (76, .5), (74, 1), (72, 1),
        (74, 2), (71, 1), (67, 1), (71, 1.5), (72, .5), (74, 1), (71, 1), (69, 2.5), (71, .5), (72, 1), (69, 1), (74, 1.5),
        (73, .5), (74, 1), (77, 1), (79, 2), (77, 1), (74, 1)] * 2
-v = np.zeros(n); t0 = 0.0; ph = 0
+v = np.zeros(n); t0 = 0.0; ph = 0; notes = []
 for m, bt in mel:
     dur = bt * beat; t = np.arange(int(SR * dur)) / SR
     f = 440 * 2 ** ((m - 69) / 12) * 2 ** (20 * np.sin(2 * np.pi * 5.5 * t) / 1200 * np.clip(t / 0.3, 0, 1))
     phase = ph + 2 * np.pi * np.cumsum(f) / SR; ph = phase[-1]
     env = np.clip(t / 0.04, 0, 1) * np.clip((dur - t) / 0.06, 0, 1)
     x = env * (np.sin(phase) + 0.5 * np.sin(2 * phase) + 0.3 * np.sin(3 * phase) + 0.15 * np.sin(4 * phase))
-    i0 = int(SR * t0); v[i0:i0 + len(x)] += x[:n - i0] * 0.5; t0 += dur
+    i0 = int(SR * t0); v[i0:i0 + len(x)] += x[:n - i0] * 0.5; notes.append((m, t0, t0 + dur)); t0 += dur
     if t0 >= len(prog) * bar: break
 # Drums: kick on 1 and 3, snare on 2 and 4, closed hi-hat eighths.
 d = np.zeros(n)
@@ -60,7 +60,8 @@ for b in range(len(prog)):
             s = (rng.standard_normal(len(t)) * 0.5 + np.sin(2 * np.pi * 190 * t)) * np.exp(-t / 0.06) * 0.6; d[i0:i0 + len(s)] += s[:n - i0]
 mix = g + bs + v + d
 write(sys.argv[1] + "/mix.wav", mix)
-for name, stem in [("guitar", g), ("guitar_bass", g + bs), ("guitar_voice", g + v), ("guitar_drums", g + d)]:   # stems: which part hurts
+json.dump({"notes": [n for n in notes if n[1] < len(prog) * bar]}, open(sys.argv[1] + "/mix_voice.json", "w"))   # melody ground truth
+for name, stem in [("voice", v), ("voice_drums", v + d), ("guitar", g), ("guitar_bass", g + bs), ("guitar_voice", g + v), ("guitar_drums", g + d)]:   # stems: which part hurts
     write(sys.argv[1] + f"/mix_{name}.wav", stem)
 json.dump({"bar": bar, "chords": [p[0] for p in prog]}, open(sys.argv[1] + "/mix.json", "w"))
 print("mix.wav", round(len(mix) / SR, 1), "s,", len(prog), "bars at", bpm, "bpm")

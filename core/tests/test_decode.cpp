@@ -84,3 +84,39 @@ TEST_CASE("whole-take decoding: silence gives no chords; cancel stops it") {
     CHECK(decode_chords(s, x.data(), x.size(), 48000, 0.0, false).empty());
     CHECK(decode_chords(s, x.data(), x.size(), 48000, 0.0, false, [](double) { return false; }).empty());
 }
+
+TEST_CASE("whole-take notes: deep vibrato and a stray octave frame stay one note; a line keeps its notes") {
+    const uint32_t rate = 48000;
+    std::vector<float> x;
+    double ph = 0;
+    auto tone = [&](int midi, double sec, double vibCents, double glitchAt = -1) {
+        for (size_t i = 0; i < size_t(sec * rate); i++) {
+            double t = double(i) / rate, m = midi + vibCents / 100 * std::sin(2 * kPi * 5.5 * t);
+            if (glitchAt >= 0 && t >= glitchAt && t < glitchAt + 0.04) m -= 12;   // 40 ms read an octave down
+            ph += 2 * kPi * hz(int(std::lround(m))) * std::pow(2.0, (m - std::lround(m)) / 12) / rate;
+            x.push_back(float(0.2 * (std::sin(ph) + 0.5 * std::sin(2 * ph) + 0.25 * std::sin(3 * ph))));
+        }
+    };
+    auto silence = [&](double sec) { x.insert(x.end(), size_t(sec * rate), 0.f); };
+    silence(0.3);
+    tone(64, 1.2, 45, 0.6);   // E4, +-45 cents vibrato, an octave glitch in the middle
+    silence(0.3);
+    tone(67, 0.4, 0); tone(69, 0.4, 0); tone(71, 0.4, 0);   // G4 A4 B4 legato
+    silence(0.4);
+    SessionConfig s{};
+    s.mode = AnalysisMode::VoiceMono;
+    s.quality = AudioQuality::Balanced;
+    s.referenceA4 = 440;
+    s.keyFifths = 1;
+    s.meter = {4, 4};
+    s.bpm = 120;
+    std::string names;
+    std::vector<double> starts;
+    for (const AnalyzerEvent& e : decode_notes(s, x.data(), x.size(), rate, 0.0)) { names += std::string(e.data.note.writtenName) + " "; starts.push_back(e.data.note.startTimeSeconds); }
+    INFO("decoded: " << names);
+    CHECK(names == "E4 G4 A4 B4 ");
+    REQUIRE(starts.size() == 4);
+    CHECK(starts[0] == Approx(0.3).margin(0.02));
+    CHECK(starts[1] == Approx(1.8).margin(0.02));
+    CHECK(starts[2] == Approx(2.2).margin(0.02));
+}

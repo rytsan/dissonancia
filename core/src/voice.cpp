@@ -207,7 +207,7 @@ void VoicePipeline::process(const float* x, uint32_t n, uint64_t endFrame, Voice
     p.confidence = voiced ? clarity : 0;
     p.clarity = clarity;
     p.rms = rms;
-    p.timestampSeconds = seconds(endFrame - windowNative_ / 2);
+    p.timestampSeconds = seconds(endFrame - std::min<uint64_t>(endFrame, windowNative_ / 2));   // no underflow before the window fills
 
     rawMidi_[rawPos_] = voiced ? p.midiFloat : -1.f;
     rawEnd_[rawPos_] = endFrame;

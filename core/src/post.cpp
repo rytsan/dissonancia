@@ -61,8 +61,6 @@ int PostJob::run(const SessionConfig& session, double comp, const std::string& i
     // The session's quality: HighPrecision is not better on the band mix (take labels 89 % vs 91 %
     // Balanced), so offline does not force it; the S5 whole-take decoders are where precision grows.
     const SessionConfig& s = session;
-    const LiveConfig c = live_config(s.mode, s.quality, rate);
-    const uint32_t hop = uint32_t(std::lround(c.hopSeconds * rate));
     std::vector<AnalyzerEvent> events;
     auto keep = [&](const AnalyzerEvent& e) {
         if (e.type == AnalyzerEventType::NoteEnd || e.type == AnalyzerEventType::ChordEnded || e.type == AnalyzerEventType::Cadence) {
@@ -70,29 +68,21 @@ int PostJob::run(const SessionConfig& session, double comp, const std::string& i
             events.back().sequence = uint32_t(events.size() - 1);
         }
     };
-    auto step = [&](size_t pos) {
-        progress_.store(float(double(pos) / double(x.size())), std::memory_order_relaxed);
-        return !cancel_.load(std::memory_order_relaxed);
-    };
 
+    bool cancelled = false;
+    auto report = [&](double f) {
+        progress_.store(float(f), std::memory_order_relaxed);
+        cancelled = cancel_.load(std::memory_order_relaxed);
+        return !cancelled;
+    };
     if (!is_chord_mode(s.mode)) {
-        VoicePipeline vp(s, c, rate, hop, comp);
-        VoiceOutput o{};
-        for (size_t pos = 0; pos + hop <= x.size(); pos += hop) {
-            vp.process(x.data() + pos, hop, pos + hop, o);
-            for (uint32_t i = 0; i < o.eventCount; i++) keep(o.events[i]);
-            if ((pos / hop) % 256 == 0 && !step(pos)) { set_error("cancelled"); return ANA_ERR_STATE; }
-        }
-        vp.flush(o);
-        for (uint32_t i = 0; i < o.eventCount; i++) keep(o.events[i]);
+        // Whole-take note decoding (decode.hpp): each note decided with the rest of the line in view.
+        auto ev = decode_notes(s, x.data(), x.size(), rate, comp, report);
+        if (cancelled) { set_error("cancelled"); return ANA_ERR_STATE; }
+        for (const AnalyzerEvent& e : ev) keep(e);
     } else {
         // Whole-take decoding (decode.hpp): the chord sequence decided with the future in view.
-        bool cancelled = false;
-        auto ev = decode_chords(s, x.data(), x.size(), rate, comp, grid, [&](double f) {
-            progress_.store(float(f), std::memory_order_relaxed);
-            cancelled = cancel_.load(std::memory_order_relaxed);
-            return !cancelled;
-        });
+        auto ev = decode_chords(s, x.data(), x.size(), rate, comp, grid, report);
         if (cancelled) { set_error("cancelled"); return ANA_ERR_STATE; }
         for (const AnalyzerEvent& e : ev) keep(e);
     }

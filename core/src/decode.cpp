@@ -7,6 +7,8 @@
 #include "chords.hpp"
 #include "cqt.hpp"
 #include "live_config.hpp"
+#include "theory.hpp"
+#include "voice.hpp"
 
 namespace dz {
 
@@ -207,6 +209,142 @@ std::vector<AnalyzerEvent> decode_chords(const SessionConfig& s, const float* x,
         history = {b.rootPitchClass, b.quality, history.currentRoot, history.currentQuality};
         previous = phraseEnd ? ChordCandidate{} : b;
         previousEnd = end;
+    }
+    if (progress) progress(1.0);
+    return out;
+}
+
+namespace {
+constexpr int kLowMidi = 28, kHighMidi = 100, kNotes = kHighMidi - kLowMidi + 1, kUnvoiced = kNotes;
+// Cost of a note change in summed log-likelihood units; sigma of a held note's pitch (vibrato and
+// intonation); the floor that keeps one stray frame (octave error, glide) from forcing a change.
+constexpr float kNoteChange = 6.0f, kSigma = 0.45f, kFloor = -3.0f;
+// Voiced <-> unvoiced change cost and the shortest note kept: swept 1 / 2.5 / 4 and 50 / 80 / 100 ms
+// on the band-mix melody alone and over the drums (F 50 / 56 / 60 / 54 %; clean voice 100 % in all).
+constexpr float kVoicing = 2.5f;
+constexpr double kMinNote = 0.08;
+}  // namespace
+
+std::vector<AnalyzerEvent> decode_notes(const SessionConfig& s, const float* x, size_t n, uint32_t rate, double comp,
+                                        const std::function<bool(double)>& progress) {
+    const LiveConfig c = live_config(s.mode, s.quality, rate);
+    const uint32_t hop = uint32_t(std::lround(c.hopSeconds * rate));
+    VoicePipeline vp(s, c, rate, hop, comp);
+    VoiceOutput o{};
+    struct P { double t; float midi, clarity, hz, rms; bool voiced; };
+    std::vector<P> frames;
+    std::vector<double> starts;   // the live pipeline's note starts: sample-accurate onsets / legato midpoints
+    for (size_t pos = 0; pos + hop <= n; pos += hop) {
+        vp.process(x + pos, hop, pos + hop, o);
+        frames.push_back({o.pitch.timestampSeconds, o.pitch.midiFloat, o.pitch.clarity, o.pitch.frequencyHz, o.pitch.rms, o.pitch.voiced != 0});
+        for (uint32_t k = 0; k < o.eventCount; k++)
+            if (o.events[k].type == AnalyzerEventType::NoteStart) starts.push_back(o.events[k].data.note.startTimeSeconds);
+        if (progress && (pos / hop) % 256 == 0 && !progress(0.8 * double(pos) / double(n))) return {};
+    }
+    if (frames.empty()) return {};
+
+    // Viterbi: emission = -(d / sigma)^2 / 2, floored, times the frame's clarity; unvoiced frames
+    // belong to the unvoiced state, voiced ones cost it a constant.
+    std::vector<uint8_t> back(frames.size() * (kNotes + 1));
+    std::vector<float> prev(kNotes + 1, 0.f), cur(kNotes + 1), e(kNotes + 1);
+    for (size_t i = 0; i < frames.size(); i++) {
+        const P& f = frames[i];
+        for (int k = 0; k < kNotes; k++) {
+            if (!f.voiced) { e[size_t(k)] = -2.f; continue; }
+            float d = (f.midi - float(kLowMidi + k)) / kSigma;
+            e[size_t(k)] = std::max(kFloor, -0.5f * d * d) * std::max(0.2f, f.clarity);
+        }
+        e[kUnvoiced] = f.voiced ? -2.f : 0.f;
+        int best = 0;
+        for (int k = 1; k <= kNotes; k++) if (prev[size_t(k)] > prev[size_t(best)]) best = k;
+        for (int k = 0; k <= kNotes; k++) {
+            // Voice <-> silence changes are cheap (a phrase ends when the sound does); pitch changes cost.
+            const float cost = (k == kUnvoiced || best == kUnvoiced) ? kVoicing : kNoteChange;
+            const float stay = prev[size_t(k)], move = prev[size_t(best)] - cost;
+            const bool keep = i == 0 || stay >= move;
+            cur[size_t(k)] = e[size_t(k)] + (i == 0 ? 0 : keep ? stay : move);
+            back[i * (kNotes + 1) + size_t(k)] = uint8_t(keep ? k : best);
+        }
+        std::swap(prev, cur);
+    }
+    std::vector<int> path(frames.size());
+    int st = int(std::max_element(prev.begin(), prev.end()) - prev.begin());
+    for (size_t i = frames.size(); i-- > 0;) { path[i] = st; st = back[i * (kNotes + 1) + size_t(st)]; }
+
+    Speller speller;
+    speller.configure(s.keyFifths, s.keyMode);
+    const int shift = clef_octave_shift(s.clef);
+    std::vector<AnalyzerEvent> out;
+    int previousMidi = -1;
+    double lastEnd = -1;
+    uint32_t seq = 0;
+    for (size_t i = 0; i < frames.size();) {
+        size_t j = i;
+        while (j < frames.size() && path[j] == path[i]) j++;
+        if (path[i] != kUnvoiced) {
+            const int midi = kLowMidi + path[i];
+            double sumHz = 0, sumC = 0, sumC2 = 0, sumConf = 0;
+            int cnt = 0;
+            for (size_t k = i; k < j; k++) {
+                const P& f = frames[k];
+                if (!f.voiced || std::fabs(f.midi - float(midi)) > 0.5f) continue;   // glide / stray frames left out of the averages
+                const double cents = 100.0 * (f.midi - midi);
+                sumHz += f.hz; sumC += cents; sumC2 += cents * cents; sumConf += f.clarity; cnt++;
+            }
+            double start = frames[i].t, end = j < frames.size() ? frames[j].t : frames.back().t + c.hopSeconds;
+            // The same pitch after a short gap with no dip in level (a stray octave frame or a glitch
+            // read unvoiced, not a re-articulation) is the same note: a sung repeat has a consonant.
+            bool sustained = false;
+            if (cnt >= 2 && !out.empty() && out.back().data.note.midi == midi && start - out.back().data.note.endTimeSeconds < 0.15) {
+                float gapMin = 1e9f, noteRms = 0;
+                int nr = 0;
+                for (size_t k = 0; k < i; k++) {
+                    if (frames[k].t >= out.back().data.note.endTimeSeconds - 1e-9) gapMin = std::min(gapMin, frames[k].rms);
+                    else if (frames[k].t >= out.back().data.note.startTimeSeconds) { noteRms += frames[k].rms; nr++; }
+                }
+                sustained = nr > 0 && gapMin >= 0.6f * noteRms / float(nr);
+            }
+            if (sustained) {
+                MusicalNoteEvent& pm = out.back().data.note;
+                pm.endTimeSeconds = end;
+                pm.durationSeconds = end - pm.startTimeSeconds;
+                lastEnd = end;
+            } else if (cnt >= 2 && end - start >= kMinNote) {
+                double bestD = 0.06;   // snap to the nearest live onset (the decoder places a boundary on a window centre)
+                for (double on : starts)
+                    if (std::fabs(on - start) < bestD) { bestD = std::fabs(on - start); start = std::max(on, lastEnd); }
+                if (!out.empty() && start - lastEnd < 0.03 && start > lastEnd) {   // legato: the previous note ends here
+                    MusicalNoteEvent& pm = out.back().data.note;
+                    pm.endTimeSeconds = start;
+                    pm.durationSeconds = pm.endTimeSeconds - pm.startTimeSeconds;
+                }
+                if (lastEnd > 0 && start - lastEnd > 0.15) speller.reset_phrase();
+                const Spelled sp = speller.spell(midi, previousMidi);
+                AnalyzerEvent ev{};
+                ev.type = AnalyzerEventType::NoteEnd;
+                ev.sequence = seq++;
+                MusicalNoteEvent& m = ev.data.note;
+                m.startTimeSeconds = start;   // pitch timestamps are window centres, already compensated
+                m.endTimeSeconds = end;
+                m.durationSeconds = end - start;
+                m.midi = int8_t(midi);
+                Speller::name(sp, shift, m.writtenName);
+                m.avgHz = float(sumHz / cnt);
+                m.medianHz = m.avgHz;
+                m.avgCents = float(sumC / cnt);
+                m.confidence = float(sumConf / cnt);
+                m.chromatic = !sp.diatonic;
+                m.vibrato = sumC2 / cnt - (sumC / cnt) * (sumC / cnt) > 144.0;
+                out.push_back(ev);
+                previousMidi = midi;
+                lastEnd = end;
+                if (!out.empty() && out.size() >= 2) {
+                    MusicalNoteEvent& pm = out[out.size() - 2].data.note;   // no overlap with the note before
+                    if (pm.endTimeSeconds > m.startTimeSeconds) { pm.endTimeSeconds = m.startTimeSeconds; pm.durationSeconds = pm.endTimeSeconds - pm.startTimeSeconds; }
+                }
+            }
+        }
+        i = j;
     }
     if (progress) progress(1.0);
     return out;

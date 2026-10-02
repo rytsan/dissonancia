@@ -342,16 +342,6 @@ public sealed class MainWindow : Window
         },
     } };
 
-    static Control Placeholder(string title, string text) => new Border
-    {
-        Margin = new Thickness(16), Padding = new Thickness(24), Background = Ui.Face, CornerRadius = new CornerRadius(6),
-        Child = new StackPanel
-        {
-            Spacing = 12,
-            Children = { new TextBlock { Text = title, FontSize = 22, FontWeight = FontWeight.Bold }, new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, Foreground = Ui.Label } },
-        },
-    };
-
     // ---------------- START tab (spec §22.1) ----------------
 
     Action _syncStart = () => { };   // START controls <- session (tap tempo)
