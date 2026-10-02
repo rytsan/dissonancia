@@ -30,12 +30,11 @@ public sealed class StudioState
     readonly Stack<EditList> _undo = new();
     public double ViewStart, ViewEnd, SelStart = -1, SelEnd = -1;   // edited frames
     public AppMode Mode;
-    public string? Result;           // take JSON of the offline analysis of the current edits
+    public string? Result;           // take JSON of the offline analysis (or the stems' lead sheet) of the current edits
     public Take? ResultTake;
     public bool Running;
     public float Progress;
     public string Status = "";
-    string? _jobOptions, _jobSource;
 
     public event Action<string>? ScoreRequested;
     public event Action? Changed;
@@ -67,6 +66,7 @@ public sealed class StudioState
         Player.Refresh();
         Fit();
         Status = err is null ? "" : "não foi possível abrir: " + err;
+        LoadStems();
         RefreshResult();
     }
 
@@ -90,6 +90,7 @@ public sealed class StudioState
         Player.Refresh();
         StudioProject.SaveEdits(Current!, Edits);
         Fit();
+        LoadStems();   // stems of other edits no longer apply
         RefreshResult();
         Changed?.Invoke();
     }
@@ -122,65 +123,193 @@ public sealed class StudioState
         else { Player.Loop((ulong)SelStart, (ulong)SelEnd); Player.Seek((ulong)SelStart); }
     }
 
+    // ---------------------------------------------------------------- S3 separation
+
+    public List<StemTrack> Stems = [];
+    public DemucsModel.Variant Variant = DemucsModel.FourStems;
+    SeparationJob? _sep;
+    CancellationTokenSource? _install;
+    public bool Separating => _sep is { Running: true } || _install is not null;
+    public float SepProgress;
+    public bool DemucsReady => DemucsModel.HelperPresent && DemucsModel.Installed(Variant);
+    string StemsKey => Variant.File + ";" + Edits.Key;
+
+    void LoadStems()
+    {
+        Stems = [];
+        if (Current is null) return;
+        var dir = StudioProject.StemsDir(Current);
+        var key = Path.Combine(dir, "key.txt");
+        if (!File.Exists(key) || File.ReadAllText(key) != StemsKey) return;   // separated from other edits / model
+        foreach (var name in SeparationJob.StemOrder)
+            if (StemTrack.Load(name, Path.Combine(dir, name + ".wav")) is { } t) Stems.Add(t);
+    }
+
+    /// Installs the weights if needed (one download, checksum-pinned), then separates the edited take.
+    public async void Separate()
+    {
+        if (Current is null || Player is null || Separating || Running) return;
+        if (!DemucsModel.HelperPresent) { Status = "separação ausente nesta instalação (core sem DZ_WITH_DEMUCS)"; Changed?.Invoke(); return; }
+        if (!DemucsModel.Installed(Variant))
+        {
+            _install = new CancellationTokenSource();
+            Status = $"baixando o modelo Demucs ({Variant.Size / 1_000_000} MB, uma vez)…";
+            var err = await DemucsModel.InstallAsync(Variant, f => SepProgress = f * 0.1f, _install.Token);
+            _install = null;
+            if (err is not null) { Status = "modelo não instalado: " + err; Changed?.Invoke(); return; }
+        }
+        StudioProject.EnsureDir();
+        string input = Current;
+        if (!Edits.IsEmpty) { input = StudioProject.EditedWavPath(Current); if (!Player.SaveWav(input)) { Status = "não foi possível gravar o áudio editado"; return; } }
+        var dir = StudioProject.StemsDir(Current);
+        try { if (Directory.Exists(dir)) Directory.Delete(dir, true); } catch (IOException) { }
+        _sep = SeparationJob.Start(Variant, input, dir, out var e);
+        Status = _sep is null ? "falhou: " + e : "separando em faixas (Demucs)…";
+        Changed?.Invoke();
+    }
+
+    void PollSeparation()
+    {
+        if (_sep is null) return;
+        SepProgress = 0.1f + 0.9f * _sep.Progress;
+        if (_sep.Running) return;
+        var job = _sep;
+        _sep = null;
+        if (job.Succeeded && Current is not null)
+        {
+            File.WriteAllText(Path.Combine(StudioProject.StemsDir(Current), "key.txt"), StemsKey);
+            LoadStems();
+            RefreshResult();
+            Status = $"separado: {string.Join(", ", Stems.Select(t => t.Name))}";
+        }
+        else Status = job.Error.Length > 0 ? "separação falhou: " + job.Error : "separação cancelada";
+        Changed?.Invoke();
+    }
+
     // ---------------------------------------------------------------- analysis
 
-    string Options(Session s) =>
-        StudioProject.Options(s, Compensation) + (FromTake && Edits.KeepsGrid ? ";grid" : "") + ";decoder=2;edits=" + Edits.Key;
+    /// One analysis of the queue: a session (mode), the audio it reads, its result suffix.
+    sealed record Pass(Session Session, string Input, string Suffix, string Options);
+    readonly Queue<Pass> _queue = new();
+    Pass? _pass;
+    string? _passSource;
 
-    Session AnalysisSession()
+    string Options(Session s, string extra = "") =>
+        StudioProject.Options(s, Compensation) + (FromTake && Edits.KeepsGrid ? ";grid" : "") + ";decoder=2;edits=" + Edits.Key + extra;
+
+    Session AnalysisSession(AppMode? mode = null)
     {
         var s = Session;
         return new Session
         {
-            Mode = Mode, Quality = s.Quality, KeySet = s.KeySet, Key = s.Key, Clef = s.Clef, AutoClef = s.AutoClef,
+            Mode = mode ?? Mode, Quality = s.Quality, KeySet = s.KeySet, Key = s.Key, Clef = s.Clef, AutoClef = s.AutoClef,
             BeatsPerBar = s.BeatsPerBar, BeatUnit = s.BeatUnit, Bpm = s.Bpm,
         };
     }
 
+    AppMode HarmonyMode => Mode is AppMode.VoiceMono or AppMode.InstrumentMono ? AppMode.GeneralChords : Mode;
+
+    /// The analyses this take gets: with stems, the voice on the vocals stem and the harmony on
+    /// other + bass (+ guitar + piano); without, the mix in the selected mode.
+    List<Pass> Plan()
+    {
+        if (Current is null) return [];
+        if (Stems.Count == 0) { var s = AnalysisSession(); return [new Pass(s, "", "", Options(s))]; }
+        var dir = StudioProject.StemsDir(Current);
+        var voice = AnalysisSession(AppMode.VoiceMono);
+        var harmony = AnalysisSession(HarmonyMode);
+        return
+        [
+            new Pass(voice, Path.Combine(dir, "vocals.wav"), ".voice", Options(voice, ";stem=vocals;" + StemsKey)),
+            new Pass(harmony, Path.Combine(dir, "harmony.wav"), ".harmony", Options(harmony, ";stem=harmony;" + StemsKey)),
+        ];
+    }
+
     void RefreshResult()
     {
-        Result = Current is null ? null : StudioProject.Cached(Current, Options(AnalysisSession()));
+        Result = null;
         ResultTake = null;
+        if (Current is null) return;
+        var plan = Plan();
+        var done = plan.Select(p => StudioProject.Cached(Current, p.Options, p.Suffix)).ToList();
+        if (done.Any(d => d is null)) return;
+        Result = done.Count == 1 ? done[0] : MergeLeadSheet(done!);
         if (Result is not null) try { ResultTake = Take.Load(Result); } catch (Exception e) when (e is IOException or JsonException or KeyNotFoundException) { }
+    }
+
+    /// Melody (voice notes) + harmony (chords) of the separated stems in one take JSON for SCORE.
+    string? MergeLeadSheet(List<string> results)
+    {
+        try
+        {
+            var root = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(results[1]))!.AsObject();   // the harmony's session
+            var events = root["events"]!.AsArray();
+            var voice = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(results[0]))!["events"]!.AsArray();
+            foreach (var e in voice.ToList()) events.Add(e!.DeepClone());
+            root["analysis"] = "studio-offline-stems";
+            root["session"]!["mode"] = (int)AppMode.VoiceMono;   // a lead sheet: the voice's staff, the harmony as symbols
+            // The voice's own clef / spelling rule: SCORE re-picks the clef from the notes (Auto).
+            var path = StudioProject.LeadSheetPath(Current!);
+            File.WriteAllText(path, root.ToJsonString());
+            return path;
+        }
+        catch (Exception e) when (e is IOException or JsonException or InvalidOperationException or NullReferenceException) { return null; }
     }
 
     public void CycleMode() { Mode = (AppMode)(((int)Mode + 1) % 5); RefreshResult(); }
 
     public void Analyze()
     {
-        if (Job is null || Player is null || Current is null || Running) return;
-        var s = AnalysisSession();
-        var options = Options(s);
-        if (StudioProject.Cached(Current, options) is not null) { RefreshResult(); Status = "resultado em cache (mesmas opções e edições)"; return; }
+        if (Job is null || Player is null || Current is null || Running || Separating) return;
+        RefreshResult();
+        if (Result is not null) { Status = "resultado em cache (mesmas opções e edições)"; Changed?.Invoke(); return; }
         StudioProject.EnsureDir();
-        string input = Current;
-        if (!Edits.IsEmpty)
-        {   // the analysis reads the edited take
-            input = StudioProject.EditedWavPath(Current);
-            if (!Player.SaveWav(input)) { Status = "não foi possível gravar o áudio editado"; return; }
+        _queue.Clear();
+        foreach (var p in Plan())
+        {
+            if (StudioProject.Cached(Current, p.Options, p.Suffix) is not null) continue;
+            string input = p.Input;
+            if (input.Length == 0)
+            {
+                input = Current;
+                if (!Edits.IsEmpty) { input = StudioProject.EditedWavPath(Current); if (!Player.SaveWav(input)) { Status = "não foi possível gravar o áudio editado"; return; } }
+            }
+            else if (p.Suffix == ".harmony" && !File.Exists(input))
+            {
+                var dir = StudioProject.StemsDir(Current);
+                var parts = new[] { "other", "bass", "guitar", "piano" }.Select(n => Path.Combine(dir, n + ".wav")).Where(File.Exists);
+                if (!Wav.Mix(parts, input)) { Status = "não foi possível juntar a harmonia"; return; }
+            }
+            _queue.Enqueue(p with { Input = input });
         }
-        var err = Job.Start(s, Compensation, input, StudioProject.ResultPath(Current), FromTake && Edits.KeepsGrid);
-        if (err is not null) { Status = "falhou: " + err; return; }
-        (Running, _jobOptions, _jobSource, Result, ResultTake) = (true, options, Current, null, null);
-        Status = "analisando…";
+        _passSource = Current;
+        Next();
     }
 
-    public void Cancel() => Job?.Cancel();
+    void Next()
+    {
+        if (Job is null || _passSource is null) return;
+        if (!_queue.TryDequeue(out var p)) { Running = false; _pass = null; RefreshResult(); FinishStatus(); return; }
+        var err = Job.Start(p.Session, Compensation, p.Input, StudioProject.ResultPath(_passSource, p.Suffix), FromTake && Edits.KeepsGrid);
+        if (err is not null) { Running = false; Status = "falhou: " + err; return; }
+        (_pass, Running) = (p, true);
+        Status = p.Suffix switch { ".voice" => "transcrevendo a voz…", ".harmony" => "transcrevendo a harmonia…", _ => "analisando…" };
+    }
+
+    void FinishStatus() =>
+        Status = ResultTake is { } t ? $"pronto · {t.Notes.Count} notas · {t.Chords.Count} acordes" + (Stems.Count > 0 ? " · das faixas separadas" : "") : "pronto";
+
+    public void Cancel() { _queue.Clear(); Job?.Cancel(); _sep?.Cancel(); _install?.Cancel(); }
 
     public void Poll()
     {
-        if (!Running || Job is null) return;
+        PollSeparation();
+        if (!Running || Job is null || _pass is null) return;
         var (state, progress) = Job.Poll();
         Progress = progress;
         if (state == StudioJob.State.Running) return;
-        Running = false;
-        if (state == StudioJob.State.Done && _jobSource is not null && _jobOptions is not null)
-        {
-            StudioProject.Save(_jobSource, _jobOptions);
-            if (_jobSource == Current) RefreshResult();
-            Status = ResultTake is { } t ? $"pronto · {t.Notes.Count} notas · {t.Chords.Count} acordes" : "pronto";
-        }
-        else Status = state == StudioJob.State.Cancelled ? "cancelado" : "falhou: " + Job.Error;
+        if (state == StudioJob.State.Done && _passSource is not null) { StudioProject.Save(_passSource, _pass.Options, _pass.Suffix); Next(); }
+        else { Running = false; _queue.Clear(); Status = state == StudioJob.State.Cancelled ? "cancelado" : "falhou: " + Job.Error; }
         Changed?.Invoke();
     }
 
@@ -189,11 +318,11 @@ public sealed class StudioState
         if (Current is null) return;
         if (Result is not null) { ScoreRequested?.Invoke(Result); return; }
         var sidecar = Path.ChangeExtension(Current, ".json");
-        if (File.Exists(sidecar) && Edits.IsEmpty) ScoreRequested?.Invoke(sidecar);   // raw take preview
+        if (File.Exists(sidecar) && Edits.IsEmpty && Stems.Count == 0) ScoreRequested?.Invoke(sidecar);   // raw take preview
         else Status = "analise primeiro (DA · ANALISAR)";
     }
 
-    public void Close() { Player?.Stop(); Player?.Dispose(); Job?.Dispose(); }
+    public void Close() { Cancel(); Player?.Stop(); Player?.Dispose(); Job?.Dispose(); }
 }
 
 /// Base of every STUDIO rack unit: screwed face, engraved maker + model + name, hardware keys.
@@ -320,7 +449,7 @@ public sealed class TransportUnit : StudioUnit
         }
         // Optional components present (any environment: everything optional, used when there).
         double lx = r.Right - 250;
-        (string, bool)[] parts = [("PLAYER", p is not null), ("ANÁLISE", S.Job is not null), ("VEROVIO", Directory.Exists(Path.Combine(AppContext.BaseDirectory, "verovio-data"))), ("DEMUCS", false), ("GPU", false)];
+        (string, bool)[] parts = [("PLAYER", p is not null), ("ANÁLISE", S.Job is not null), ("VEROVIO", Directory.Exists(Path.Combine(AppContext.BaseDirectory, "verovio-data"))), ("DEMUCS", S.DemucsReady), ("GPU", false)];
         for (int i = 0; i < parts.Length; i++)
         {
             Ui.Led(ctx, new Point(lx + 6 + i * 50, y + 12), 4, parts[i].Item2, Ui.Green, Ui.GreenOff);
@@ -427,20 +556,28 @@ public sealed class RecorderUnit : StudioUnit
         ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF24272B)), new ImmutablePen(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF0B0C0D)), 1), card, 3, 3);
         Ui.Text(ctx, "CANAIS", card.X + 8, card.Y + 4, 8, Ui.Label, Ui.SansBold);
         double laneH = 44;
-        double trackH = Math.Max(80, area.Height - 30 - laneH);
+        double stemH = S.Stems.Count == 0 ? 0 : Math.Clamp((area.Height - 30 - laneH) * 0.55 / S.Stems.Count, 26, 60);
+        double trackH = Math.Max(60, area.Height - 30 - laneH - stemH * S.Stems.Count);
         Tape(ctx, card.X + 10, card.Y + 26, S.Current is null ? "—" : "MIX");
         Plasma.DotText(ctx, "1", card.Right - 22, card.Y + 26, 2.4, 1);
         Ui.Led(ctx, new Point(card.X + 16, card.Y + 64), 3.5, S.Player?.Playing == true, Ui.Green, Ui.GreenOff);
         Ui.Text(ctx, "PLAY", card.X + 24, card.Y + 58, 8, Ui.Label, Ui.SansBold);
         Ui.Led(ctx, new Point(card.X + 70, card.Y + 64), 3.5, !S.Edits.IsEmpty, Ui.Amber, Ui.AmberOff);
         Ui.Text(ctx, "EDITADO", card.X + 78, card.Y + 58, 8, Ui.Label, Ui.SansBold);
-        string laneName = S.Mode is AppMode.VoiceMono or AppMode.InstrumentMono ? "↳ NOTAS" : "↳ ACORDES";
-        Ui.Text(ctx, laneName, card.X + 16, area.Y + 22 + trackH + 14, 10, S.ResultTake is null ? Ui.Label : Ui.Amber, Ui.SansBold);
+        string laneName = S.Stems.Count > 0 ? "↳ VOZ + CIFRAS" : S.Mode is AppMode.VoiceMono or AppMode.InstrumentMono ? "↳ NOTAS" : "↳ ACORDES";
+        var stemNames = new Dictionary<string, string> { ["vocals"] = "VOZ", ["bass"] = "BAIXO", ["other"] = "OUTROS", ["drums"] = "BATERIA", ["guitar"] = "VIOLÃO", ["piano"] = "PIANO" };
+        for (int i = 0; i < S.Stems.Count; i++)
+        {
+            double sy = area.Y + 22 + trackH + i * stemH;
+            Tape(ctx, card.X + 10, sy + stemH / 2 - 10, stemNames.GetValueOrDefault(S.Stems[i].Name, S.Stems[i].Name.ToUpperInvariant()), i % 2 == 0 ? 1.2 : -1.2);
+            Plasma.DotText(ctx, $"{i + 2}", card.Right - 22, sy + stemH / 2 - 8, 2.2, 1);
+        }
+        Ui.Text(ctx, laneName, card.X + 16, area.Y + 22 + trackH + stemH * S.Stems.Count + 14, 10, S.ResultTake is null ? Ui.Label : Ui.Amber, Ui.SansBold);
 
         var bezel = new Rect(card.Right + 8, area.Y, area.Right - card.Right - 8, area.Height);
         ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF0B0C0D)), null, bezel, 5, 5);
         _screen = new Rect(bezel.X + 5, bezel.Y + 22, bezel.Width - 10, trackH);
-        _lane = new Rect(_screen.X, _screen.Bottom + 4, _screen.Width, laneH);
+        _lane = new Rect(_screen.X, _screen.Bottom + stemH * S.Stems.Count + 4, _screen.Width, laneH);
         ctx.DrawRectangle(PhosphorBg, null, new Rect(bezel.X + 5, bezel.Y + 5, bezel.Width - 10, bezel.Height - 10), 2, 2);
 
         var p = S.Player;
@@ -473,6 +610,24 @@ public sealed class RecorderUnit : StudioUnit
             c.EndFigure(true);
         }
         ctx.DrawGeometry(new ImmutableSolidColorBrush(Color.FromUInt32(0x553DDC84)), PhosphorTrace, g);
+
+        // Separated stems, one row each, on the same time axis (stems are the edited take).
+        uint[] stemColours = [0xFFFF7A1A, 0xFF5AA9FF, 0xFF9DFFC8, 0xFFC9CED6, 0xFF3DDC84, 0xFFFFB000];
+        for (int i = 0; i < S.Stems.Count; i++)
+        {
+            var row = new Rect(_screen.X, _screen.Bottom + i * stemH, _screen.Width, stemH);
+            ctx.DrawLine(PhosphorLine, row.TopLeft, row.TopRight);
+            var st = S.Stems[i];
+            var brush = new ImmutableSolidColorBrush(Color.FromUInt32(stemColours[i % stemColours.Length]));
+            double secPerCol = (S.ViewEnd - S.ViewStart) / S.Rate / Math.Max(1, row.Width);
+            for (int col = 0; col < (int)row.Width; col += 2)
+            {
+                double a = S.ViewStart / S.Rate + col * secPerCol;
+                var (lo, hi) = st.Peak(a, a + 2 * secPerCol);
+                double cyy = row.Center.Y, ah = row.Height * 0.45;
+                ctx.DrawRectangle(brush, null, new Rect(row.X + col, cyy - hi * ah * 1.6, 1.4, Math.Max(1, (hi - lo) * ah * 1.6)));
+            }
+        }
 
         // Transcription lane: the offline result of these edits.
         ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0x55000000)), null, _lane);
@@ -596,15 +751,19 @@ public sealed class ChainUnit : StudioUnit
             AppMode.VoiceMono => "VOZ", AppMode.InstrumentMono => "MELODIA", AppMode.GuitarChords => "VIOLÃO", AppMode.PianoChords => "PIANO", _ => "GERAL",
         };
         double ix = an.X + 14, iy = an.Y + 26;
-        Key(ctx, new Rect(ix, iy, 96, 30), mode, () => { S.CycleMode(); InvalidateVisual(); }, true, Ui.Amber, !S.Running);
-        Key(ctx, new Rect(ix + 104, iy, 110, 30), "ANALISAR", S.Analyze, S.Running, Ui.Green, S.Current is not null && !S.Running);
-        Key(ctx, new Rect(ix + 222, iy, 96, 30), "CANCELAR", S.Cancel, false, Ui.Red, S.Running);
-        Key(ctx, new Rect(ix + 326, iy, 96, 30), "SCORE", S.OpenScore, S.Result is not null, Ui.Green, S.Current is not null);
-        // Progress as an LED bar.
-        int lit = (int)Math.Round((S.Running ? S.Progress : S.Result is not null ? 1 : 0) * 20);
-        for (int i = 0; i < 20; i++) Ui.Led(ctx, new Point(ix + 6 + i * 14, iy + 46), 4, i < lit, Ui.Green, Ui.GreenOff);
+        Key(ctx, new Rect(ix, iy, 88, 30), mode, () => { S.CycleMode(); InvalidateVisual(); }, true, Ui.Amber, !S.Running);
+        string sepLabel = !DemucsModel.HelperPresent ? "SEM DEMUCS" : S.Stems.Count > 0 ? "SEPARADO" : DemucsModel.Installed(S.Variant) ? "SEPARAR" : "SEPARAR*";
+        Key(ctx, new Rect(ix + 94, iy, 104, 30), sepLabel, S.Separate, S.Stems.Count > 0 || S.Separating, Ui.Amber, DemucsModel.HelperPresent && S.Current is not null && !S.Separating && !S.Running);
+        Key(ctx, new Rect(ix + 204, iy, 100, 30), "ANALISAR", S.Analyze, S.Running, Ui.Green, S.Current is not null && !S.Running && !S.Separating);
+        Key(ctx, new Rect(ix + 310, iy, 96, 30), "CANCELAR", S.Cancel, false, Ui.Red, S.Running || S.Separating);
+        Key(ctx, new Rect(ix + 412, iy, 80, 30), "SCORE", S.OpenScore, S.Result is not null, Ui.Green, S.Current is not null);
+        if (sepLabel == "SEPARAR*") Ui.Text(ctx, $"* baixa o modelo Demucs ({S.Variant.Size / 1_000_000} MB) uma vez", ix + 94, iy + 34, 8, Ui.Label, Ui.Mono);
+        // Progress as an LED bar (separation amber, analysis green).
+        bool sep = S.Separating;
+        int lit = (int)Math.Round((sep ? S.SepProgress : S.Running ? S.Progress : S.Result is not null ? 1 : 0) * 20);
+        for (int i = 0; i < 20; i++) Ui.Led(ctx, new Point(ix + 6 + i * 14, iy + 50), 4, i < lit, sep ? Ui.Amber : Ui.Green, sep ? Ui.AmberOff : Ui.GreenOff);
         // Plasma readout of the result.
-        var win = new Rect(ix, iy + 62, Math.Min(an.Width - 28, 420), an.Bottom - iy - 72);
+        var win = new Rect(ix, iy + 64, Math.Min(an.Width - 28, 520), an.Bottom - iy - 74);
         ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF120804)), Ui.FaceEdge, win, 2, 2);
         if (S.ResultTake is { } t)
         {
@@ -612,9 +771,11 @@ public sealed class ChainUnit : StudioUnit
             string main = notes ? $"{t.Notes.Count}" : $"{t.Chords.Count}";
             Plasma.DotText(ctx, main, win.X + 10, win.Y + 8, 4.2, 4);
             Plasma.Text(ctx, notes ? "NOTAS" : "ACORDES", win.X + 140, win.Y + 10, 14);
-            Plasma.Text(ctx, notes ? "voz: take inteiro" : "take inteiro · Viterbi" + (S.FromTake && S.Edits.KeepsGrid ? " · grade do metrônomo" : ""), win.X + 140, win.Y + 32, 11, false);
+            string how = S.Stems.Count > 0 ? $"{t.Notes.Count} notas da voz · {t.Chords.Count} acordes · faixas separadas"
+                : notes ? "voz: take inteiro" : "take inteiro · Viterbi" + (S.FromTake && S.Edits.KeepsGrid ? " · grade do metrônomo" : "");
+            Plasma.Text(ctx, how, win.X + 140, win.Y + 32, 11, false);
         }
-        else Plasma.Text(ctx, S.Running ? $"{S.Progress * 100:0} %" : "—", win.X + 12, win.Y + 12, 16, S.Running);
+        else Plasma.Text(ctx, S.Separating ? $"SEPARANDO {S.SepProgress * 100:0} %" : S.Running ? $"{S.Progress * 100:0} %" : "—", win.X + 12, win.Y + 12, 16, S.Running || S.Separating);
         Ui.Led(ctx, new Point(an.Right - 150, an.Bottom - 16), 4, true, Ui.Amber, Ui.AmberOff);
         Ui.Text(ctx, "PÓS-INSERTOS · PRÉ-FADER", an.Right - 142, an.Bottom - 22, 8, Ui.Amber, Ui.SansBold);
     }
@@ -700,6 +861,7 @@ public sealed class StudioView : DockPanel
     public void TogglePlay() => _s.TogglePlay();
     public void OpenFirst() { if (_s.Library.Count > 0) _s.Open(_s.Library[0].Path); Refresh(); }
     public void AnalyzeCurrent() => _s.Analyze();
+    public void SeparateCurrent() => _s.Separate();
     public void ScoreCurrent() => _s.OpenScore();
     public void SelectRange(double fromSeconds, double toSeconds) { _s.SelStart = fromSeconds * _s.Rate; _s.SelEnd = toSeconds * _s.Rate; Refresh(); }
     public void EditAction(string name)

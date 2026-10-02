@@ -1,12 +1,5 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
-using Avalonia;
-using Avalonia.Controls;
-using Avalonia.Input;
-using Avalonia.Layout;
-using Avalonia.Media;
-using Avalonia.Media.Immutable;
-using Avalonia.Platform.Storage;
 
 namespace Dissonancia;
 
@@ -156,29 +149,32 @@ public static class StudioProject
         return System.IO.Path.Combine(Dir, $"{System.IO.Path.GetFileNameWithoutExtension(source)}-{hash}");
     }
 
-    public static string ResultPath(string source) => Stem(source) + ".events.json";
-    static string ProjectPath(string source) => Stem(source) + ".studio.json";
+    // suffix: one analysis among several of the same take (".voice", ".harmony" on separated stems).
+    public static string ResultPath(string source, string suffix = "") => Stem(source) + suffix + ".events.json";
+    static string ProjectPath(string source, string suffix = "") => Stem(source) + suffix + ".studio.json";
+    public static string StemsDir(string source) => Stem(source) + "-stems";
+    public static string LeadSheetPath(string source) => Stem(source) + ".leadsheet.json";
 
     /// The options that change the result (the cache key).
     public static string Options(Session s, double comp) =>
         $"mode={s.Mode};quality={s.Quality};key={(s.KeySet ? s.Key.Fifths + (s.Key.Minor ? "m" : "M") : "none")};clef={s.CoreClef};meter={s.BeatsPerBar}/{s.BeatUnit};bpm={s.Bpm:0.###};comp={comp:0.####}";
 
     /// A cached result for this source and options, or null.
-    public static string? Cached(string source, string options)
+    public static string? Cached(string source, string options, string suffix = "")
     {
         try
         {
-            var p = JsonSerializer.Deserialize<Project>(File.ReadAllText(ProjectPath(source)));
+            var p = JsonSerializer.Deserialize<Project>(File.ReadAllText(ProjectPath(source, suffix)));
             var fi = new FileInfo(source);
             return p is not null && p.Options == options && p.Size == fi.Length && p.Modified == fi.LastWriteTimeUtc.Ticks && File.Exists(p.Result) ? p.Result : null;
         }
         catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException) { return null; }
     }
 
-    public static void Save(string source, string options)
+    public static void Save(string source, string options, string suffix = "")
     {
         var fi = new FileInfo(source);
-        File.WriteAllText(ProjectPath(source), JsonSerializer.Serialize(new Project(source, fi.Length, fi.LastWriteTimeUtc.Ticks, options, ResultPath(source), DateTime.UtcNow),
+        File.WriteAllText(ProjectPath(source, suffix), JsonSerializer.Serialize(new Project(source, fi.Length, fi.LastWriteTimeUtc.Ticks, options, ResultPath(source, suffix), DateTime.UtcNow),
             new JsonSerializerOptions { WriteIndented = true }));
     }
 
@@ -269,42 +265,64 @@ public static class StudioLibrary
 }
 
 
-/// S2 edit list (non-destructive): source ranges in order with clip gain, fades over the edited take,
-/// peak normalisation. Operations take a selection in EDITED frames. Kept per take, with undo.
-public sealed class EditList
+/// Small WAV helpers for the separated stems (float32 or 16-bit, any channels).
+public static class Wav
 {
-    public sealed record Seg(ulong A, ulong B, float GainDb);
-    public List<Seg> Segments { get; set; } = [];
-    public ulong FadeIn { get; set; }
-    public ulong FadeOut { get; set; }
-    public bool Normalize { get; set; }
-
-    [System.Text.Json.Serialization.JsonIgnore] public bool IsEmpty => Segments.Count == 0 && FadeIn == 0 && FadeOut == 0 && !Normalize;
-    public ulong Length(ulong original) => Segments.Count == 0 ? original : (ulong)Segments.Sum(s => (long)(s.B - s.A));
-    public EditList Clone() => new() { Segments = [.. Segments], FadeIn = FadeIn, FadeOut = FadeOut, Normalize = Normalize };
-    /// The take still starts where the original did, without cuts: the metronome grid holds.
-    [System.Text.Json.Serialization.JsonIgnore] public bool KeepsGrid => Segments.Count <= 1 && (Segments.Count == 0 || Segments[0].A == 0);
-    [System.Text.Json.Serialization.JsonIgnore] public string Key => System.Text.Json.JsonSerializer.Serialize(this);
-
-    List<Seg> Base(ulong original) => Segments.Count == 0 ? [new Seg(0, original, 0)] : Segments;
-
-    /// The pieces of the edited range [a, b), optionally with a gain change.
-    List<Seg> Slice(ulong original, ulong a, ulong b, float gain = 0)
+    public static (float[] Mono, int Rate)? ReadMono(string path)
     {
-        var outp = new List<Seg>();
-        ulong pos = 0;
-        foreach (var s in Base(original))
+        try
         {
-            ulong len = s.B - s.A, lo = Math.Max(a, pos), hi = Math.Min(b, pos + len);
-            if (hi > lo) outp.Add(new Seg(s.A + (lo - pos), s.A + (hi - pos), s.GainDb + gain));
-            pos += len;
+            var b = File.ReadAllBytes(path);
+            int ch = 1, bits = 16, rate = 44100;
+            for (int p = 12; p + 8 <= b.Length;)
+            {
+                string id = System.Text.Encoding.ASCII.GetString(b, p, 4);
+                int size = BitConverter.ToInt32(b, p + 4);
+                if (id == "fmt ") { ch = BitConverter.ToInt16(b, p + 10); rate = BitConverter.ToInt32(b, p + 12); bits = BitConverter.ToInt16(b, p + 22); }
+                if (id == "data")
+                {
+                    size = Math.Min(size, b.Length - p - 8);
+                    int frames = size / (bits / 8) / ch;
+                    var x = new float[frames];
+                    for (int i = 0; i < frames; i++)
+                        for (int c = 0; c < ch; c++)
+                        {
+                            int o = p + 8 + (i * ch + c) * (bits / 8);
+                            x[i] += (bits == 32 ? BitConverter.ToSingle(b, o) : BitConverter.ToInt16(b, o) / 32768f) / ch;
+                        }
+                    return (x, rate);
+                }
+                p += 8 + size + (size & 1);
+            }
         }
-        return outp;
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException) { }
+        return null;
     }
 
-    public void Trim(ulong original, ulong a, ulong b) { Segments = Slice(original, a, b); Clamp(original); }
-    public void Cut(ulong original, ulong a, ulong b) { Segments = [.. Slice(original, 0, a), .. Slice(original, b, ulong.MaxValue)]; Clamp(original); }
-    public void Gain(ulong original, ulong a, ulong b, float db) =>
-        Segments = [.. Slice(original, 0, a), .. Slice(original, a, b, db), .. Slice(original, b, ulong.MaxValue)];
-    void Clamp(ulong original) { ulong n = Length(original); FadeIn = Math.Min(FadeIn, n); FadeOut = Math.Min(FadeOut, n); }
+    public static void WriteMono(string path, float[] x, int rate)
+    {
+        using var f = File.Create(path);
+        using var w = new BinaryWriter(f);
+        w.Write("RIFF"u8); w.Write(36 + x.Length * 4); w.Write("WAVE"u8);
+        w.Write("fmt "u8); w.Write(16); w.Write((short)3); w.Write((short)1); w.Write(rate); w.Write(rate * 4); w.Write((short)4); w.Write((short)32);
+        w.Write("data"u8); w.Write(x.Length * 4);
+        foreach (float v in x) w.Write(v);
+    }
+
+    /// Sum of stems (e.g. the harmony = other + bass [+ guitar + piano]) into one mono WAV.
+    public static bool Mix(IEnumerable<string> inputs, string output)
+    {
+        float[]? sum = null;
+        int rate = 44100;
+        foreach (var path in inputs)
+        {
+            if (ReadMono(path) is not { } s) continue;
+            rate = s.Rate;
+            if (sum is null) sum = s.Mono;
+            else for (int i = 0; i < Math.Min(sum.Length, s.Mono.Length); i++) sum[i] += s.Mono[i];
+        }
+        if (sum is null) return false;
+        WriteMono(output, sum, rate);
+        return true;
+    }
 }

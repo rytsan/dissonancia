@@ -61,6 +61,9 @@ Only the pipeline chosen on START exists in a session (`voice_` for mono modes,
 | `core/src/decode.{hpp,cpp}` | STUDIO whole-take chord decoding: Viterbi over the matcher's scores, segment labels, onset snap, metronome grid |
 | `core/src/sidecar.hpp` | Take JSON event writer shared by the REC sidecar and the offline result |
 | `app/Studio.cs` | STUDIO native wrappers (player, job), take project cache, library, edit list |
+| `app/StudioSeparation.cs` | STUDIO S3: Demucs weights (download + SHA-256), the dz_separate process, stem waveforms |
+| `app/EditList.cs` | S2 edit list (trim, cut, clip gain, fades, normalize) |
+| `core/tools/dz_separate.cpp` | Separation helper: Demucs v4 via demucs.cpp, one WAV per stem, progress on stdout |
 | `app/StudioRack.cs` | STUDIO tab as a 19" rack: DS-T transport, DS-L library, DS-A track recorder with the edit keys, DS-C chain + analyser |
 | `core/src/tempo.{hpp,cpp}` | Tempo heard (onset-envelope autocorrelation + beat phase): beat marks on the scope only |
 | `core/src/chords.{hpp,cpp}` | Chord matcher (180 harmonic-aware templates, Occam, key/cadence context, bass), tracker, slash spelling |
@@ -325,6 +328,28 @@ notes, a sung melody with passing and neighbour tones, kick/snare/hi-hat),
 - Fixed on the way: the pitch timestamp of the first hops underflowed (an
   unsigned subtraction before the window filled) — LIVE and offline.
 
+### STUDIO S3 — separation (Demucs)
+- Optional component, any environment: `dz_separate` (built when
+  `DZ_WITH_DEMUCS`, pinned demucs.cpp + Eigen tarballs) runs Demucs v4 as its
+  own process — a crash or a cancel never touches the app; progress comes
+  from its output. The 4-stem weights (84 MB; 6-stem 55 MB) are downloaded
+  once into the app data folder and refused unless the SHA-256 matches. The
+  transport LED DEMUCS lights when helper and weights are both there.
+- SEPARAR separates the edited take into vocals, bass, other, drums
+  (+ guitar, piano with 6 stems); the stems are cached per edit list and
+  model and appear as channels in the track recorder. ANALISAR then runs
+  the voice decoder on the vocals stem and the chord decoder on other + bass
+  (+ guitar + piano), and SCORE gets one lead sheet: the melody on the
+  voice's staff with the chord symbols above.
+- Speed (10-core CPU, portable build): 4 inference threads are fastest —
+  58 s for 8.7 s of audio, 174 s for 42 s (≈ 4× real time). AVX2 + FMA was
+  only 17 % faster, so there is one portable binary. (A build that mixed
+  AVX2 and non-AVX2 Eigen code crashed; caught by checking every run wrote
+  its stems.)
+- Synthetic voices do not test it: Demucs leaves a sine-sum voice and even a
+  formant-synthesised one in "other" (vocals at −69 dB). The measurement uses
+  the real 2026-10-02 voice take mixed with the synthetic guitar and drums.
+
 ### STUDIO S2 — editing, and the tab as a rack
 - Core (`ana_player_apply_edits`, `ana_player_save_wav`): the edited take is
   rendered from the original (never changed) — source segments in order,
@@ -439,6 +464,7 @@ item).
 | Band mix, live loopback (engine, `tools/loopback`) | take labels 86 % correct |
 | STUDIO offline chords vs LIVE (band mix and stems, `dz_wav … offline 96 4`) | mix 91.2 → 99.2 %, guitar 95.0 → 99.0, guitar + voice 94.0 → 99.2, guitar + bass 94.5 → 99.3, guitar + drums 97.5 → 99.2; 16 chords for 16 bars every time (LIVE: 21–37); the mix's one miss is Dm/A (passing bass read as an inversion) |
 | STUDIO offline notes vs LIVE (band-mix melody, 57 notes, `dz_wav … voice … offline`) | voice alone F 100 → 100 % (onsets 4 / 7 ms); voice over the drums F 42.3 → 70.2 % (99 → 57 notes); voice under the strummed guitar 0 % in both (one pitch tracker cannot hear a voice inside chords: S3 separation's job); the 2026-10-02 voice take: 25 → 16 notes (the wobbles and the G♯5 tail gone); loopback melody 13/13 |
+| STUDIO S3, real voice in a band (the 2026-10-02 take + synthetic guitar + drums; reference = the clean take's offline notes, 16) | no separation: F 0 % (1 note); Demucs vocals stem → offline decoder: F 100 % (16/16, onsets 10 ms); the LIVE pipeline on the same stem: F 68 %. Chords on the separated other + bass of the band mix: 16/16 bars, Dm/A the one inversion slip as on the mix |
 | STUDIO offline chords, validation (6 progressions not used for tuning: V/V + dim7, harmonic minor, B♭ jazz with tritone sub, V/vi, Neapolitan, blues) | 100 % on all six; clean plucked guitar 99.5 %, G Em C D7 G/B Am7 D G exact |
 | Tempo heard, synthetic | within 2 BPM at 72/92/120/150 (10 % missing attacks, ±12 ms timing), eighth-note strumming at 92 → 92; beat phase within 30 ms |
 | Tempo heard, live loopback (guitar, strums on 1 and 3, 92 bpm) | 91.5–92.3 from 3 s; beat marks hold their phase within ±15 ms over 13 s |

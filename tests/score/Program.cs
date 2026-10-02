@@ -35,6 +35,18 @@ Check(Theory.ClefForRange(M("D4", "G4", "A4", "B4", "C5", "D5", "A4")) == Clef.T
 Check(Theory.ClefForRange(M("D3", "E3", "D3"), Clef.Treble8vb) == Clef.Treble8vb && Theory.ClefForRange(M("C3", "D3", "C3"), Clef.Treble8vb) == Clef.Bass,
       "auto clef: hysteresis at E3 (D3 stays treble 8vb, C3 goes to bass)");
 
+// STUDIO S2 edit list: trim, cut and clip gain on the edited timeline (frames).
+var el = new EditList();
+el.Trim(1000, 100, 900);                       // keep 100-900 of a 1000-frame take
+Check(el.Length(1000) == 800 && el.Segments[0].A == 100, "edit: trim");
+el.Cut(1000, 200, 300);                        // edited 200-300 = source 300-400 removed
+Check(el.Length(1000) == 700 && el.Segments.Count == 2 && el.Segments[0].B == 300 && el.Segments[1].A == 400, $"edit: cut {string.Join(",", el.Segments)}");
+el.Gain(1000, 150, 250, -6);                   // across the join: three pieces get -6 dB where selected
+Check(el.Segments.Count == 4 && el.Segments.Sum(s => (long)(s.B - s.A)) == 700 && el.Segments.Count(s => s.GainDb == -6) == 2, $"edit: gain across a join {string.Join(",", el.Segments)}");
+Check(!el.KeepsGrid && new EditList().KeepsGrid, "edit: a cut loses the metronome grid, no edit keeps it");
+var key = el.Key;
+Check(System.Text.Json.JsonSerializer.Deserialize<EditList>(key)!.Key == key, "edit: the list round-trips as JSON (the cache key)");
+
 // Crossing the bar line: beat 4 to beat 2 of the next bar -> tied quarters.
 var s1 = B(T((1.5, 2.5, "C4")));
 Check(Durs(s1.Measures[0]) == "r36 n12~" && Durs(s1.Measures[1]) == "n12 r12 r24", $"bar line tie: {Durs(s1.Measures[0])} | {Durs(s1.Measures[1])}");

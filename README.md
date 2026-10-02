@@ -82,3 +82,6 @@ docs/   IMPLEMENTATION.md, spec.md, spec.v2.1.md, graph/ (knowledge graph)
 MIT. Dependencies are MIT / public domain (miniaudio, Catch2, Svg.Skia).
 Verovio (LGPL-3.0, SCORE engraving) is a separate shared library loaded at run
 time, built from its unmodified source; its Leipzig font is SIL OFL 1.1.
+STUDIO separation (optional): demucs.cpp (MIT) with Eigen (MPL-2.0, header-only)
+in the separate `dz_separate` helper; the Demucs v4 weights (MIT, Meta) are
+downloaded on demand, checksum-pinned.

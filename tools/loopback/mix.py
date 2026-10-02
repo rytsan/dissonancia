@@ -36,14 +36,35 @@ for b, (name, _) in enumerate(prog):
 mel = [(72, 1), (74, .5), (76, 1.5), (74, 1), (72, 2), (71, .5), (69, 1.5), (72, 1), (77, 1.5), (76, .5), (74, 1), (72, 1),
        (74, 2), (71, 1), (67, 1), (71, 1.5), (72, .5), (74, 1), (71, 1), (69, 2.5), (71, .5), (72, 1), (69, 1), (74, 1.5),
        (73, .5), (74, 1), (77, 1), (79, 2), (77, 1), (74, 1)] * 2
-v = np.zeros(n); t0 = 0.0; ph = 0; notes = []
-for m, bt in mel:
+# Sung voice (source-filter): a glottal pulse train with jitter / shimmer and vibrato through the
+# formants of a vowel per syllable, breath noise, and a short consonant (noise burst) starting each
+# syllable, so a separator hears a voice, not a synth.
+def lfilter(b, a, x):   # direct-form IIR, up to 2 poles (no scipy needed)
+    y = np.zeros(len(x)); a1 = a[1] if len(a) > 1 else 0.0; a2 = a[2] if len(a) > 2 else 0.0
+    b0 = b[0]; b1 = b[1] if len(b) > 1 else 0.0; x1 = y1 = y2 = 0.0
+    for i, xi in enumerate(x):
+        yi = b0 * xi + b1 * x1 - a1 * y1 - a2 * y2
+        y[i] = yi; x1 = xi; y2 = y1; y1 = yi
+    return y
+VOWELS = {"a": [(730, 90), (1090, 110), (2440, 170)], "e": [(530, 70), (1840, 120), (2480, 170)], "o": [(570, 80), (840, 100), (2410, 170)], "i": [(300, 60), (2200, 140), (3000, 200)]}
+def formant(x, fc, bw):
+    r = np.exp(-np.pi * bw / SR); th = 2 * np.pi * fc / SR
+    return lfilter([1 - r], [1, -2 * r * np.cos(th), r * r], x)
+v = np.zeros(n); t0 = 0.0; ph = 0.0; notes = []
+for k, (m, bt) in enumerate(mel):
     dur = bt * beat; t = np.arange(int(SR * dur)) / SR
-    f = 440 * 2 ** ((m - 69) / 12) * 2 ** (20 * np.sin(2 * np.pi * 5.5 * t) / 1200 * np.clip(t / 0.3, 0, 1))
-    phase = ph + 2 * np.pi * np.cumsum(f) / SR; ph = phase[-1]
-    env = np.clip(t / 0.04, 0, 1) * np.clip((dur - t) / 0.06, 0, 1)
-    x = env * (np.sin(phase) + 0.5 * np.sin(2 * phase) + 0.3 * np.sin(3 * phase) + 0.15 * np.sin(4 * phase))
-    i0 = int(SR * t0); v[i0:i0 + len(x)] += x[:n - i0] * 0.5; notes.append((m, t0, t0 + dur)); t0 += dur
+    f = 440 * 2 ** ((m - 69) / 12) * 2 ** ((20 * np.sin(2 * np.pi * 5.5 * t) * np.clip(t / 0.3, 0, 1) + 6 * rng.standard_normal(len(t)).cumsum() / np.sqrt(len(t) + 1)) / 1200)
+    phase = ph + np.cumsum(f) / SR; ph = phase[-1] % 1
+    saw = 2 * (phase % 1) - 1                                   # glottal-like pulse train (rich, -6 dB/oct)
+    src = lfilter([1], [1, -0.9], np.diff(saw, prepend=saw[0])) * (1 + 0.05 * rng.standard_normal(len(t)))
+    src += 0.04 * rng.standard_normal(len(t))                   # breath
+    vow = VOWELS["aeoi"[k % 4]]
+    y = sum(formant(src, fc, bw) * g for (fc, bw), g in zip(vow, (1.0, 0.6, 0.35)))
+    cons = np.zeros(len(t)); nc = int(0.03 * SR)
+    if k % 2 == 0: cons[:nc] = rng.standard_normal(nc) * np.linspace(1, 0, nc) * 0.3   # "t" / "s" onset
+    env = np.clip((t - 0.02) / 0.05, 0, 1) * np.clip((dur - t) / 0.06, 0, 1)
+    x = env * y / (np.abs(y).max() + 1e-9) + lfilter([1, -0.95], [1], cons)
+    i0 = int(SR * t0); v[i0:i0 + len(x)] += x[:n - i0] * 0.45; notes.append((m, t0 + 0.02, t0 + dur)); t0 += dur
     if t0 >= len(prog) * bar: break
 # Drums: kick on 1 and 3, snare on 2 and 4, closed hi-hat eighths.
 d = np.zeros(n)

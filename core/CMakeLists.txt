@@ -61,6 +61,45 @@ if(DZ_TESTS)
   add_test(NAME dz_tests COMMAND dz_tests)
 endif()
 
+# STUDIO S3 separation (optional component, docs/studio-plan.md): demucs.cpp (MIT) + Eigen (MPL-2.0,
+# header-only), pinned tarballs, built into the dz_separate helper the app runs as its own process.
+# Demucs weights are not built: the app downloads them on demand (checksum-pinned).
+option(DZ_WITH_DEMUCS "Build the Demucs separation helper (dz_separate) for STUDIO" ON)
+if(DZ_WITH_DEMUCS)
+  include(FetchContent)
+  FetchContent_Declare(demucs_cpp
+    URL https://github.com/sevagh/demucs.cpp/archive/f1206e9adeea103aef4a636b9e62297cf1f8e34e.tar.gz
+    URL_HASH SHA256=f08bcacb49f99fdedac8affe13d671ec82cf3639c096b92c9c3da08c4b952934
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+  # Eigen at demucs.cpp's submodule commit; gitlab.com refuses scripted downloads, the GitHub mirror
+  # serves the same tree (the hash pins the content).
+  FetchContent_Declare(eigen_src
+    URL https://github.com/eigen-mirror/eigen/archive/dd8c71e62852b2fe429edb6682ac91fd1c578a26.tar.gz
+    URL_HASH SHA256=e8cbc003b1fa5e0d0d142c58155aaf341f87783d213d31a605a19b2f13d27acc
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+  FetchContent_GetProperties(demucs_cpp)
+  if(NOT demucs_cpp_POPULATED)
+    FetchContent_Populate(demucs_cpp)
+  endif()
+  FetchContent_GetProperties(eigen_src)
+  if(NOT eigen_src_POPULATED)
+    FetchContent_Populate(eigen_src)
+  endif()
+  find_package(OpenMP REQUIRED)
+  file(GLOB DEMUCS_SOURCES ${demucs_cpp_SOURCE_DIR}/src/*.cpp)
+  # Portable build (no -march=native: the helper runs on the user's machine). AVX2 + FMA measured
+  # only 17 % faster here (50 s vs 60 s for 8.7 s of audio), not worth a second binary.
+  add_library(demucs_lib STATIC ${DEMUCS_SOURCES})
+  target_include_directories(demucs_lib SYSTEM PUBLIC ${eigen_src_SOURCE_DIR} ${demucs_cpp_SOURCE_DIR}/src ${demucs_cpp_SOURCE_DIR}/cli-apps)
+  target_compile_features(demucs_lib PUBLIC cxx_std_17)
+  target_compile_options(demucs_lib PRIVATE -O3 -fno-math-errno -w)
+  target_compile_definitions(demucs_lib PUBLIC NDEBUG)
+  target_link_libraries(demucs_lib PUBLIC OpenMP::OpenMP_CXX)
+  add_executable(dz_separate tools/dz_separate.cpp)
+  target_compile_options(dz_separate PRIVATE -O3 -w)
+  target_link_libraries(dz_separate PRIVATE demucs_lib miniaudio)
+endif()
+
 # SCORE view (spec §20.4): Verovio, LGPL-3.0, stays a separate shared library loaded at run
 # time by the app; it is never linked into the core. Pinned source tarball, built once.
 option(DZ_WITH_VEROVIO "Build Verovio (LGPL-3.0) as a separate shared library for the SCORE view" ON)

@@ -101,7 +101,7 @@ this order because each stage needs the one before it, as in a studio.
   (linear / equal-power), clip gain, normalize (peak / RMS).
 - Edits apply to all tracks at once (time-aligned), also after separation.
 
-### S3 — Separation: the multitrack (spec M8, §20.3)
+### S3 — Separation: the multitrack (spec M8, §20.3) — done 2026-10-02
 - demucs.cpp (MIT, C++17 + Eigen, CPU) with Demucs v4 weights (MIT):
   4 stems (vocals, drums, bass, other) by default, 6 (+ guitar, piano) as an
   option. Weights downloaded once, checksum-pinned.
