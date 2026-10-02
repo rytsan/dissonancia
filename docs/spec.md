@@ -1610,6 +1610,7 @@ measured.
 - **M5 Music Theory:** Key cascade + spelling (letter/alter/written octave, section 22.2) + chord symbols + Roman numerals + cadence rules + LCD unit with mini staff.
 - **M5b Rack modules:** fretboard, keyboard, CQT waterfall, tuner, chord timeline, modular rack (edit mode, presets JSON), stage mode, shortcuts.
 - **M6 LIVE → SCORE:** SCORE tab + C# event log + backdated event timing + quantization on the REC metronome grid + ties across bar lines + stages 5–8 (spelling, chord symbols, Roman numerals, score, chord chart) + MusicXML/MIDI/JSON/text writers + Verovio score view. **v1.0 release.**
+- **STUDIO order and scope (2026-10-02):** see `docs/studio-plan.md` (S1–S9), which supersedes the order below.
 - **M7 STUDIO from audio:** library/import + stage pipeline + stage cache + stages 0, 2 (built-in effects), 4 (full reprocessing) + "refine from audio".
 - **M7b Editor:** stage 1 single-track editor (section 20.1).
 - **M7c Refined Piano & NNLS:** Bounded-iteration NNLS-chroma + inharmonicity partial correction ($B$ coefficient).
