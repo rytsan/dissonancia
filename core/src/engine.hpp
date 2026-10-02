@@ -91,6 +91,7 @@ private:
     double cbBeatFrames_ = 0;
     uint64_t cbOrigin_ = 0, cbNextBeat_ = 0;
     uint32_t cbBeatsPerBar_ = 4, cbClickPos_ = ~0u;
+    bool clickDuringTake_ = false;   // set in start(), before the device runs
     bool cbMetroOn_ = false, cbAccent_ = false;
     std::vector<float> clickAccent_, clickBeat_;
 

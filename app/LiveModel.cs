@@ -15,6 +15,11 @@ public sealed class Session
     public int CaptureDevice = -1;
     public uint SampleRate, PeriodFrames;
     public bool Exclusive, ClickOutput = true;
+    public bool ClickDuringTake;           // false: click only in the count-in, the microphone does not record it
+
+    // Notation (SCORE): shortest notated value, as a note-value denominator; 0 = the meter's beat unit.
+    public int SmallestNote;
+    public bool Triplets;
 
     /// Piano: grand staff (treble + bass, split at C4); the clef setting does not apply (spec §22.2).
     public bool GrandStaff => Mode == AppMode.PianoChords;
@@ -67,7 +72,7 @@ public sealed class LiveFrame
     public float Bpm;
     public int BeatInBar;                  // 1-based, 0 = metronome off
     public bool Metronome = true, Recording, CountingIn;
-    public double RecordedSeconds;
+    public double RecordedSeconds;         // negative while counting in: seconds until REC
     public float CaptureMs, ProcessingMs, DisplayMs, CpuPercent;
     public int Xruns, RecorderGaps;
     public bool Simulated;
@@ -184,7 +189,7 @@ public sealed class FakeLiveSource(Session session) : ILiveSource
         bool armed = !double.IsNaN(_recStart);
         f.CountingIn = armed && t < _recStart;
         f.Recording = armed && t >= _recStart;
-        f.RecordedSeconds = f.Recording ? t - _recStart : 0;
+        f.RecordedSeconds = armed ? t - _recStart : 0;   // negative while counting in
         if (f.Recording && f.ChordConfirmed)
         {
             int recordedBar = (int)Math.Floor((t - _recStart) / bar);

@@ -78,8 +78,12 @@ Only the pipeline chosen on START exists in a session (`voice_` for mono modes,
   triple buffer. Discrete events go through the SPSC queue with sequence
   numbers, so a dropped event shows up as a gap.
 - The metronome grid lives on the input sample clock. REC arms at the next bar
-  plus the count-in and forces the metronome on. REC stop is 100 ms ahead of
-  the callback clock, so no block ever writes past it.
+  plus the count-in and forces the metronome on. By default the click plays
+  only in the count-in and stops at the first downbeat of the take, so a
+  microphone does not record it (`AudioDeviceConfig.clickDuringTake = 1` keeps
+  it for headphones). While counting in, `recordedSeconds` is negative (time
+  to REC); LIVE shows a large count-in panel with the beats left. REC stop is
+  100 ms ahead of the callback clock, so no block ever writes past it.
 - Each take is a float32 WAV plus a JSON sidecar: session, device rate,
   input/output/compensation latency, start sample, gaps, and the complete
   note/chord events of the take (times from the first downbeat).
@@ -93,8 +97,13 @@ Only the pipeline chosen on START exists in a session (`voice_` for mono modes,
 - The stable note comes from a median of 3, 0.7-semitone hysteresis and a
   30 ms minimum. Vibrato never splits a note. A repeated pitch after silence
   is a new note.
+- Octave-down guard: when the CMND dip at half the chosen lag is under 0.25,
+  the half lag wins (a decaying or breathy note can push the true-period dip
+  just over the 0.15 threshold while the double-period dip stays under it).
 - Notes are backdated to the energy onset (from silence) or to the window
-  centre (pitch change). The previous note ends exactly at the new onset.
+  centre (pitch change). The energy onset counts only when newer than the
+  last voiced hop, so an unvoiced gap above the gate does not pull a note back
+  to the start of the phrase. The previous note ends exactly at the new onset.
 - Spelling: key signature letters; chromatic notes by melodic direction (A→A♯→B,
   B→B♭→A); raised 6/7 in minor (G♯ in A minor, F𝄪 in G♯ minor); the octave
   follows the letter (C♭4 = MIDI 59); Treble 8vb clef.
@@ -159,9 +168,12 @@ Only the pipeline chosen on START exists in a session (`voice_` for mono modes,
 - Source: the REC take's JSON sidecar. Event times are seconds from the
   first downbeat, round-trip compensated; bar lines come from the session
   meter and BPM, never from the audio.
-- Quantization: 12 divisions per quarter. Each quarter takes the sixteenth
-  grid, or the eighth-triplet grid when its note boundaries fit it clearly
-  better. Chords snap to eighths. A melody note is cut by the next one; one
+- Quantization: 12 divisions per quarter. The grid is the smallest notated
+  value (START → NOTATION, like Finale's quantization settings); the default
+  is the meter's beat unit (quarter in 4/4, eighth in 6/8), or quarter,
+  eighth, sixteenth. With "Allow eighth triplets", a quarter takes the
+  eighth-triplet grid when its note boundaries fit it clearly better. Chords
+  snap to the same grid, never finer than eighths. A melody note is cut by the next one; one
   that snaps onto another replaces it. Notes held before the first downbeat
   start at the downbeat.
 - Notation (§19): a note crossing a bar line or a chord change is split and

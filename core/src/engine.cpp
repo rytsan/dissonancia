@@ -67,6 +67,7 @@ int Engine::start(const SessionConfig& s, const AudioDeviceConfig& d, ma_context
         rate_ = device_.sampleRate;
         captureChannels_ = device_.capture.channels;
         playbackChannels_ = d.clickOutput ? device_.playback.channels : 0;
+        clickDuringTake_ = d.clickDuringTake != 0;
         captureLatencyMs_ = 1000.f * device_.capture.internalPeriodSizeInFrames * device_.capture.internalPeriods /
                             float(device_.capture.internalSampleRate ? device_.capture.internalSampleRate : rate_);
         playbackLatencyMs_ = d.clickOutput ? 1000.f * device_.playback.internalPeriodSizeInFrames * device_.playback.internalPeriods /
@@ -236,7 +237,9 @@ void Engine::mix_click(float* out, uint32_t frames, uint64_t pos) {
     uint64_t beatFrame = cbOrigin_ + uint64_t(std::llround(cbNextBeat_ * cbBeatFrames_));
     for (uint32_t i = 0; i < frames; i++) {
         if (pos + i == beatFrame) {
-            if (cbMetroOn_) { cbClickPos_ = 0; cbAccent_ = cbNextBeat_ % cbBeatsPerBar_ == 0; }
+            const uint64_t rs = recStart_.load(std::memory_order_relaxed), re = recStop_.load(std::memory_order_relaxed);
+            const bool inTake = rs != kNever && pos + i >= rs && pos + i < re;
+            if (cbMetroOn_ && (clickDuringTake_ || !inTake)) { cbClickPos_ = 0; cbAccent_ = cbNextBeat_ % cbBeatsPerBar_ == 0; }
             cbNextBeat_++;
             beatFrame = cbOrigin_ + uint64_t(std::llround(cbNextBeat_ * cbBeatFrames_));
         }
@@ -354,7 +357,7 @@ void Engine::process_hop(const float* x, uint32_t n) {
     uint64_t rs = recStart_.load(std::memory_order_acquire), re = recStop_.load(std::memory_order_acquire);
     s.countingIn = rs != kNever && anFrames_ < rs;
     s.recording = rs != kNever && anFrames_ >= rs && anFrames_ < re;
-    s.recordedSeconds = rs != kNever && anFrames_ >= rs ? double(std::min(anFrames_, re) - rs) / rate_ : 0;
+    s.recordedSeconds = rs == kNever ? 0 : anFrames_ >= rs ? double(std::min(anFrames_, re) - rs) / rate_ : -double(rs - anFrames_) / rate_;
 
     s.vuLevel = vu_;
     s.peakDbfs = peakDb;

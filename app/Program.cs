@@ -88,6 +88,7 @@ public sealed class MainWindow : Window
         _modules = [.. catalog.Values, _stage];
         foreach (var m in _modules) { m.Frame = _frame; m.Session = _session; }
         _rack = new RackView(catalog);
+        _rack.CountIn.Frame = _frame; _rack.CountIn.Session = _session;
         _rack.Load(_session.Mode);
 
         // One action table (spec §22.6): keys, transport buttons (and later MIDI) all bind to it.
@@ -132,6 +133,7 @@ public sealed class MainWindow : Window
         {
             if (_stageMode) _stage.InvalidateVisual();
             else foreach (var m in _rack.Visible) m.InvalidateVisual();   // hidden modules are not rendered
+            if (!_stageMode) _rack.CountIn.InvalidateVisual();   // draws nothing outside the count-in
         }
         RequestAnimationFrame(OnFrame);
     }
@@ -178,7 +180,7 @@ public sealed class MainWindow : Window
     }
 
     /// Screenshot tool entry: fill the frame at a fixed time without the animation loop.
-    public void Step(double now) { _source.Read(_frame, now); SyncRack(); foreach (var m in _modules) m.InvalidateVisual(); }
+    public void Step(double now) { _source.Read(_frame, now); SyncRack(); foreach (var m in _modules) m.InvalidateVisual(); _rack.CountIn.InvalidateVisual(); }
     public void Action(string name) => _actions[name]();
     public void SelectTab(int index) => _tabs.SelectedIndex = index;
     public void SetMode(AppMode mode, Clef clef) { _session.Mode = mode; _session.Clef = clef; }
@@ -209,13 +211,14 @@ public sealed class MainWindow : Window
         {
             try
             {
-                _score = Score.Build(Take.Load(path));
+                _score = Score.Build(Take.Load(path), _session.SmallestNote, _session.Triplets);
                 var t = _score.Take;
                 var key = new KeyOption(t.KeyFifths, t.Minor);
                 string cadences = string.Join("\n", t.Cadences.Select(c => $"  {Display(c.From, true)} → {Display(c.To, true)}   {c.Evidence}   {c.Confidence:0.00}"));
                 _scoreTitle.Text = $"{Path.GetFileNameWithoutExtension(path)}  ·  {_score.Measures.Count} bars · {_score.QuantizedNotes.Count} notes · " +
                                    $"{_score.QuantizedChords.Count} chords{(t.EventLogComplete ? "" : "  ·  EVENT LOG INCOMPLETE")}";
-                _scoreText.Text = $"{(t.KeySet ? key.Label : "no key")}   ·   {t.BeatsPerBar}/{t.BeatUnit}   ·   ♩ = {t.Bpm:0}\n\n" +
+                _scoreText.Text = $"{(t.KeySet ? key.Label : "no key")}   ·   {t.BeatsPerBar}/{t.BeatUnit}   ·   ♩ = {t.Bpm:0}   ·   " +
+                                  $"smallest value {NoteValueName(Score.Divisions * 4 / _score.Step)}{(_session.Triplets ? " + triplets" : "")} (START → NOTATION)\n\n" +
                                   Display(_score.ChordChart()) + (_score.RomanLine().Length > 0 ? "\n\n" + Display(_score.RomanLine(), roman: true) : "") +
                                   (cadences.Length > 0 ? "\n\ncadences\n" + cadences : "") +
                                   (_score.QuantizedNotes.Count > 0 ? "\n\n" + string.Join("  ", _score.QuantizedNotes.Select(n => n.Note.Sounding.Name)) : "");
@@ -374,8 +377,23 @@ public sealed class MainWindow : Window
         bpm.ValueChanged += (_, _) => _session.Bpm = (float)(bpm.Value ?? 92);
         var countIn = new NumericUpDown { Value = _session.CountInBars, Minimum = 0, Maximum = 4, Increment = 1, Width = 120, FormatString = "0" };
         countIn.ValueChanged += (_, _) => _session.CountInBars = (int)(countIn.Value ?? 1);
-        root.Children.Add(Section("METER  ·  TEMPO  ·  METRONOME  (REC always uses metronome + count-in)",
-            Row(Labeled("Meter", meterBox), Labeled("BPM", bpm), Labeled("Count-in bars", countIn))));
+        var duringTake = new ComboBox { ItemsSource = new[] { "Count-in only (microphone)", "Whole take (headphones)" }, SelectedIndex = _session.ClickDuringTake ? 1 : 0, Width = 230 };
+        duringTake.SelectionChanged += (_, _) => _session.ClickDuringTake = duringTake.SelectedIndex == 1;
+        root.Children.Add(Section("METER  ·  TEMPO  ·  METRONOME  (REC always counts in; the beat LEDs keep the beat during the take)",
+            Row(Labeled("Meter", meterBox), Labeled("BPM", bpm), Labeled("Count-in bars", countIn), Labeled("Click during the take", duringTake))));
+
+        // Notation: like Finale's quantization settings. The grid is the shortest value written.
+        int[] values = [0, 4, 8, 16];
+        var smallest = new ComboBox
+        {
+            ItemsSource = new[] { "Beat unit (♩ in 4/4, ♪ in 6/8)", "Quarter ♩", "Eighth ♪", "Sixteenth" },
+            SelectedIndex = Array.IndexOf(values, _session.SmallestNote), Width = 250,
+        };
+        smallest.SelectionChanged += (_, _) => _session.SmallestNote = values[Math.Max(0, smallest.SelectedIndex)];
+        var triplets = new CheckBox { Content = "Allow eighth triplets", IsChecked = _session.Triplets };
+        triplets.IsCheckedChanged += (_, _) => _session.Triplets = triplets.IsChecked == true;
+        root.Children.Add(Section("NOTATION  (SCORE quantization: shorter notes are snapped to this grid; applies to the next SCORE view)",
+            Row(Labeled("Smallest note value", smallest), Labeled(" ", triplets))));
 
         // Audio settings
         // Audio settings: requests only — the core reads back the real rate/period and the status strip shows them.
@@ -403,6 +421,8 @@ public sealed class MainWindow : Window
         root.Children.Add(_startStatus);
         return root;
     }
+
+    static string NoteValueName(int denominator) => denominator switch { 4 => "quarter ♩", 8 => "eighth ♪", _ => "sixteenth" };
 
     static Control Section(string title, Control content) => new Border
     {

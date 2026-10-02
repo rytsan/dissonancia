@@ -19,6 +19,7 @@ public sealed class RackView : DockPanel
     List<RackEntry> _entries = [];
     bool _locked;
 
+    public readonly CountInOverlay CountIn = new();
     public AppMode Mode { get; private set; } = (AppMode)(-1);
     public bool Editing => _editButton.IsChecked == true;
     public IEnumerable<RackModule> Visible => _entries.Select(e => _modules[e.Module]);
@@ -39,7 +40,7 @@ public sealed class RackView : DockPanel
         SetDock(_pinned, Dock.Bottom);
         Children.Add(bar);
         Children.Add(_pinned);
-        Children.Add(new ScrollViewer { Content = _rows });
+        Children.Add(new Panel { Children = { new ScrollViewer { Content = _rows }, CountIn } });
     }
 
     public void Load(AppMode mode)

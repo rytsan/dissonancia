@@ -25,8 +25,8 @@ unsafe struct AudioDeviceConfigNative
 {
     public int CaptureDevice;
     public uint SampleRate, PeriodFrames;
-    public byte Exclusive, ClickOutput;
-    fixed byte _pad0[2];
+    public byte Exclusive, ClickOutput, ClickDuringTake;
+    fixed byte _pad0[1];
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -269,6 +269,7 @@ public sealed class NativeCore : IDisposable
         {
             CaptureDevice = s.CaptureDevice, SampleRate = s.SampleRate, PeriodFrames = s.PeriodFrames,
             Exclusive = (byte)(s.Exclusive ? 1 : 0), ClickOutput = (byte)(s.ClickOutput ? 1 : 0),
+            ClickDuringTake = (byte)(s.ClickDuringTake ? 1 : 0),
         };
         if (Ana.Start(_h, cfg, dev) != 0) throw new InvalidOperationException(Ana.Error(_h));
         return new NativeLiveSource(_h, s);

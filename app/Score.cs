@@ -114,13 +114,19 @@ public sealed class Score
     public List<(int Start, int End, TakeNote Note)> QuantizedNotes = [];
     public List<(int Start, int End, TakeChord Chord)> QuantizedChords = [];
     readonly HashSet<int> _triplets = [];   // quarters snapped to the triplet grid
+    public int Step;                        // grid of the smallest notated value, in divisions
+    bool _allowTriplets;
 
     public double SecondsPerQuarter => 60 / Take.Bpm * Take.BeatUnit / 4.0;
 
-    public static Score Build(Take t)
+    /// smallest: shortest notated value as a note-value denominator (4 = quarter, 8, 16); 0 = the
+    /// meter's beat unit (quarter in 4/4, eighth in 6/8). triplets: eighth triplets where they fit.
+    public static Score Build(Take t, int smallest = 0, bool triplets = false)
     {
         var s = new Score { Take = t };
+        s.Step = Divisions * 4 / Math.Clamp(smallest > 0 ? smallest : t.BeatUnit, 4, 16);
         s.Compound = t.BeatUnit == 8 && t.BeatsPerBar % 3 == 0 && t.BeatsPerBar > 3;
+        s._allowTriplets = triplets && !s.Compound;
         s.MeasureDivs = t.BeatsPerBar * Divisions * 4 / t.BeatUnit;
         s.BeatDivs = s.Compound ? Divisions * 3 / 2 : Divisions * 4 / t.BeatUnit;
         s.Quantize();
@@ -133,7 +139,7 @@ public sealed class Score
 
     int Snap(double p)
     {
-        int step = _triplets.Contains((int)Math.Floor(p / Divisions)) ? 4 : 3;
+        int step = _triplets.Contains((int)Math.Floor(p / Divisions)) ? 4 : Step;
         return (int)Math.Round(p / step) * step;
     }
 
@@ -141,14 +147,14 @@ public sealed class Score
     {
         // Grid per quarter: eighth triplets only where the note boundaries fit them clearly better.
         var bounds = Take.Notes.SelectMany(n => new[] { Pos(n.Start), Pos(n.End) }).ToList();
-        if (!Compound)
+        if (_allowTriplets)
             foreach (var g in bounds.GroupBy(p => (int)Math.Floor(p / Divisions)))
-                if (g.Count() >= 2 && g.Sum(p => Err(p, 4)) < 0.5 * g.Sum(p => Err(p, 3))) _triplets.Add(g.Key);
+                if (g.Count() >= 2 && g.Sum(p => Err(p, 4)) < 0.5 * g.Sum(p => Err(p, Step))) _triplets.Add(g.Key);
 
         foreach (var n in Take.Notes.OrderBy(n => n.Start))
         {
             int a = Snap(Pos(n.Start)), b = Snap(Pos(n.End));
-            if (b <= a) b = a + (_triplets.Contains(a / Divisions) ? 4 : 3);   // never shorter than one grid step
+            if (b <= a) b = a + (_triplets.Contains(a / Divisions) ? 4 : Step);   // never shorter than one grid step
             // Monophonic line: a new note cuts the previous one; one that snaps onto it replaces it.
             while (QuantizedNotes.Count > 0 && QuantizedNotes[^1].End > a)
             {
@@ -159,10 +165,12 @@ public sealed class Score
             QuantizedNotes.Add((a, b, n));
         }
 
-        // Chords snap to eighths; one that snaps onto the previous replaces it (it was too short to notate).
+        // Chords snap to the note grid, never finer than eighths; one that snaps onto the previous
+        // replaces it (it was too short to notate).
+        int cs = Math.Max(6, Step);
         foreach (var c in Take.Chords.OrderBy(c => c.Start))
         {
-            int a = (int)Math.Round(Pos(c.Start) / 6) * 6, b = Math.Max(a + 6, (int)Math.Round(Pos(c.End) / 6) * 6);
+            int a = (int)Math.Round(Pos(c.Start) / cs) * cs, b = Math.Max(a + cs, (int)Math.Round(Pos(c.End) / cs) * cs);
             while (QuantizedChords.Count > 0 && QuantizedChords[^1].Start >= a) QuantizedChords.RemoveAt(QuantizedChords.Count - 1);
             if (QuantizedChords.Count > 0 && QuantizedChords[^1].End > a) QuantizedChords[^1] = QuantizedChords[^1] with { End = a };
             QuantizedChords.Add((a, b, c));
@@ -254,7 +262,7 @@ public sealed class Score
             }
             return v;
         }
-        return Math.Min(remaining, 3);   // unreachable with snapped input: every piece is a grid multiple
+        return Math.Min(remaining, Step);   // unreachable with snapped input: every piece is a grid multiple
     }
 
     // ---------------------------------------------------------------- chord chart (text)

@@ -145,14 +145,18 @@ TEST_CASE("meters, scope, notify rule and metronome click on the input clock") {
 
 TEST_CASE("REC: count-in, bar-aligned start, WAV + sidecar, metronome locked") {
     Engine e;
-    REQUIRE(e.start(session(), headless(), nullptr, nullptr) == ANA_OK);
+    REQUIRE(e.start(session(), headless(), nullptr, nullptr) == ANA_OK);   // clickDuringTake = 0
     std::atomic<bool> feeding{true};
+    std::vector<double> clickEnergy;   // per 480-frame block, written by the feeder only
     std::thread feeder([&] {   // plays the callback at ~10x real time
         std::vector<float> in(480), out(480);
         for (uint64_t pos = 0; feeding; pos += 480) {
             sine(in, pos, 0.25f, 440);
             std::fill(out.begin(), out.end(), 0.f);
             e.on_audio(in.data(), out.data(), 480);
+            double en = 0;
+            for (float v : out) en += double(v) * v;
+            clickEnergy.push_back(en);
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     });
@@ -164,7 +168,9 @@ TEST_CASE("REC: count-in, bar-aligned start, WAV + sidecar, metronome locked") {
 
     const uint64_t bar = 96000;   // 4 beats at 120 bpm, 48 kHz
     LiveSnapshot s{};
-    e.read_snapshot(&s);
+    REQUIRE(wait_until([&] { e.read_snapshot(&s); return s.countingIn != 0; }, 10));
+    CHECK(s.recordedSeconds < 0);   // time to REC
+    CHECK(s.recordedSeconds >= -4.0);   // rest of the current bar + one count-in bar (2 s each)
     REQUIRE(wait_until([&] { e.read_snapshot(&s); return s.recording && s.recordedSeconds > 1.0; }, 10));
     REQUIRE(e.rec_stop() == ANA_OK);
     feeding = false;
@@ -183,6 +189,10 @@ TEST_CASE("REC: count-in, bar-aligned start, WAV + sidecar, metronome locked") {
     uint64_t start = field("\"startSample\": "), frames = field("\"frames\": ");
     CHECK(start % bar == 0);
     CHECK(start >= 2 * bar);   // next bar after 30000 frames, plus one count-in bar
+    // Click in the count-in bar, none during the take (a microphone would record it).
+    auto blocks = [&](uint64_t a, uint64_t b) { double x = 0; for (uint64_t i = a / 480; i < b / 480 && i < clickEnergy.size(); i++) x += clickEnergy[i]; return x; };
+    CHECK(blocks(start - bar, start) > 0.01);
+    CHECK(blocks(start, start + 48000) == 0);
     CHECK(field("\"recorderGaps\": ") == 0);
     CHECK(frames > 48000);
     // The sustained A4 was open at REC stop: flushed as one complete note into the take log.

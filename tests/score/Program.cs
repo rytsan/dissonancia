@@ -12,30 +12,39 @@ Take T(params (double s, double e, string name)[] notes)
     foreach (var (s, e, n) in notes) { var p = Take.ParseName(n); t.Notes.Add(new TakeNote(s, e, p.Midi, p, 0.9f)); }
     return t;
 }
+Score B(Take t) => Score.Build(t, 16, true);   // the checks below exercise the finest grid
 string Durs(Measure m) => string.Join(" ", m.Items.Select(i => (i.Pitch is null ? "r" : "n") + i.Duration + (i.TieStart ? "~" : "")));
 
+// Default grid = the meter's beat unit: in 4/4 a sung eighth-ish note becomes a quarter, no
+// sixteenths or triplets unless asked for.
+var q0 = Score.Build(T((0.0, 0.3, "C4"), (0.3, 0.55, "D4"), (1.0, 1.8, "E4")));
+Check(Durs(q0.Measures[0]) == "n12 n12 n24", $"default 4/4 grid is the quarter: {Durs(q0.Measures[0])}");
+Check(Score.Build(T((0.0, 0.3, "C4")), 8).Step == 6 && Score.Build(T((0.0, 0.3, "C4")), 16).Step == 3, "smallest value sets the grid");
+var t68 = T((0.0, 0.25, "C4")); t68.BeatsPerBar = 6; t68.BeatUnit = 8;
+Check(Score.Build(t68).Step == 6, "default 6/8 grid is the eighth");
+
 // Crossing the bar line: beat 4 to beat 2 of the next bar -> tied quarters.
-var s1 = Score.Build(T((1.5, 2.5, "C4")));
+var s1 = B(T((1.5, 2.5, "C4")));
 Check(Durs(s1.Measures[0]) == "r36 n12~" && Durs(s1.Measures[1]) == "n12 r12 r24", $"bar line tie: {Durs(s1.Measures[0])} | {Durs(s1.Measures[1])}");
 
 // Beat 2 to beat 4 is quarter + tied quarter (beat 3 stays visible); beat 3 to the end is a half.
-var s2 = Score.Build(T((0.5, 1.5, "D4")));
+var s2 = B(T((0.5, 1.5, "D4")));
 Check(Durs(s2.Measures[0]) == "r12 n12~ n12 r12", $"beat 2-4: {Durs(s2.Measures[0])}");
-var s3 = Score.Build(T((1.0, 2.0, "E4")));
+var s3 = B(T((1.0, 2.0, "E4")));
 Check(Durs(s3.Measures[0]) == "r24 n24", $"half on beat 3: {Durs(s3.Measures[0])}");
 
 // A note longer than a bar: whole + tied chain; jittered times snap to the grid.
-var s4 = Score.Build(T((0.01, 3.02, "F4")));
+var s4 = B(T((0.01, 3.02, "F4")));
 Check(Durs(s4.Measures[0]) == "n48~" && Durs(s4.Measures[1]) == "n24 r24", $"long note: {Durs(s4.Measures[0])} | {Durs(s4.Measures[1])}");
 
 // Eighth triplets on beat 1.
 double q = 0.5 / 3;
-var s5 = Score.Build(T((0, q, "G4"), (q, 2 * q, "A4"), (2 * q, 0.5, "B4")));
+var s5 = B(T((0, q, "G4"), (q, 2 * q, "A4"), (2 * q, 0.5, "B4")));
 var m5 = s5.Measures[0].Items;
 Check(Durs(s5.Measures[0]) == "n4 n4 n4 r12 r24" && m5[0].TupletStart && m5[2].TupletStop, $"triplets: {Durs(s5.Measures[0])}");
 
 // Sixteenths and a dotted eighth stay inside the beat.
-var s6 = Score.Build(T((0, 0.375, "C5"), (0.375, 0.5, "D5")));
+var s6 = B(T((0, 0.375, "C5"), (0.375, 0.5, "D5")));
 Check(Durs(s6.Measures[0]) == "n9 n3 r12 r24", $"dotted eighth + 16th: {Durs(s6.Measures[0])}");
 
 // Chords: harmony on the right item, chart with repeat bars, sustained melody tied at a change.
@@ -43,7 +52,7 @@ var t7 = T((0, 4.0, "E4"));
 t7.Chords.Add(new TakeChord(0, 2.0, "C", "I", 0, 0, 0, 0.8f));
 t7.Chords.Add(new TakeChord(2.0, 3.0, "G7/B", "V65", 7, 11, 7, 0.7f));
 t7.Chords.Add(new TakeChord(3.0, 4.0, "Bbm7", "bvii7", 10, -1, 9, 0.6f));
-var s7 = Score.Build(t7);
+var s7 = B(t7);
 Check(s7.ChordChart() == "| C | G7/B Bbm7 |", $"chart: {s7.ChordChart()}");
 Check(s7.Measures[1].Items[0].Harmony?.Symbol == "G7/B" && s7.Measures[1].Items[0].TieStop, "harmony + tie at a chord change");
 Check(Score.ParseSymbol("Bbm7/F") == ('B', -1, "m7", 'F', 0), "symbol parse");
@@ -52,13 +61,13 @@ Check(Score.ParseSymbol("Bbm7/F") == ('B', -1, "m7", 'F', 0), "symbol parse");
 var t8 = T((1.5, 2.5, "C4"));
 t8.Clef = Clef.Treble8vb;
 t8.Chords.Add(new TakeChord(0, 2, "F#m", "vi", 6, -1, 1, 0.8f));
-string xml = Score.Build(t8).MusicXml();
+string xml = B(t8).MusicXml();
 var doc = new XmlDocument { XmlResolver = null };
 doc.Load(new XmlTextReader(new StringReader(xml)) { DtdProcessing = DtdProcessing.Ignore });
 Check(doc.SelectNodes("//tie[@type='start']")!.Count == 1 && doc.SelectNodes("//tied")!.Count == 2, "musicxml ties");
 Check(doc.SelectSingleNode("//harmony/kind")!.InnerText == "minor" && doc.SelectSingleNode("//root-alter")!.InnerText == "1", "musicxml harmony");
 Check(doc.SelectSingleNode("//clef-octave-change")!.InnerText == "-1", "musicxml 8vb clef");
-Check(Score.Build(T((0, q, "G4"), (q, 2 * q, "A4"), (2 * q, 0.5, "B4"))).MusicXml().Contains("<actual-notes>3</actual-notes>"), "musicxml triplet");
+Check(B(T((0, q, "G4"), (q, 2 * q, "A4"), (2 * q, 0.5, "B4"))).MusicXml().Contains("<actual-notes>3</actual-notes>"), "musicxml triplet");
 foreach (XmlNode m in doc.SelectNodes("//measure")!)
 {
     int sum = 0;
@@ -69,13 +78,13 @@ foreach (XmlNode m in doc.SelectNodes("//measure")!)
 // Accidentals: printed against the key and earlier accidentals in the bar, not repeated on ties.
 var t9 = T((0, 0.5, "Db5"), (0.5, 1.0, "C5"), (1.0, 1.5, "Db5"), (1.5, 2.5, "F#4"));   // C major
 var acc = new XmlDocument { XmlResolver = null };
-acc.Load(new XmlTextReader(new StringReader(Score.Build(t9).MusicXml())) { DtdProcessing = DtdProcessing.Ignore });
+acc.Load(new XmlTextReader(new StringReader(B(t9).MusicXml())) { DtdProcessing = DtdProcessing.Ignore });
 string Accs(XmlDocument d) => string.Join(" ", d.SelectNodes("//note[pitch]")!.Cast<XmlNode>().Select(n => n.SelectSingleNode("accidental")?.InnerText ?? "-"));
 Check(Accs(acc) == "flat - - sharp -", $"accidentals C major: {Accs(acc)}");
 var t10 = T((0, 0.5, "F4"), (0.5, 1.0, "F#4"));
 t10.KeyFifths = 1;   // G major: F needs a natural, F# none
 var acc2 = new XmlDocument { XmlResolver = null };
-acc2.Load(new XmlTextReader(new StringReader(Score.Build(t10).MusicXml())) { DtdProcessing = DtdProcessing.Ignore });
+acc2.Load(new XmlTextReader(new StringReader(B(t10).MusicXml())) { DtdProcessing = DtdProcessing.Ignore });
 Check(Accs(acc2) == "natural sharp", $"accidentals G major: {Accs(acc2)}");
 
 // MIDI: header, three tracks, tempo 500000 us/quarter.
@@ -99,7 +108,7 @@ File.WriteAllText(path, """
 """);
 var take = Take.Load(path);
 Check(take.Notes[0].Sounding == new Pitch(4, 0, 3) && take.BeatsPerBar == 3 && take.Chords[0].Roman == "I" && take.Cadences.Count == 1, "sidecar load");
-Check(Score.Build(take).Measures[0].Items.Sum(i => i.Duration) == 36, "3/4 measure");
+Check(B(take).Measures[0].Items.Sum(i => i.Duration) == 36, "3/4 measure");
 
 // Likely guitar shapes: the common open and barre chords.
 string Shape(int[] pcs, int bass) => string.Join(" ", Theory.LikelyShape(pcs, bass).Select(f => f < 0 ? "x" : f.ToString()));
@@ -133,7 +142,7 @@ Check(RackCatalog.Default(AppMode.GuitarChords).Any(e => e.Module == ModuleKind.
 Directory.Delete(config, true);
 
 // Every MusicXML we write validates against the MusicXML 4.0 XSD (downloaded once, cached next to the binary).
-var samples = new[] { s1, s2, s4, s5, s6, s7, Score.Build(t8), Score.Build(take) }.Select(x => x.MusicXml()).ToArray();
+var samples = new[] { s1, s2, s4, s5, s6, s7, B(t8), B(take) }.Select(x => x.MusicXml()).ToArray();
 if (Schema() is { } schema)
     for (int i = 0; i < samples.Length; i++)
     {

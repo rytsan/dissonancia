@@ -524,9 +524,9 @@ public sealed class TransportModule : RackModule
         // Time counter mm:ss.mmm
         var tc = new Rect(r.X + 70, cy - 22, 190, 44);
         ctx.DrawRectangle(Ui.SevenSegBg, Ui.FaceEdge, tc, 3, 3);
-        var ts = TimeSpan.FromSeconds(f.RecordedSeconds);
+        var ts = TimeSpan.FromSeconds(Math.Abs(f.RecordedSeconds));   // negative during the count-in: time to REC
         Ui.Text(ctx, "88:88.888", tc.X + 10, tc.Y + 5, 28, Ui.SevenSegGhost, Ui.Mono);
-        Ui.Text(ctx, $"{(int)ts.TotalMinutes:00}:{ts.Seconds:00}.{ts.Milliseconds:000}", tc.X + 10, tc.Y + 5, 28, Ui.SevenSeg, Ui.Mono);
+        Ui.Text(ctx, (f.RecordedSeconds < 0 ? $"-{Math.Min(9, (int)ts.TotalMinutes)}" : $"{(int)ts.TotalMinutes:00}") + $":{ts.Seconds:00}.{ts.Milliseconds:000}", tc.X + 10, tc.Y + 5, 28, Ui.SevenSeg, Ui.Mono);
 
         // BPM + beat LEDs + meter
         var bp = new Rect(tc.Right + 18, cy - 22, 104, 44);
@@ -626,5 +626,38 @@ public sealed class StageView : RackModule
         string rec = f.Recording ? "● REC   " : f.CountingIn ? "COUNT-IN   " : "";
         static string Centre(string s, int cells) => new string(' ', Math.Max(0, (cells - Plasma.CellCount(s)) / 2)) + s;
         Plasma.Text(ctx, $"{rec}capture {f.CaptureMs:0} ms · proc {f.ProcessingMs:0} ms · display {f.DisplayMs:0} ms", r.Center.X, r.Bottom - 30, 16, f.Recording, Ui.Mono, Ui.Align.Center);
+    }
+}
+
+/// Count-in over the LIVE rack: beats left until REC, the beat of the bar, meter and tempo, so the
+/// first downbeat of the take is never a surprise. Hidden outside the count-in; never takes input.
+public sealed class CountInOverlay : Control
+{
+    public LiveFrame? Frame { get; set; }
+    public Session Session { get; set; } = new();
+
+    public CountInOverlay() { IsHitTestVisible = false; }
+
+    public override void Render(DrawingContext ctx)
+    {
+        var f = Frame;
+        if (f is null || !f.CountingIn || f.Bpm <= 0) return;
+        double beat = 60 / f.Bpm;
+        int left = Math.Max(1, (int)Math.Ceiling(-f.RecordedSeconds / beat - 0.02));
+        int bars = (left + Session.BeatsPerBar - 1) / Session.BeatsPerBar;
+
+        ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0xB0000000)), null, new Rect(Bounds.Size));
+        var card = new Rect(Bounds.Width / 2 - 260, Bounds.Height / 2 - 170, 520, 340);
+        ctx.DrawRectangle(Ui.Face, new ImmutablePen(Ui.Red as IImmutableBrush, 2), card, 10, 10);
+        Ui.Text(ctx, "COUNT-IN  ·  RECORDING STARTS RIGHT AFTER 1", card.Center.X, card.Y + 18, 14, Ui.LabelBright, Ui.SansBold, Ui.Align.Center);
+        Ui.Text(ctx, left.ToString(), card.Center.X, card.Y + 44, 150, left <= Session.BeatsPerBar ? Ui.Red : Ui.Amber, Ui.Mono, Ui.Align.Center);
+        double lx = card.Center.X - (Session.BeatsPerBar - 1) * 22;
+        for (int i = 1; i <= Session.BeatsPerBar; i++)
+            Ui.Led(ctx, new Point(lx + (i - 1) * 44, card.Bottom - 74), 12, f.BeatInBar == i, i == 1 ? Ui.Red : Ui.Green, i == 1 ? Ui.RedOff : Ui.GreenOff);
+        string beats = left == 1 ? "1 beat" : $"{left} beats";
+        Ui.Text(ctx, $"{beats} left  ·  {bars} bar{(bars == 1 ? "" : "s")}  ·  {Session.BeatsPerBar}/{Session.BeatUnit}  ·  ♩ = {f.Bpm:0}",
+            card.Center.X, card.Bottom - 50, 15, Ui.LabelBright, Ui.Sans, Ui.Align.Center);
+        Ui.Text(ctx, Session.ClickDuringTake ? "click continues during the take" : "click stops at REC  ·  the beat LEDs keep the beat",
+            card.Center.X, card.Bottom - 26, 12, Ui.Label, Ui.Sans, Ui.Align.Center);
     }
 }

@@ -52,7 +52,8 @@ struct AudioDeviceConfig {
     uint32_t periodFrames;             // 0 = 5 ms request; the real period is read back
     uint8_t exclusive;                 // bool: WASAPI exclusive capture
     uint8_t clickOutput;               // bool: duplex device, click on the same device's output
-    uint8_t _pad0[2];
+    uint8_t clickDuringTake;           // bool: 0 = click only in the count-in (a microphone does not record it)
+    uint8_t _pad0[1];
 };
 
 // ---------------------------------------------------------------- events (§3, §13, §14)
@@ -244,7 +245,7 @@ struct ChordRecognitionResult {        // per-hop preview
 struct LiveSnapshot {
     uint64_t sequence;
     double publishTimeSeconds;         // ana_now() clock, for GUI latency
-    double recordedSeconds;
+    double recordedSeconds;            // negative while counting in: seconds until the take starts
     uint64_t analyzedFrames;           // input sample clock position of this snapshot
     uint32_t sampleRate;               // real device rate (read back)
     uint32_t liveRate;                 // analysis rate after integer decimation (§5)
