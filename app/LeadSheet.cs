@@ -34,6 +34,20 @@ public static class LeadSheet
         return root;
     }
 
+    public const double DriftFlagMs = 40;
+
+    /// The drums' beats (event time) and tempo; with a metronome (gridBpm > 0, the take starts on
+    /// its downbeat) each beat's drift from the nearest click, so a drummer off the click shows.
+    public static void AddBeats(JsonObject root, JsonObject beatsResult, double gridBpm)
+    {
+        var beats = beatsResult["beats"]!.AsArray().Select(b => (double)b!).ToList();
+        root["tempoBpm"] = (double)beatsResult["tempoBpm"]!;
+        root["beats"] = new JsonArray(beats.Select(b => (JsonNode)Math.Round(b, 4)).ToArray());
+        if (gridBpm <= 0) return;
+        double period = 60 / gridBpm;
+        root["beatDriftMs"] = new JsonArray(beats.Select(b => (JsonNode)Math.Round((b - Math.Round(b / period) * period) * 1000, 1)).ToArray());
+    }
+
     /// The chord's bass from the bass line (see the file comment); unchanged when the bass rests.
     public static void ApplyBass(JsonObject chord, IReadOnlyList<JsonNode> bass)
     {

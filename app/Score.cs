@@ -24,6 +24,9 @@ public sealed class Take
     public List<TakeNote> Notes = [];
     public List<TakeChord> Chords = [];
     public List<TakeNote> BassNotes = [];   // STUDIO: the separated bass line
+    public List<double> Beats = [];         // STUDIO: the drums' beats (event time) and tempo
+    public double TempoBpm;
+    public double? MaxDriftMs;              // largest |drift| from the metronome, when there is one
     public List<TakeCadence> Cadences = [];
 
     public static string Folder
@@ -60,6 +63,13 @@ public sealed class Take
             Bpm = s.GetProperty("bpm").GetDouble(),
             EventLogComplete = root.TryGetProperty("eventLogComplete", out var c) && c.GetBoolean(),
         };
+        if (root.TryGetProperty("beats", out var beats))
+        {
+            t.Beats = beats.EnumerateArray().Select(b => b.GetDouble()).ToList();
+            t.TempoBpm = root.GetProperty("tempoBpm").GetDouble();
+            if (root.TryGetProperty("beatDriftMs", out var drift) && drift.GetArrayLength() > 0)
+                t.MaxDriftMs = drift.EnumerateArray().Max(d => Math.Abs(d.GetDouble()));
+        }
         foreach (var e in root.GetProperty("events").EnumerateArray())
         {
             switch (e.GetProperty("type").GetString())

@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdio>
 
+#include "beats.hpp"
 #include "decode.hpp"
 #include "live_config.hpp"
 #include "miniaudio.h"
@@ -30,7 +31,7 @@ void PostJob::status(PostStatus& out) const {
     out.state = PostState(state_.load());
 }
 
-int PostJob::start(const SessionConfig& s, double comp, const char* in, const char* out, bool grid) {
+int PostJob::start(const SessionConfig& s, double comp, const char* in, const char* out, bool grid, bool beats) {
     if (state_.load() == uint8_t(PostState::Running)) { set_error("a job is already running"); return ANA_ERR_STATE; }
     join();
     cancel_ = false;
@@ -38,15 +39,15 @@ int PostJob::start(const SessionConfig& s, double comp, const char* in, const ch
     set_error("");
     state_ = uint8_t(PostState::Running);
     std::string i = in, o = out;
-    thread_ = std::thread([this, s, comp, i, o, grid] {
+    thread_ = std::thread([this, s, comp, i, o, grid, beats] {
         int r = ANA_ERR_STATE;
-        try { r = run(s, comp, i, o, grid); } catch (const std::exception& e) { set_error(e.what()); }
+        try { r = run(s, comp, i, o, grid, beats); } catch (const std::exception& e) { set_error(e.what()); }
         state_ = uint8_t(r == ANA_OK ? PostState::Done : cancel_.load() ? PostState::Cancelled : PostState::Failed);
     });
     return ANA_OK;
 }
 
-int PostJob::run(const SessionConfig& session, double comp, const std::string& in, const std::string& out, bool grid) {
+int PostJob::run(const SessionConfig& session, double comp, const std::string& in, const std::string& out, bool grid, bool beats) {
     // Decode to mono float at the file's rate (miniaudio mixes the channels down).
     ma_decoder dec;
     ma_decoder_config dc = ma_decoder_config_init(ma_format_f32, 1, 0);
@@ -75,7 +76,11 @@ int PostJob::run(const SessionConfig& session, double comp, const std::string& i
         cancelled = cancel_.load(std::memory_order_relaxed);
         return !cancelled;
     };
-    if (!is_chord_mode(s.mode)) {
+    BeatTrack track;
+    if (beats) {
+        progress_.store(0.1f, std::memory_order_relaxed);
+        track = track_beats(x.data(), x.size(), rate, grid ? s.bpm : 0);
+    } else if (!is_chord_mode(s.mode)) {
         // Whole-take note decoding (decode.hpp): each note decided with the rest of the line in view.
         auto ev = decode_notes(s, x.data(), x.size(), rate, comp, report);
         if (cancelled) { set_error("cancelled"); return ANA_ERR_STATE; }
@@ -104,7 +109,13 @@ int PostJob::run(const SessionConfig& session, double comp, const std::string& i
                  int(s.mode), int(s.quality), s.referenceA4, s.keySet ? "true" : "false", s.keyFifths, int(s.keyMode), int(s.clef),
                  s.meter.numerator, s.meter.denominator, s.bpm, s.countInBars, rate, (unsigned long long)x.size(), comp * 1000);
     write_events_json(f, events, 0.0);
-    std::fprintf(f, "\n  ]\n}\n");
+    std::fprintf(f, "\n  ]");
+    if (beats) {
+        std::fprintf(f, ",\n  \"tempoBpm\": %.3f,\n  \"beats\": [", track.bpm);
+        for (size_t i = 0; i < track.beats.size(); i++) std::fprintf(f, "%s%.4f", i ? ", " : "", track.beats[i] - comp);
+        std::fprintf(f, "]");
+    }
+    std::fprintf(f, "\n}\n");
     std::fclose(f);
     progress_ = 1;
     return ANA_OK;

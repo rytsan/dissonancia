@@ -52,6 +52,15 @@ LeadSheet.ApplyBass(am, [BassNote(43, "G2", 0, 0.6)]);   // held less than half
 LeadSheet.ApplyBass(am, [BassNote(42, "F#2", 0, 1.8)]);  // not a chord tone: left to the review
 Check((string?)am["symbol"] == "Am", "bass: short or non-chord bass leaves the chord");
 
+// STUDIO S5: the drums' beats against the metronome.
+var withBeats = new System.Text.Json.Nodes.JsonObject();
+LeadSheet.AddBeats(withBeats, new System.Text.Json.Nodes.JsonObject { ["tempoBpm"] = 118.0, ["beats"] = new System.Text.Json.Nodes.JsonArray(0.0, 0.5, 1.06, 1.45) }, 120);
+var drift = withBeats["beatDriftMs"]!.AsArray().Select(d => (double)d!).ToArray();
+Check(drift.SequenceEqual([0.0, 0.0, 60.0, -50.0]), $"beats: drift from the 120 BPM click ({string.Join(" ", drift)})");
+var noGrid = new System.Text.Json.Nodes.JsonObject();
+LeadSheet.AddBeats(noGrid, new System.Text.Json.Nodes.JsonObject { ["tempoBpm"] = 96.0, ["beats"] = new System.Text.Json.Nodes.JsonArray(0.0, 0.625) }, 0);
+Check(noGrid["beatDriftMs"] is null && (double)noGrid["tempoBpm"]! == 96, "beats: an imported file has no click to drift from");
+
 // STUDIO S2 edit list: trim, cut and clip gain on the edited timeline (frames).
 var el = new EditList();
 el.Trim(1000, 100, 900);                       // keep 100-900 of a 1000-frame take

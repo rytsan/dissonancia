@@ -235,7 +235,7 @@ public sealed class StudioState
     // ---------------------------------------------------------------- analysis
 
     /// One analysis of the queue: a session (mode), the tracks whose analysis tap it reads, its result suffix.
-    sealed record Pass(Session Session, uint Mask, string Input, string Suffix, string Options);
+    sealed record Pass(Session Session, uint Mask, string Input, string Suffix, string Options, bool Beats = false);
     readonly Queue<Pass> _queue = new();
     Pass? _pass;
     string? _passSource;
@@ -283,6 +283,8 @@ public sealed class StudioState
             bassS.Clef = Clef.Bass;
             passes.Add(new(bassS, bm, StudioProject.TapPath(Current, "bass"), ".bass", Options(bassS, ";stems=" + StemsKey + ";tap=" + Keys(bm))));
         }
+        if (Mask("drums") is var dm and not 0)   // the beats of the drums: the tempo map, drift against the metronome
+            passes.Add(new(voice, dm, StudioProject.TapPath(Current, "drums"), ".beats", Options(voice, ";beats;stems=" + StemsKey + ";tap=" + Keys(dm)), true));
         return passes;
     }
 
@@ -294,18 +296,19 @@ public sealed class StudioState
         var plan = Plan();
         var done = plan.Select(p => StudioProject.Cached(Current, p.Options, p.Suffix)).ToList();
         if (done.Any(d => d is null)) return;
-        Result = done.Count == 1 ? done[0] : MergeLeadSheet(done!);
+        Result = done.Count == 1 ? done[0] : MergeLeadSheet(plan.Zip(done, (p, d) => (p.Suffix, d!)).ToDictionary());
         if (Result is not null) try { ResultTake = Take.Load(Result); } catch (Exception e) when (e is IOException or JsonException or KeyNotFoundException) { }
     }
 
     /// Melody (voice notes) + harmony (chords) of the separated stems in one take JSON for SCORE.
-    string? MergeLeadSheet(List<string> results)
+    string? MergeLeadSheet(Dictionary<string, string> results)
     {
         try
         {
             static System.Text.Json.Nodes.JsonNode Read(string p) => System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(p))!;
-            var bass = results.Count > 2 ? Read(results[2])["events"]!.AsArray() : null;
-            var root = LeadSheet.Merge(Read(results[1]).AsObject(), Read(results[0])["events"]!.AsArray(), bass);
+            var bass = results.TryGetValue(".bass", out var b) ? Read(b)["events"]!.AsArray() : null;
+            var root = LeadSheet.Merge(Read(results[".harmony"]).AsObject(), Read(results[".voice"])["events"]!.AsArray(), bass);
+            if (results.TryGetValue(".beats", out var d)) LeadSheet.AddBeats(root, Read(d).AsObject(), FromTake && Edits.KeepsGrid ? Session.Bpm : 0);
             var path = StudioProject.LeadSheetPath(Current!);
             File.WriteAllText(path, root.ToJsonString());
             return path;
@@ -338,14 +341,16 @@ public sealed class StudioState
     {
         if (Job is null || _passSource is null) return;
         if (!_queue.TryDequeue(out var p)) { Running = false; _pass = null; RefreshResult(); FinishStatus(); return; }
-        var err = Job.Start(p.Session, Compensation, p.Input, StudioProject.ResultPath(_passSource, p.Suffix), FromTake && Edits.KeepsGrid);
+        var err = Job.Start(p.Session, Compensation, p.Input, StudioProject.ResultPath(_passSource, p.Suffix), FromTake && Edits.KeepsGrid, p.Beats);
         if (err is not null) { Running = false; Status = "falhou: " + err; return; }
         (_pass, Running) = (p, true);
-        Status = p.Suffix switch { ".voice" => "transcrevendo a voz…", ".harmony" => "transcrevendo a harmonia…", _ => "analisando…" };
+        Status = p.Suffix switch { ".voice" => "transcrevendo a voz…", ".harmony" => "transcrevendo a harmonia…", ".bass" => "transcrevendo o baixo…", ".beats" => "rastreando a bateria…", _ => "analisando…" };
     }
 
     void FinishStatus() =>
-        Status = ResultTake is { } t ? $"pronto · {t.Notes.Count} notas · {t.Chords.Count} acordes" + (Stems.Count > 0 ? " · das faixas separadas" : "") : "pronto";
+        Status = ResultTake is { } t ? $"pronto · {t.Notes.Count} notas · {t.Chords.Count} acordes" + (t.BassNotes.Count > 0 ? $" · {t.BassNotes.Count} do baixo" : "")
+            + (t.Beats.Count > 0 ? $" · bateria {t.TempoBpm:0.0} BPM" + (t.MaxDriftMs is double dr ? $", deriva máx {dr:0} ms" + (dr > LeadSheet.DriftFlagMs ? " (fora do metrônomo)" : "") : "") : "")
+            + (Stems.Count > 0 ? " · das faixas separadas" : "") : "pronto";
 
     public void Cancel() { _queue.Clear(); Job?.Cancel(); _sep?.Cancel(); _install?.Cancel(); }
 
@@ -775,6 +780,29 @@ public sealed class RecorderUnit : StudioUnit
                 var (lo, hi) = st.Peak(a, a + 2 * secPerCol);
                 double cyy = row.Center.Y, ah = row.Height * 0.45;
                 ctx.DrawRectangle(brush, null, new Rect(row.X + col, cyy - hi * ah * 1.6, 1.4, Math.Max(1, (hi - lo) * ah * 1.6)));
+            }
+            // The stem's own transcription on its row: the bass line (pitch over E1..G3), the beats
+            // of the drums (ticks; amber where they leave the metronome).
+            if (S.ResultTake is not { } rt) continue;
+            double o = S.Compensation;
+            if (st.Name == "bass")
+                foreach (var n in rt.BassNotes)
+                {
+                    double a = XAt((n.Start + o) * S.Rate), b = XAt((n.End + o) * S.Rate);
+                    if (b < row.X || a > row.Right) continue;
+                    double ny = row.Bottom - 3 - (row.Height - 6) * Math.Clamp((n.Midi - 28) / 27.0, 0, 1);
+                    ctx.DrawRectangle(Ui.Amber, null, new Rect(Math.Max(a, row.X), ny - 1.5, Math.Max(2, Math.Min(b, row.Right) - Math.Max(a, row.X) - 1), 3));
+                }
+            if (st.Name == "drums")
+            {
+                double period = S.Session.Bpm > 0 ? 60 / S.Session.Bpm : 0;
+                foreach (var bt in rt.Beats)
+                {
+                    double x = XAt((bt + o) * S.Rate);
+                    if (x < row.X || x > row.Right) continue;
+                    bool off = rt.MaxDriftMs is not null && period > 0 && Math.Abs(bt - Math.Round(bt / period) * period) * 1000 > LeadSheet.DriftFlagMs;
+                    ctx.DrawLine(new ImmutablePen((IImmutableBrush)(off ? Ui.Amber : Ui.LabelBright), 1.2), new Point(x, row.Y + 2), new Point(x, row.Y + 8));
+                }
             }
         }
 

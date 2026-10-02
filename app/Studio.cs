@@ -117,7 +117,7 @@ static partial class PostApi
     [LibraryImport(Lib, EntryPoint = "ana_post_destroy")] public static partial void Destroy(nint h);
     [LibraryImport(Lib, EntryPoint = "ana_post_last_error")] public static partial nint LastError(nint h);
     [LibraryImport(Lib, EntryPoint = "ana_post_start", StringMarshalling = StringMarshalling.Utf8)]
-    public static partial int Start(nint h, in SessionConfigNative s, double compensationSeconds, string inPath, string outJson, byte metronomeGrid);
+    public static partial int Start(nint h, in SessionConfigNative s, double compensationSeconds, string inPath, string outJson, byte flags);
     [LibraryImport(Lib, EntryPoint = "ana_post_status")] public static partial void Status(nint h, out PostStatusNative s);
     [LibraryImport(Lib, EntryPoint = "ana_post_cancel")] public static partial void Cancel(nint h);
 }
@@ -137,8 +137,8 @@ public sealed class StudioJob : IDisposable
     public enum State { Idle, Running, Done, Failed, Cancelled }
 
     /// metronomeGrid: the file starts on a downbeat of the session's tempo and meter (a REC take).
-    public string? Start(Session s, double compensationSeconds, string input, string outJson, bool metronomeGrid) =>
-        PostApi.Start(_h, NativeCore.Config(s), compensationSeconds, input, outJson, (byte)(metronomeGrid ? 1 : 0)) == 0 ? null : Error;
+    public string? Start(Session s, double compensationSeconds, string input, string outJson, bool metronomeGrid, bool beats = false) =>
+        PostApi.Start(_h, NativeCore.Config(s), compensationSeconds, input, outJson, (byte)((metronomeGrid ? 1 : 0) | (beats ? 2 : 0))) == 0 ? null : Error;
 
     public (State State, float Progress) Poll()
     {

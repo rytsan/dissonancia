@@ -447,9 +447,12 @@ ANA_API int32_t ana_player_peaks(PlayerHandle* p, uint64_t startFrame, uint64_t 
 ANA_API PostHandle* ana_post_create(void);
 ANA_API void ana_post_destroy(PostHandle* h);   // cancels and joins a running job
 ANA_API const char* ana_post_last_error(PostHandle* h);
-// metronomeGrid != 0: the file starts on a downbeat of session->bpm / meter (a REC take).
+// flags: ANA_POST_GRID — the file starts on a downbeat of session->bpm / meter (a REC take);
+// ANA_POST_BEATS — track the beats instead of transcribing (the drums channel: a "beats" array
+// and the global tempo in the JSON, session->bpm as the prior when ANA_POST_GRID is set).
+enum { ANA_POST_GRID = 1, ANA_POST_BEATS = 2 };
 ANA_API int32_t ana_post_start(PostHandle* h, const SessionConfig* session, double compensationSeconds, const char* inPathUtf8, const char* outJsonUtf8,
-                               uint8_t metronomeGrid);
+                               uint8_t flags);
 ANA_API void ana_post_status(PostHandle* h, PostStatus* out);
 ANA_API void ana_post_cancel(PostHandle* h);
 }

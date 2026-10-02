@@ -330,6 +330,27 @@ notes, a sung melody with passing and neighbour tones, kick/snare/hi-hat),
 - Fixed on the way: the pitch timestamp of the first hops underflowed (an
   unsigned subtraction before the window filled) — LIVE and offline.
 
+### STUDIO S5 — transcription per channel
+- Passes per separated take, each at its channel's tap: voice (notes),
+  harmony (other + bass: chords), bass (instrument melody, high precision,
+  bass clef), drums (beats). One lead sheet for SCORE (`LeadSheet.cs`).
+- Inversions from the bass line: the bass note sounding as a chord arrives
+  (holding a quarter of it), else the one held longest (half); root = root
+  position, another chord tone = slash chord, a non-chord bass is left for
+  review; a bassist's fifth on beat 3 is not an inversion. Band mix 16/16
+  exact (Dm stays Dm with D on 1 and A on 3; G7 in bar 16).
+- Beats (`beats.cpp`): onset envelope (positive log-energy flux, 10 ms,
+  local mean removed), global period by autocorrelation with a log-normal
+  prior (±0.08 octave around the session BPM for a REC take, ±0.5 octave
+  around 110 otherwise), Ellis dynamic programming (tightness 100), edge
+  beats over silence dropped. Band mix: 96.1 BPM, 64/64 beats on the
+  0.625 s grid. Tests: steady 96 BPM F > 0.95 without a hint; a drummer
+  drifting 92 → 100 BPM followed with the 92 hint (last beat on the drummer,
+  > 100 ms off the click). With a metronome each beat's drift from the
+  nearest click is kept; > 40 ms is flagged (amber ticks, status line).
+- The recorder draws the bass line on the bass row and the beats on the
+  drums row.
+
 ### STUDIO S4 — mixing
 - Core (`player.cpp`, `mixdsp.hpp`): tracks = the edited take + the stems
   (resampled to its rate and length); each through a strip in console

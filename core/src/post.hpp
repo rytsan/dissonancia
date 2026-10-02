@@ -16,13 +16,14 @@ public:
     ~PostJob() { cancel(); join(); }
     // compensationSeconds: subtracted from event times (a REC take's round-trip latency, else 0).
     // metronomeGrid: the file starts on a downbeat of the session's tempo and meter (a REC take).
-    int start(const SessionConfig& s, double compensationSeconds, const char* inPath, const char* outJsonPath, bool metronomeGrid);
+    // beats: track the beats (beats.hpp) instead of transcribing.
+    int start(const SessionConfig& s, double compensationSeconds, const char* inPath, const char* outJsonPath, bool metronomeGrid, bool beats = false);
     void cancel() { cancel_.store(true); }
     void status(PostStatus& out) const;
     std::string error() const;
 
     // Synchronous body (tests, tools): returns ANA_OK, or an error / ANA_ERR_STATE when cancelled.
-    int run(const SessionConfig& s, double compensationSeconds, const std::string& in, const std::string& out, bool metronomeGrid = false);
+    int run(const SessionConfig& s, double compensationSeconds, const std::string& in, const std::string& out, bool metronomeGrid = false, bool beats = false);
 
 private:
     void join() { if (thread_.joinable()) thread_.join(); }
