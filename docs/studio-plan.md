@@ -49,6 +49,13 @@ language as the LIVE rack. Mockup: https://claude.ai/artifact/1cES4MCBM9otq1qSVa
 
 - Rack frame: 19" rails with mounting holes on both sides; every part is a
   screwed rack unit with a model name.
+- Digital look as in LIVE: orange gas-plasma dot-matrix readouts (lit dots
+  glowing over a grid of unlit dots) for the transport, channel numbers,
+  analysers and the console's dB; phosphor-green screens for the track
+  recorder, library and EQ curve.
+- VU meters as on analog racks: backlit cream face, drawn scale with the red
+  zone, needle with its shadow, chrome bezel and the diagonal reflection of
+  the glass.
 - **DS-T Transport (1U):** tab selector, hardware keys (TAP, ▶, ■, ●, loop)
   with LEDs, seven-segment readouts (BPM, meter, grid, position in
   bars.beats.sixteenths, loop start / length), LEDs of the optional
