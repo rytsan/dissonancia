@@ -41,31 +41,34 @@ take is never modified (edits are a list, outputs are cached per stage);
 every result carries a confidence and the UI never presents it as certain;
 key and meter are the user's (STUDIO may suggest, never applies by itself).
 
-## Layout: Ableton Live, effects and console as rack hardware (decision 2026-10-02)
+## Layout: Dissonância's own rack, Ableton-like workflow (decision 2026-10-02)
 
-Reference: Ableton Live's arrangement and device chain; the effects and the
-mixer drawn as rack hardware, like LIVE's rack (screwed faces, knobs, VU,
-LEDs, seven-segment readouts). Mockup:
-https://claude.ai/artifact/1cES4MCBM9otq1qSVa3ed5 (two screens).
+Workflow and layout follow Ableton Live (arrangement, device chain, mixer);
+the look is Dissonância's own 19" rack — not a clone of any DAW. Same visual
+language as the LIVE rack. Mockup: https://claude.ai/artifact/1cES4MCBM9otq1qSVa3ed5.
 
-1. **Arrangement:** control bar on top (TAP, tempo, meter, metronome,
-   quantization, position in bars.beats.sixteenths, play / stop / record,
-   loop with its start and length, CPU, and the optional components present:
-   Demucs, Verovio, GPU); browser on the left (takes, imported files,
-   effects, analysers); tracks with coloured clips and waveforms on the bar
-   ruler, loop brace, playhead; track headers on the right (name, activator,
-   solo, arm, volume, pan). Each separated track has its transcription track
-   under it as a MIDI-like clip (voice notes, chord blocks with confidence,
-   bass notes, beats). Master at the bottom of the headers.
-2. **Track chain (bottom, Ableton's device view):** the selected track's
-   devices left to right in fixed studio order — 1 trim, 2 filter,
-   3 noise gate, 4 parametric EQ (curve on an LCD), 5 compressor (gain
-   reduction LEDs), then the analyser device at the tap (post-inserts,
-   pre-fader) — each a rack unit.
-3. **Mixer:** a hardware console — per channel: colour, name, source and
-   separation confidence, trim, insert slots in studio order with LEDs,
-   analysis type, pan, mute / solo, LED meters, fader, dB readout; master
-   strip with EQ, bus compressor, limiter and a pair of VU meters.
+- Rack frame: 19" rails with mounting holes on both sides; every part is a
+  screwed rack unit with a model name.
+- **DS-T Transport (1U):** tab selector, hardware keys (TAP, ▶, ■, ●, loop)
+  with LEDs, seven-segment readouts (BPM, meter, grid, position in
+  bars.beats.sixteenths, loop start / length), LEDs of the optional
+  components present (Demucs, Verovio, GPU), CPU, key.
+- **DS-L Library:** phosphor-green list in a bezel (takes, imported files,
+  effect units, analysers).
+- **DS-A Track recorder:** channel cards with masking-tape scribble strips
+  (name), channel number, solo / arm LEDs, level; a phosphor screen with the
+  bar ruler, loop brace, playhead, clips with their waveforms, and under each
+  separated track its transcription lane (notes, chords with confidence,
+  bass notes, beats). Light scanlines.
+- **DS-C Channel chain:** the selected channel's units in fixed studio order,
+  joined by patch cables: DS-1 TRIM (VU), DF-2 FILTER, DG-3 NOISE GATE,
+  DQ-4 PARAMETRIC EQ (curve on a phosphor screen), DC-5 COMPRESSOR (gain
+  reduction LEDs), then the analyser at the tap (DA-N notes, DA-C chords,
+  DA-B bass, DA-T beats; post-inserts, pre-fader). DL-6 LIMITER on master.
+- **DS-M Console:** strips with channel number, tape label, source and
+  separation confidence, trim, insert slots by model with LEDs, analyser,
+  pan, mute / solo, LED meters, fader, seven-segment dB; master strip with
+  EQ, bus compressor, limiter and a pair of VU meters.
 
 ## Milestones (in studio order)
 
