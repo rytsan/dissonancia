@@ -35,6 +35,23 @@ Check(Theory.ClefForRange(M("D4", "G4", "A4", "B4", "C5", "D5", "A4")) == Clef.T
 Check(Theory.ClefForRange(M("D3", "E3", "D3"), Clef.Treble8vb) == Clef.Treble8vb && Theory.ClefForRange(M("C3", "D3", "C3"), Clef.Treble8vb) == Clef.Bass,
       "auto clef: hysteresis at E3 (D3 stays treble 8vb, C3 goes to bass)");
 
+// STUDIO S5: the bass line decides the inversion (the note held longest, at least half the chord).
+System.Text.Json.Nodes.JsonObject Chord(string sym, int root, int q) => new() { ["type"] = "chord", ["start"] = 0.0, ["end"] = 2.0, ["symbol"] = sym, ["root"] = root, ["quality"] = q, ["bass"] = -1, ["inversion"] = 0 };
+System.Text.Json.Nodes.JsonNode BassNote(int midi, string name, double a, double b) => new System.Text.Json.Nodes.JsonObject { ["type"] = "note", ["midi"] = midi, ["name"] = name, ["start"] = a, ["end"] = b };
+var dm = Chord("Dm/A", 2, 1);
+LeadSheet.ApplyBass(dm, [BassNote(38, "D2", 0.02, 0.9), BassNote(45, "A2", 1.0, 1.7), BassNote(42, "F#2", 1.75, 1.95)]);   // root on 1, fifth on 3, a passing note
+Check((string?)dm["symbol"] == "Dm", $"bass: the root on the downbeat -> root position, the fifth on 3 is not an inversion ({dm["symbol"]})");
+var ce = Chord("C", 0, 0);
+LeadSheet.ApplyBass(ce, [BassNote(40, "E2", 0, 1.6)]);
+Check((string?)ce["symbol"] == "C/E" && (int)ce["inversion"]! == 1, $"bass: E under C -> C/E ({ce["symbol"]})");
+var g7 = Chord("G7", 7, 7);
+LeadSheet.ApplyBass(g7, [BassNote(41, "F2", 0, 1.5)]);
+Check((string?)g7["symbol"] == "G7/F" && (int)g7["inversion"]! == 3, $"bass: F under G7 -> third inversion ({g7["symbol"]})");
+var am = Chord("Am", 9, 1);
+LeadSheet.ApplyBass(am, [BassNote(43, "G2", 0, 0.6)]);   // held less than half
+LeadSheet.ApplyBass(am, [BassNote(42, "F#2", 0, 1.8)]);  // not a chord tone: left to the review
+Check((string?)am["symbol"] == "Am", "bass: short or non-chord bass leaves the chord");
+
 // STUDIO S2 edit list: trim, cut and clip gain on the edited timeline (frames).
 var el = new EditList();
 el.Trim(1000, 100, 900);                       // keep 100-900 of a 1000-frame take

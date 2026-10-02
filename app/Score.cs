@@ -23,6 +23,7 @@ public sealed class Take
     public double Bpm = 120;
     public List<TakeNote> Notes = [];
     public List<TakeChord> Chords = [];
+    public List<TakeNote> BassNotes = [];   // STUDIO: the separated bass line
     public List<TakeCadence> Cadences = [];
 
     public static string Folder
@@ -65,6 +66,11 @@ public sealed class Take
             {
                 case "note":
                     var written = ParseName(e.GetProperty("name").GetString() ?? "");
+                    if (e.TryGetProperty("part", out var part) && part.GetString() == "bass")
+                    {   // the bass line of a separated take (STUDIO): its own part, spelled as sounding
+                        t.BassNotes.Add(new TakeNote(e.GetProperty("start").GetDouble(), e.GetProperty("end").GetDouble(), e.GetProperty("midi").GetInt32(), written, e.GetProperty("confidence").GetSingle()));
+                        break;
+                    }
                     t.Notes.Add(new TakeNote(e.GetProperty("start").GetDouble(), e.GetProperty("end").GetDouble(), e.GetProperty("midi").GetInt32(),
                         written.WithOctaveShift(-t.Clef.OctaveShift()), e.GetProperty("confidence").GetSingle()));
                     break;

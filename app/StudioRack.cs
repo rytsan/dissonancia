@@ -269,12 +269,21 @@ public sealed class StudioState
         string Keys(uint mask) => string.Join("|", Enumerable.Range(0, Tracks).Where(t => (mask >> t & 1) != 0).Select(t => NameOf(t) + ":" + Channel(t).TapKey));
         var voice = AnalysisSession(AppMode.VoiceMono);
         var harmony = AnalysisSession(HarmonyMode);
-        uint vm = Mask("vocals"), hm = Mask("other", "bass", "guitar", "piano");
-        return
-        [
-            new Pass(voice, vm, StudioProject.TapPath(Current, "voice"), ".voice", Options(voice, ";stems=" + StemsKey + ";tap=" + Keys(vm))),
-            new Pass(harmony, hm, StudioProject.TapPath(Current, "harmony"), ".harmony", Options(harmony, ";stems=" + StemsKey + ";tap=" + Keys(hm))),
-        ];
+        uint vm = Mask("vocals"), hm = Mask("other", "bass", "guitar", "piano"), bm = Mask("bass");
+        var passes = new List<Pass>
+        {
+            new(voice, vm, StudioProject.TapPath(Current, "voice"), ".voice", Options(voice, ";stems=" + StemsKey + ";tap=" + Keys(vm))),
+            new(harmony, hm, StudioProject.TapPath(Current, "harmony"), ".harmony", Options(harmony, ";stems=" + StemsKey + ";tap=" + Keys(hm))),
+        };
+        if (bm != 0)
+        {   // the bass line: a melody pipeline over the low range (HighPrecision: down to 40 Hz)
+            var bassS = AnalysisSession(AppMode.InstrumentMono);
+            bassS.Quality = Quality.HighPrecision;
+            bassS.AutoClef = false;
+            bassS.Clef = Clef.Bass;
+            passes.Add(new(bassS, bm, StudioProject.TapPath(Current, "bass"), ".bass", Options(bassS, ";stems=" + StemsKey + ";tap=" + Keys(bm))));
+        }
+        return passes;
     }
 
     void RefreshResult()
@@ -294,13 +303,9 @@ public sealed class StudioState
     {
         try
         {
-            var root = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(results[1]))!.AsObject();   // the harmony's session
-            var events = root["events"]!.AsArray();
-            var voice = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(results[0]))!["events"]!.AsArray();
-            foreach (var e in voice.ToList()) events.Add(e!.DeepClone());
-            root["analysis"] = "studio-offline-stems";
-            root["session"]!["mode"] = (int)AppMode.VoiceMono;   // a lead sheet: the voice's staff, the harmony as symbols
-            // The voice's own clef / spelling rule: SCORE re-picks the clef from the notes (Auto).
+            static System.Text.Json.Nodes.JsonNode Read(string p) => System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(p))!;
+            var bass = results.Count > 2 ? Read(results[2])["events"]!.AsArray() : null;
+            var root = LeadSheet.Merge(Read(results[1]).AsObject(), Read(results[0])["events"]!.AsArray(), bass);
             var path = StudioProject.LeadSheetPath(Current!);
             File.WriteAllText(path, root.ToJsonString());
             return path;
