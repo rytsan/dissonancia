@@ -44,7 +44,10 @@ rate, buffer size, metronome output, latency calibration) — section 22.
    is treated (normalize, trim / cut, EQ, source separation with Demucs) before
    any notation; the SCORE is made from the treated take, never from the raw
    recording. Until STUDIO exists, the raw take's LIVE events can be previewed
-   in SCORE (marked as a preview).
+   in SCORE (marked as a preview). STUDIO is the heavy layer: full offline
+   reprocessing of the treated audio (high-resolution CQT, separation,
+   look-ahead, whole-take context) and only then notation and the MusicXML /
+   MIDI export. Not 100 % either, but far more precise than the live events.
 The LIVE layer NEVER renders a score, never runs Verovio, never writes files,
 never separates sources. It offers only the fixed modes of section 5.
 
