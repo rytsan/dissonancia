@@ -6,10 +6,14 @@
 namespace dz {
 
 namespace {
-// Krumhansl & Kessler (1982) probe-tone profiles, tonic first.
-constexpr double kMajor[12] = {6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88};
-constexpr double kMinor[12] = {6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17};
+// Temperley (1999) key profiles, tonic first. Chosen over Krumhansl-Kessler on a stress set of 14
+// progressions and melodies (secondary dominants, passing diminished chords, borrowed chords,
+// Neapolitan, harmonic/melodic minor, chromatic neighbours): KK read C major with V/V and a
+// passing dim7 as G major, Temperley none wrong (docs/IMPLEMENTATION.md, dynamic session).
+constexpr double kMajor[12] = {5, 2, 3.5, 2, 4.5, 4, 2, 4.5, 2, 3.5, 1.5, 4};
+constexpr double kMinor[12] = {5, 2, 3.5, 4.5, 2, 4, 2, 4.5, 3.5, 2, 1.5, 4};
 constexpr double kEnvSeconds = 8, kMinEnvSeconds = 4, kMinKeySeconds = 3;
+constexpr double kNewSongSilence = 3;   // seconds without pitch: the key histogram starts over
 constexpr double kMinBpm = 40, kMaxBpm = 200, kPriorBpm = 110, kPriorOctaves = 1.0;
 
 double pearson(const double* x, const double* p, int rot) {
@@ -41,13 +45,16 @@ ContextTracker::ContextTracker(double hopSeconds)
 void ContextTracker::process(const float* pcWeights, float onsetStrength, ContextEstimate& out) {
     for (double& v : pc_) v *= decay_;
     mass_ *= decay_;
-    if (pcWeights) {
-        double sum = 0;
+    double sum = 0;
+    if (pcWeights)
         for (int i = 0; i < 12; i++) sum += pcWeights[i];
-        if (sum > 0) {
-            for (int i = 0; i < 12; i++) pc_[i] += pcWeights[i] / sum;
-            mass_ += 1;
-        }
+    if (sum > 0) {
+        for (int i = 0; i < 12; i++) pc_[i] += pcWeights[i] / sum;
+        mass_ += 1;
+        silentHops_ = 0;
+    } else if (++silentHops_ * hop_ >= kNewSongSilence) {   // a pause long enough to be another song
+        for (double& v : pc_) v = 0;
+        mass_ = 0;
     }
     env_[envWrite_] = std::max(0.f, onsetStrength);
     envWrite_ = (envWrite_ + 1) % uint32_t(env_.size());

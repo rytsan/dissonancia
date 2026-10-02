@@ -206,9 +206,16 @@ Only the pipeline chosen on START exists in a session (`voice_` for mono modes,
 
 ### Dynamic session — key and tempo heard before REC (`core/src/context.cpp`)
 - Key: a pitch-class histogram with a 30 s memory (chroma in chord modes, the
-  stable sung note in mono modes) correlated with the 24 Krumhansl-Kessler
+  stable sung note in mono modes) correlated with the 24 Temperley (1999)
   profiles. Confidence is the margin over the best key with a different
-  signature (the relative key shares it). Needs ~3 s of pitched input.
+  signature (the relative key shares it). Needs ~3 s of pitched input; 3 s
+  without pitch starts the histogram over (another song).
+- Why Temperley: on a 14-case stress set (V/V and passing dim7, harmonic
+  minor with viio7, borrowed iv/bVII, Neapolitan, ii-V-I with tritone sub,
+  V/vi, line cliché, chromatic neighbours, melodic minor, blues, dorian,
+  mixolydian), Krumhansl-Kessler applied 3 wrong signatures under the first
+  app rule (C major with V/V read as G major, E major first as B major,
+  dorian as D minor); Temperley with the stricter rule below applied none.
 - Tempo: onset envelope (CQT flux in chord modes; level rise plus one pulse
   per note start in mono modes) over the last 8 s, smoothed over 50 ms,
   autocorrelated for 40–200 BPM with a log-normal prior around 110 BPM. Half
@@ -219,8 +226,11 @@ Only the pipeline chosen on START exists in a session (`voice_` for mono modes,
 - `LiveSnapshot.context` publishes both every 0.5 s; `ana_set_key` changes
   spelling, roman numerals and the chord prior from the next hop. Both
   `ana_set_key` and `ana_set_metronome` are refused while REC is armed.
-- App: START → "Auto" for key and tempo (default on). A detected value is
-  applied after holding 2 s (key confidence ≥ 0.5, tempo ≥ 0.3); REC locks
+- App: START → "Auto" for key and tempo (default on). A tempo is applied
+  after holding 2 s (confidence ≥ 0.3); a key after holding 3 s at
+  confidence ≥ 0.7, a dip below restarting the wait. Ambiguous music (blues
+  with dominant sevenths everywhere, a dorian vamp, chromatic or whole-tone
+  material) never reaches that and stays at the START key. REC locks
   both, the take's sidecar records the applied values. With auto tempo the
   metronome starts off (the estimator would hear its own click); REC turns
   it on for the count-in. Tap tempo switches auto tempo off. TRANSPORT shows
@@ -303,6 +313,8 @@ item).
 | Live loopback, guitar (`tools/loopback`, 8 bars G Em C D7 G/B Am7 D G, 92 bpm, plucked strings) | 8/8 chords with inversions (Guitar and Piano pipelines), starts within ±20 ms of the strums, confirmed 0.40 s after the attack, V7→I6 imperfect and V→I perfect authentic cadences, chart and numerals exact, 8 bars engraved |
 | Live loopback, voice (13 notes, vibrato ±15 ¢, chromatic passing tone) | 13/13 pitches at +2…+3 ¢, D–D♭–C spelled by direction, stable-note latency median 50 ms; legato note changes start ≈ 28 ms late (first note after silence exact); score rhythm exact after quantization |
 | Dynamic session, synthetic | tempo within 2 BPM at 72/92/120/150 (10 % missing attacks, ±12 ms timing), eighth-note strumming at 92 → 92; Ode to Joy → G major, A minor line → A minor, B♭ scale → 2♭ |
+| Key stress set (`test_context.cpp`, chroma-like weights) | 11/11 tonal cases applied with the right signature, 0 wrong; blues, dorian, chromatic scale, augmented and dim7 cycles: nothing applied |
+| Key stress set, real CQT chroma (plucked-string synth: C with V/V + dim7, A harmonic minor, B♭ jazz, E with V/vi, D minor with Neapolitan, blues) | 5/5 applied right after 7.5–12 s; blues not applied (heard A major at 0.35) |
 | Dynamic session, live loopback | guitar (strums on 1 and 3, 92 bpm): tempo 91.4–92.2 from 3 s, 1♯ from 5 s (E minor until bar 4, then G major); voice melody: 90.4–91.8 from 2 s, G major from 4 s |
 | Live loopback, pipeline | capture 15 ms (reported), processing median 4.8–5.1 ms, CPU ≤ 2.5 %, 0 xruns, 0 recorder gaps, 0 event gaps |
 

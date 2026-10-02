@@ -168,8 +168,10 @@ public sealed class MainWindow : Window
         FollowContext(Clock());
     }
 
-    // Dynamic session (before REC): a detected key or tempo is applied once it has held for 2 s
-    // with enough confidence. REC locks both (the core refuses changes while REC is armed).
+    // Dynamic session (before REC): a detected tempo is applied once it has held for 2 s, a key
+    // once it has held 3 s at confidence >= 0.7 (a dip below restarts the wait). The key rule
+    // applied no wrong signature on the 14-case stress set (tests/key, docs); ambiguous music
+    // (blues, dorian vamp) is left at the START key. REC locks both.
     (int Fifths, bool Minor, double Since) _keyCandidate = (99, false, 0);
     (float Bpm, double Since) _tempoCandidate = (0, 0);
 
@@ -177,11 +179,12 @@ public sealed class MainWindow : Window
     {
         var f = _frame;
         if (f.Recording || f.CountingIn) return;
-        if (_session.AutoKey && f.DetectedKeyValid && f.KeyConfidence >= 0.5f)
+        if (!_session.AutoKey || !f.DetectedKeyValid || f.KeyConfidence < 0.7f) _keyCandidate = (99, false, 0);
+        else
         {
             if (_keyCandidate.Fifths != f.DetectedKeyFifths || _keyCandidate.Minor != f.DetectedKeyMinor)
                 _keyCandidate = (f.DetectedKeyFifths, f.DetectedKeyMinor, now);
-            else if (now - _keyCandidate.Since >= 2 && (_session.Key.Fifths != f.DetectedKeyFifths || _session.Key.Minor != f.DetectedKeyMinor))
+            else if (now - _keyCandidate.Since >= 3 && (_session.Key.Fifths != f.DetectedKeyFifths || _session.Key.Minor != f.DetectedKeyMinor))
             {
                 _session.Key = new KeyOption(f.DetectedKeyFifths, f.DetectedKeyMinor);
                 _source.SetKey(_session.Key.Fifths, _session.Key.Minor);
