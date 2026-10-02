@@ -17,7 +17,7 @@ for (int i = 0; i < 40; i++)   // 2 s of frames so meters, scope and waterfall f
 {
     t += 0.05;
     w.Step(t);
-    if (i == 1) foreach (var a in args.Skip(4)) w.Action(a);
+    if (i == 1) foreach (var a in args.Skip(4)) { if (a == "Wait") Thread.Sleep(2000); else w.Action(a); }   // Wait: let a background job finish
     Avalonia.Threading.Dispatcher.UIThread.RunJobs();
 }
 using var file = File.Create(args[0]);

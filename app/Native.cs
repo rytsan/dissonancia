@@ -7,7 +7,7 @@ namespace Dissonancia;
 // Blittable mirrors of core/include/dissonancia.h (spec §22). Layout checked against ana_struct_layout.
 
 [StructLayout(LayoutKind.Sequential)]
-unsafe struct SessionConfigNative
+internal unsafe struct SessionConfigNative
 {
     public byte Mode, Quality, KeySet;
     public sbyte KeyFifths;
@@ -264,6 +264,20 @@ public sealed class NativeCore : IDisposable
     public NativeLiveSource Start(Session s)
     {
         Ana.Stop(_h);
+        var cfg = Config(s);
+        var dev = new AudioDeviceConfigNative
+        {
+            CaptureDevice = s.CaptureDevice, SampleRate = s.SampleRate, PeriodFrames = s.PeriodFrames,
+            Exclusive = (byte)(s.Exclusive ? 1 : 0), ClickOutput = (byte)(s.ClickOutput ? 1 : 0),
+            ClickDuringTake = (byte)(s.ClickDuringTake ? 1 : 0),
+        };
+        if (Ana.Start(_h, cfg, dev) != 0) throw new InvalidOperationException(Ana.Error(_h));
+        return new NativeLiveSource(_h, s);
+    }
+
+    /// The core's SessionConfig for a session (LIVE start, STUDIO offline analysis).
+    internal static SessionConfigNative Config(Session s)
+    {
         var cfg = new SessionConfigNative
         {
             Mode = (byte)s.Mode, Quality = (byte)s.Quality, KeySet = (byte)(s.KeySet ? 1 : 0), KeyFifths = (sbyte)s.Key.Fifths,
@@ -273,14 +287,7 @@ public sealed class NativeCore : IDisposable
         };
         sbyte[] standard = [40, 45, 50, 55, 59, 64];
         unsafe { for (int i = 0; i < standard.Length; i++) cfg.GuitarOpenMidi[i] = standard[i]; }
-        var dev = new AudioDeviceConfigNative
-        {
-            CaptureDevice = s.CaptureDevice, SampleRate = s.SampleRate, PeriodFrames = s.PeriodFrames,
-            Exclusive = (byte)(s.Exclusive ? 1 : 0), ClickOutput = (byte)(s.ClickOutput ? 1 : 0),
-            ClickDuringTake = (byte)(s.ClickDuringTake ? 1 : 0),
-        };
-        if (Ana.Start(_h, cfg, dev) != 0) throw new InvalidOperationException(Ana.Error(_h));
-        return new NativeLiveSource(_h, s);
+        return cfg;
     }
 
     public void Dispose() => Ana.Destroy(_h);

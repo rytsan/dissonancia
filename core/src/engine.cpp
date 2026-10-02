@@ -1,4 +1,5 @@
 #include "engine.hpp"
+#include "sidecar.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -590,34 +591,7 @@ void Engine::write_sidecar(uint64_t frames, uint64_t dropped) {
                  playbackChannels_ ? playbackLatencyMs_ : 0.f, compensationMs(),
                  (unsigned long long)recStart_.load(), (unsigned long long)frames, recorderGaps_.load(), (unsigned long long)dropped,
                  !takeLogOverflow_.load() && flushDone_.load() ? "true" : "false");
-    const double t0 = double(recStart_.load()) / rate_;
-    for (size_t i = 0; i < takeLog_.size(); i++) {
-        const AnalyzerEvent& e = takeLog_[i];
-        if (e.type == AnalyzerEventType::ChordEnded) {
-            const ChordEvent& c = e.data.chord;
-            std::fprintf(f, "%s\n    {\"type\": \"chord\", \"seq\": %u, \"start\": %.4f, \"end\": %.4f, \"symbol\": \"%s\", \"roman\": \"%s\","
-                            " \"diatonicStatus\": %d, \"root\": %d, \"bass\": %d, \"inversion\": %d, \"quality\": %d, \"confidence\": %.3f,"
-                            " \"incomplete\": %s, \"bassSettled\": %s}",
-                         i ? "," : "", e.sequence, c.startTimeSeconds - t0, c.endTimeSeconds - t0, c.symbol, c.roman, int(c.diatonicStatus),
-                         c.rootPitchClass, c.bassPitchClass, c.inversion, int(c.quality), c.confidence, c.incomplete ? "true" : "false",
-                         c.bassSettled ? "true" : "false");
-            continue;
-        }
-        if (e.type == AnalyzerEventType::Cadence) {
-            const CadenceEvent& c = e.data.cadence;
-            std::fprintf(f, "%s\n    {\"type\": \"cadence\", \"seq\": %u, \"time\": %.4f, \"cadence\": %d, \"from\": \"%s\", \"to\": \"%s\","
-                            " \"confidence\": %.3f, \"evidence\": \"%s\"}",
-                         i ? "," : "", e.sequence, c.timestampSeconds - t0, int(c.type), c.fromRoman, c.toRoman, c.confidence, c.evidence);
-            continue;
-        }
-        if (e.type != AnalyzerEventType::NoteEnd) continue;
-        const MusicalNoteEvent& n = e.data.note;
-        std::fprintf(f,
-                     "%s\n    {\"type\": \"note\", \"seq\": %u, \"start\": %.4f, \"end\": %.4f, \"midi\": %d, \"name\": \"%s\","
-                     " \"avgHz\": %.2f, \"medianHz\": %.2f, \"avgCents\": %.1f, \"confidence\": %.3f, \"chromatic\": %s, \"vibrato\": %s}",
-                     i ? "," : "", e.sequence, n.startTimeSeconds - t0, n.endTimeSeconds - t0, n.midi, n.writtenName, n.avgHz, n.medianHz,
-                     n.avgCents, n.confidence, n.chromatic ? "true" : "false", n.vibrato ? "true" : "false");
-    }
+    write_events_json(f, takeLog_, double(recStart_.load()) / rate_);
     std::fprintf(f, "\n  ]\n}\n");
     std::fclose(f);
 }

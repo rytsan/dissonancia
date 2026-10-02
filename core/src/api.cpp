@@ -8,12 +8,18 @@
 #include "dissonancia.h"
 #include "engine.hpp"
 #include "player.hpp"
+#include "post.hpp"
 #include "rt.hpp"
 
 struct PlayerHandle {
     ma_context ctx{};
     bool ctxOk = false;
     dz::Player player;
+    std::string error;
+};
+
+struct PostHandle {
+    dz::PostJob job;
     std::string error;
 };
 
@@ -183,5 +189,22 @@ int32_t ana_player_peaks(PlayerHandle* p, uint64_t a, uint64_t b, int32_t column
     p->player.peaks(a, b, uint32_t(columns), mn, mx);
     return ANA_OK;
 }
+
+PostHandle* ana_post_create(void) { return new (std::nothrow) PostHandle; }
+void ana_post_destroy(PostHandle* h) { delete h; }
+
+const char* ana_post_last_error(PostHandle* h) {
+    if (!h) return "null handle";
+    h->error = h->job.error();
+    return h->error.c_str();
+}
+
+int32_t ana_post_start(PostHandle* h, const SessionConfig* s, double comp, const char* in, const char* out) {
+    if (!h || !s || !in || !out) return ANA_ERR_ARG;
+    try { return h->job.start(*s, comp, in, out); } catch (const std::exception&) { return ANA_ERR_STATE; }
+}
+
+void ana_post_status(PostHandle* h, PostStatus* out) { if (h && out) h->job.status(*out); }
+void ana_post_cancel(PostHandle* h) { if (h) h->job.cancel(); }
 
 }  // extern "C"

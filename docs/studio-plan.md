@@ -70,7 +70,7 @@ https://claude.ai/artifact/1cES4MCBM9otq1qSVa3ed5 (three screens).
 Each one compiles, tests and measures, and is usable on its own. Built in
 this order because each stage needs the one before it, as in a studio.
 
-### S1 — Session: library, playback, jobs
+### S1 — Session: library, playback, jobs (done 2026-10-02)
 - Library: REC takes + imported WAV / FLAC / MP3 (miniaudio decoder) / OGG
   (stb_vorbis); duration, mode, date; open, rename, delete.
 - Take project `take-….studio.json` next to the take: stage options, edit

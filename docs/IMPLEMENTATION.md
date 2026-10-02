@@ -57,7 +57,9 @@ Only the pipeline chosen on START exists in a session (`voice_` for mono modes,
 | `core/src/cqt.{hpp,cpp}` | Octave-decimated CQT, 11 tuning sets, chroma with leakage removal, tuning estimator, onset gating |
 | `core/src/bass.{hpp,cpp}` | Onset detector (spectral flux) and bass tracker (YIN preview + CQT confirmation) |
 | `core/src/player.{hpp,cpp}` | STUDIO player: file decoded to memory, own output device, loop, min/max peak mipmap |
-| `app/Studio.cs` | STUDIO tab (S1): library, waveform, transport |
+| `core/src/post.{hpp,cpp}` | STUDIO offline analysis job: whole file through the mode's pipeline, progress, cancel, take JSON out |
+| `core/src/sidecar.hpp` | Take JSON event writer shared by the REC sidecar and the offline result |
+| `app/Studio.cs` | STUDIO tab (S1): library, waveform, transport, offline analysis, take project cache |
 | `core/src/tempo.{hpp,cpp}` | Tempo heard (onset-envelope autocorrelation + beat phase): beat marks on the scope only |
 | `core/src/chords.{hpp,cpp}` | Chord matcher (180 harmonic-aware templates, Occam, key/cadence context, bass), tracker, slash spelling |
 | `core/src/abi_check.cpp` | `static_assert` sizes/offsets, compiled with `-Wpadded -Werror` |
@@ -289,8 +291,23 @@ notes, a sung melody with passing and neighbour tones, kick/snare/hi-hat),
   selection, wheel: zoom around the pointer, shift + wheel: pan), PLAY /
   STOP (space), LOOP of the selection, time readout, and the raw-take SCORE
   preview of the take open.
-- Not yet in S1: the take project file, the job system and the offline
-  reanalysis.
+- Offline analysis (`ana_post_*`): a worker thread decodes the file to mono
+  and runs the mode's pipeline over the whole of it (voice / melody: the
+  note pipeline; chords: CQT front end + tracker, chords relabelled on their
+  whole duration), with progress and cancel; the result is a take JSON
+  (`"analysis": "studio-offline"`, same schema as the REC sidecar, written
+  by the shared `sidecar.hpp`), so SCORE loads it like any take.
+- Quality: the session's. HighPrecision was measured on the band mix and is
+  not better (take labels 89 % vs 91 % Balanced), so offline does not force
+  it; precision grows with the S5 whole-take decoders.
+- A REC take is analysed with its own session (mode, key, clef, meter, BPM)
+  and round-trip compensation from its sidecar; an imported file with the
+  START session and no compensation. The mode can be changed per file.
+- Take project: `<takes>/studio/<name>-<path hash>.studio.json` holds the
+  source's size and time, the options and the result path; the result is
+  reused while the file and the options are unchanged ("em cache").
+- SCORE from STUDIO uses the offline result; without one, a REC take's raw
+  sidecar is the preview.
 
 ### GUI (prototype, C# / Avalonia 12.1, .NET 10)
 - START: mode, quality, key cascade, clef, meter, BPM, count-in, audio

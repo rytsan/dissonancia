@@ -75,6 +75,127 @@ public sealed class StudioPlayer : IDisposable
     public void Dispose() => PlayerApi.Destroy(_p);
 }
 
+[StructLayout(LayoutKind.Sequential)]
+struct PostStatusNative
+{
+    public float Progress;
+    public byte State;   // 0 idle, 1 running, 2 done, 3 failed, 4 cancelled
+    byte _pad0, _pad1, _pad2;
+}
+
+static partial class PostApi
+{
+    const string Lib = "dissonancia";
+    [LibraryImport(Lib, EntryPoint = "ana_post_create")] public static partial nint Create();
+    [LibraryImport(Lib, EntryPoint = "ana_post_destroy")] public static partial void Destroy(nint h);
+    [LibraryImport(Lib, EntryPoint = "ana_post_last_error")] public static partial nint LastError(nint h);
+    [LibraryImport(Lib, EntryPoint = "ana_post_start", StringMarshalling = StringMarshalling.Utf8)]
+    public static partial int Start(nint h, in SessionConfigNative s, double compensationSeconds, string inPath, string outJson);
+    [LibraryImport(Lib, EntryPoint = "ana_post_status")] public static partial void Status(nint h, out PostStatusNative s);
+    [LibraryImport(Lib, EntryPoint = "ana_post_cancel")] public static partial void Cancel(nint h);
+}
+
+/// The core's offline analysis job (one at a time).
+public sealed class StudioJob : IDisposable
+{
+    readonly nint _h;
+    StudioJob(nint h) => _h = h;
+
+    public static StudioJob? TryCreate()
+    {
+        try { nint h = PostApi.Create(); return h == 0 ? null : new StudioJob(h); }
+        catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException) { return null; }
+    }
+
+    public enum State { Idle, Running, Done, Failed, Cancelled }
+
+    public string? Start(Session s, double compensationSeconds, string input, string outJson) =>
+        PostApi.Start(_h, NativeCore.Config(s), compensationSeconds, input, outJson) == 0 ? null : Error;
+
+    public (State State, float Progress) Poll()
+    {
+        PostApi.Status(_h, out var st);
+        return ((State)st.State, st.Progress);
+    }
+
+    public void Cancel() => PostApi.Cancel(_h);
+    public string Error => Marshal.PtrToStringUTF8(PostApi.LastError(_h)) ?? "";
+    public void Dispose() => PostApi.Destroy(_h);
+}
+
+/// Take project (S1): the options an offline result was made with, next to the result, under
+/// <takes>/studio/. A result is reused while the source file and the options are unchanged.
+public static class StudioProject
+{
+    public sealed record Project(string Source, long Size, long Modified, string Options, string Result, DateTime AnalyzedAt);
+
+    static string Dir => System.IO.Path.Combine(Take.Folder, "studio");
+
+    static string Stem(string source)
+    {
+        var full = System.IO.Path.GetFullPath(source);
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(full)))[..8].ToLowerInvariant();
+        return System.IO.Path.Combine(Dir, $"{System.IO.Path.GetFileNameWithoutExtension(source)}-{hash}");
+    }
+
+    public static string ResultPath(string source) => Stem(source) + ".events.json";
+    static string ProjectPath(string source) => Stem(source) + ".studio.json";
+
+    /// The options that change the result (the cache key).
+    public static string Options(Session s, double comp) =>
+        $"mode={s.Mode};quality={s.Quality};key={(s.KeySet ? s.Key.Fifths + (s.Key.Minor ? "m" : "M") : "none")};clef={s.CoreClef};meter={s.BeatsPerBar}/{s.BeatUnit};bpm={s.Bpm:0.###};comp={comp:0.####}";
+
+    /// A cached result for this source and options, or null.
+    public static string? Cached(string source, string options)
+    {
+        try
+        {
+            var p = JsonSerializer.Deserialize<Project>(File.ReadAllText(ProjectPath(source)));
+            var fi = new FileInfo(source);
+            return p is not null && p.Options == options && p.Size == fi.Length && p.Modified == fi.LastWriteTimeUtc.Ticks && File.Exists(p.Result) ? p.Result : null;
+        }
+        catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException) { return null; }
+    }
+
+    public static void Save(string source, string options)
+    {
+        var fi = new FileInfo(source);
+        File.WriteAllText(ProjectPath(source), JsonSerializer.Serialize(new Project(source, fi.Length, fi.LastWriteTimeUtc.Ticks, options, ResultPath(source), DateTime.UtcNow),
+            new JsonSerializerOptions { WriteIndented = true }));
+    }
+
+    public static void EnsureDir() => Directory.CreateDirectory(Dir);
+
+    /// A REC take carries its own session (mode, key, clef, meter, BPM) and round-trip latency in
+    /// its sidecar; an imported file takes the START session, with no compensation.
+    public static (Session Session, double Compensation, bool FromTake) SessionFor(string source, Session current)
+    {
+        var sidecar = System.IO.Path.ChangeExtension(source, ".json");
+        if (File.Exists(sidecar))
+        {
+            try
+            {
+                var t = Take.Load(sidecar);
+                using var doc = JsonDocument.Parse(File.ReadAllText(sidecar));
+                double comp = doc.RootElement.TryGetProperty("compensationLatencyMs", out var c) ? c.GetDouble() / 1000 : 0;
+                var s = new Session
+                {
+                    Mode = (AppMode)t.Mode, Quality = current.Quality, KeySet = t.KeySet, Key = new KeyOption(t.KeyFifths, t.Minor),
+                    Clef = t.Clef, AutoClef = current.AutoClef && t.Clef == Clef.Treble, BeatsPerBar = t.BeatsPerBar, BeatUnit = t.BeatUnit, Bpm = (float)t.Bpm,
+                };
+                return (s, comp, true);
+            }
+            catch (Exception e) when (e is IOException or JsonException or KeyNotFoundException or InvalidOperationException) { }
+        }
+        var copy = new Session
+        {
+            Mode = current.Mode, Quality = current.Quality, KeySet = current.KeySet, Key = current.Key, Clef = current.Clef, AutoClef = current.AutoClef,
+            BeatsPerBar = current.BeatsPerBar, BeatUnit = current.BeatUnit, Bpm = current.Bpm,
+        };
+        return (copy, 0, false);
+    }
+}
+
 /// Library (S1): the REC takes in the takes folder plus imported files, remembered in library.json.
 public static class StudioLibrary
 {
@@ -232,6 +353,15 @@ public sealed class WaveformView : Control
 public sealed class StudioView : DockPanel
 {
     readonly StudioPlayer? _player = StudioPlayer.TryCreate();
+    readonly StudioJob? _job = StudioJob.TryCreate();
+    readonly Session _session;
+    readonly ComboBox _mode = new() { Width = 200, ItemsSource = new[] { "Voz", "Melodia (instrumento)", "Acordes · violão", "Acordes · piano", "Acordes · geral" } };
+    readonly Button _analyze = new() { Content = "ANALISAR (offline)", Height = 36 };
+    readonly Button _cancel = new() { Content = "CANCELAR", Height = 36, IsEnabled = false };
+    readonly ProgressBar _progress = new() { Width = 220, Minimum = 0, Maximum = 1, VerticalAlignment = VerticalAlignment.Center };
+    readonly TextBlock _analysis = new() { Foreground = Ui.Label, VerticalAlignment = VerticalAlignment.Center };
+    string? _result, _jobOptions, _jobSource;
+    bool _running;
     readonly WaveformView _wave = new();
     readonly ListBox _library = new() { Width = 280 };
     readonly TextBlock _title = new() { FontSize = 18, FontWeight = FontWeight.Bold, Foreground = Ui.LabelBright };
@@ -242,11 +372,12 @@ public sealed class StudioView : DockPanel
     readonly Button _loop = new() { Content = "LOOP SELEÇÃO", Height = 40 };
     string? _current;
 
-    /// Opens the raw-take SCORE preview (until S7 replaces it).
-    public event Action<string>? ScorePreview;
+    /// Opens SCORE from a take JSON: the offline result, or the raw take's sidecar as a preview.
+    public event Action<string>? ScoreRequested;
 
-    public StudioView()
+    public StudioView(Session session)
     {
+        _session = session;
         var stages = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(16, 12) };
         string[] names = ["1 SESSÃO", "2 EDIÇÃO", "3 SEPARAÇÃO", "4 MIXAGEM", "5 TRANSCRIÇÃO", "6 REVISÃO", "7 ENTREGA"];
         for (int i = 0; i < names.Length; i++)
@@ -284,8 +415,16 @@ public sealed class StudioView : DockPanel
         _loop.Click += (_, _) => ToggleLoop();
         var fit = new Button { Content = "ZOOM TOTAL", Height = 40 };
         fit.Click += (_, _) => _wave.Fit();
-        var score = new Button { Content = "SCORE (prévia do take cru)", Height = 40 };
-        score.Click += (_, _) => { if (_current is not null) ScorePreview?.Invoke(_current); };
+        var score = new Button { Content = "SCORE", Height = 40 };
+        score.Click += (_, _) => OpenScore();
+        _analyze.Click += (_, _) => Analyze();
+        _cancel.Click += (_, _) => _job?.Cancel();
+        var analysisRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 0, 0, 10),
+            Children = { new TextBlock { Text = "ANÁLISE", FontSize = 11, FontWeight = FontWeight.Bold, Foreground = Ui.Label, VerticalAlignment = VerticalAlignment.Center }, _mode, _analyze, _cancel, _progress, _analysis },
+        };
+        DockPanel.SetDock(analysisRow, Dock.Top);
         var transport = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { _play, _loop, fit, _time, score } };
         _time.VerticalAlignment = VerticalAlignment.Center;
         _time.Margin = new Thickness(12, 0);
@@ -300,12 +439,14 @@ public sealed class StudioView : DockPanel
         DockPanel.SetDock(_status, Dock.Bottom);
         center.Children.Add(head);
         center.Children.Add(transport);
+        center.Children.Add(analysisRow);
         center.Children.Add(_status);
         center.Children.Add(help);
         center.Children.Add(new Border { MinHeight = 200, Child = _wave });
         Children.Add(center);
 
-        if (_player is null) _status.Text = "núcleo nativo ausente: biblioteca sem reprodução";
+        if (_player is null) _status.Text = "núcleo nativo ausente: biblioteca sem reprodução nem análise";
+        _analyze.IsEnabled = _job is not null;
         ReloadLibrary();
     }
 
@@ -347,9 +488,73 @@ public sealed class StudioView : DockPanel
         _current = path;
         _player.Refresh();
         _title.Text = Path.GetFileName(path);
+        var (s, comp, fromTake) = StudioProject.SessionFor(path, _session);
+        _mode.SelectedIndex = (int)s.Mode;
+        _result = StudioProject.Cached(path, StudioProject.Options(s, comp));
+        _progress.Value = _result is null ? 0 : 1;
+        _analysis.Text = (fromTake ? "sessão do take" : "sessão da START") + (_result is null ? " · não analisado" : " · resultado em cache");
         _info.Text = err ?? $"{_player.Frames / (double)Math.Max(1, _player.Rate):0.00} s · {_player.Rate} Hz · {(_player.Channels == 1 ? "mono" : "estéreo")}";
         _status.Text = err is null ? "" : "não foi possível abrir: " + err;
         _wave.Fit();
+    }
+
+    Session AnalysisSession(out double comp)
+    {
+        var (s, c, _) = StudioProject.SessionFor(_current!, _session);
+        s.Mode = (AppMode)Math.Max(0, _mode.SelectedIndex);
+        comp = c;
+        return s;
+    }
+
+    public void AnalyzeCurrent() => Analyze();
+
+    void Analyze()
+    {
+        if (_job is null || _current is null || _running) return;
+        var s = AnalysisSession(out double comp);
+        var options = StudioProject.Options(s, comp);
+        if (StudioProject.Cached(_current, options) is { } cached) { _result = cached; _analysis.Text = "resultado em cache (mesmas opções)"; _progress.Value = 1; return; }
+        StudioProject.EnsureDir();
+        var err = _job.Start(s, comp, _current, StudioProject.ResultPath(_current));
+        if (err is not null) { _analysis.Text = "falhou: " + err; return; }
+        (_running, _jobOptions, _jobSource, _result) = (true, options, _current, null);
+        _analyze.IsEnabled = false;
+        _cancel.IsEnabled = true;
+        _analysis.Text = "analisando…";
+    }
+
+    void PollJob()
+    {
+        if (!_running || _job is null) return;
+        var (state, progress) = _job.Poll();
+        _progress.Value = progress;
+        if (state == StudioJob.State.Running) return;
+        _running = false;
+        _analyze.IsEnabled = true;
+        _cancel.IsEnabled = false;
+        if (state == StudioJob.State.Done && _jobSource is not null && _jobOptions is not null)
+        {
+            StudioProject.Save(_jobSource, _jobOptions);
+            if (_jobSource == _current) _result = StudioProject.ResultPath(_jobSource);
+            try
+            {
+                var t = Take.Load(StudioProject.ResultPath(_jobSource));
+                _analysis.Text = $"pronto · {t.Notes.Count} notas · {t.Chords.Count} acordes";
+            }
+            catch (Exception e) when (e is IOException or JsonException or KeyNotFoundException) { _analysis.Text = "pronto"; }
+        }
+        else _analysis.Text = state == StudioJob.State.Cancelled ? "cancelado" : "falhou: " + _job.Error;
+    }
+
+    public void ScoreCurrent() => OpenScore();
+
+    void OpenScore()
+    {
+        if (_current is null) return;
+        if (_result is not null) { ScoreRequested?.Invoke(_result); return; }
+        var sidecar = Path.ChangeExtension(_current, ".json");
+        if (File.Exists(sidecar)) ScoreRequested?.Invoke(sidecar);   // raw take preview
+        else _status.Text = "analise o arquivo primeiro (ANALISAR)";
     }
 
     /// Opens the first library item (screenshot tool, first visit).
@@ -378,6 +583,7 @@ public sealed class StudioView : DockPanel
     /// Animation tick from the window: cursor, time, button labels.
     public void Tick()
     {
+        PollJob();
         if (_player is null) return;
         _player.Refresh();
         _play.Content = _player.Playing ? "■  STOP" : "▶  PLAY";
@@ -387,5 +593,5 @@ public sealed class StudioView : DockPanel
         _wave.InvalidateVisual();
     }
 
-    public void Close() { _player?.Stop(); _player?.Dispose(); }
+    public void Close() { _player?.Stop(); _player?.Dispose(); _job?.Dispose(); }
 }

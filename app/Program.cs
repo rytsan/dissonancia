@@ -51,7 +51,7 @@ public sealed class MainWindow : Window
     readonly List<double> _taps = [];
     readonly TabControl _tabs = new();
     readonly TabItem _liveTab, _studioTab, _scoreTab;
-    readonly StudioView _studio = new();
+    readonly StudioView _studio;
     readonly RackView _rack;
     readonly StageView _stage = new();
     readonly TextBlock _scoreTitle = new() { FontWeight = FontWeight.Bold, Foreground = Ui.Label };
@@ -104,6 +104,8 @@ public sealed class MainWindow : Window
             ["Score"] = () => ShowScore(),
             ["Studio"] = () => _tabs.SelectedItem = _studioTab,
             ["StudioOpenFirst"] = () => _studio.OpenFirst(),
+            ["StudioAnalyze"] = () => _studio.AnalyzeCurrent(),
+            ["StudioScore"] = () => _studio.ScoreCurrent(),
             ["ScopeTrigger"] = ((ScopeModule)catalog[ModuleKind.Scope]).ToggleTrigger,
         };
         transport.RecPressed += _actions["Rec"];
@@ -113,7 +115,8 @@ public sealed class MainWindow : Window
 
         _liveTab = new TabItem { Header = "LIVE", Content = _rack };
         _scoreTab = new TabItem { Header = "SCORE", Content = BuildScoreTab() };
-        _studio.ScorePreview += wav => ShowScore(Path.ChangeExtension(wav, ".json"));
+        _studio = new StudioView(_session);
+        _studio.ScoreRequested += json => ShowScore(json);
         _studioTab = new TabItem { Header = "STUDIO", Content = _studio };
         _tabs.ItemsSource = new[]
         {
@@ -206,7 +209,14 @@ public sealed class MainWindow : Window
     }
 
     /// Screenshot tool entry: fill the frame at a fixed time without the animation loop.
-    public void Step(double now) { _source.Read(_frame, now); SyncRack(); foreach (var m in _modules) m.InvalidateVisual(); _rack.CountIn.InvalidateVisual(); }
+    public void Step(double now)
+    {
+        _source.Read(_frame, now);
+        SyncRack();
+        foreach (var m in _modules) m.InvalidateVisual();
+        _rack.CountIn.InvalidateVisual();
+        if (_tabs.SelectedItem == _studioTab) _studio.Tick();
+    }
     public void Action(string name) => _actions[name]();
     public void SelectTab(int index) => _tabs.SelectedIndex = index;
     public void SetMode(AppMode mode, Clef? clef) { _session.Mode = mode; _session.AutoClef = clef is null; _session.Clef = clef ?? Clef.Treble; }

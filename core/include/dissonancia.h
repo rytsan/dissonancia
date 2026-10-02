@@ -313,12 +313,23 @@ struct PlayerInfo {
     uint8_t playing, looping;          // bool
 };
 
+// ---------------------------------------------------------------- STUDIO offline analysis (studio-plan S1)
+
+enum class PostState : uint8_t { Idle, Running, Done, Failed, Cancelled };
+
+struct PostStatus {
+    float progress;                    // 0..1
+    PostState state;
+    uint8_t _pad0[3];
+};
+
 // ---------------------------------------------------------------- functions
 
 enum AnaResult : int32_t { ANA_OK = 0, ANA_ERR_STATE = -1, ANA_ERR_DEVICE = -2, ANA_ERR_ARG = -3, ANA_ERR_IO = -4 };
 
 struct AnalyzerHandle;
 struct PlayerHandle;
+struct PostHandle;
 
 extern "C" {
 ANA_API AnalyzerHandle* ana_create(void);
@@ -353,4 +364,13 @@ ANA_API void ana_player_seek(PlayerHandle* p, uint64_t frame);
 ANA_API void ana_player_set_loop(PlayerHandle* p, uint64_t startFrame, uint64_t endFrame);   // end <= start: off
 // min/max of the mono mix per column over [startFrame, endFrame), from a peak mipmap (any zoom).
 ANA_API int32_t ana_player_peaks(PlayerHandle* p, uint64_t startFrame, uint64_t endFrame, int32_t columns, float* minOut, float* maxOut);
+
+// STUDIO offline analysis: the whole file through session->mode's pipeline at session->quality on a
+// worker thread; the result is a take JSON at outJsonUtf8 (same schema as the REC sidecar).
+ANA_API PostHandle* ana_post_create(void);
+ANA_API void ana_post_destroy(PostHandle* h);   // cancels and joins a running job
+ANA_API const char* ana_post_last_error(PostHandle* h);
+ANA_API int32_t ana_post_start(PostHandle* h, const SessionConfig* session, double compensationSeconds, const char* inPathUtf8, const char* outJsonUtf8);
+ANA_API void ana_post_status(PostHandle* h, PostStatus* out);
+ANA_API void ana_post_cancel(PostHandle* h);
 }
