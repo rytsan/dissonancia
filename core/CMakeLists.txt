@@ -100,6 +100,36 @@ if(DZ_WITH_DEMUCS)
   target_link_libraries(dz_separate PRIVATE demucs_lib miniaudio)
 endif()
 
+# STUDIO S8 VST3 inserts (optional component, spec §20.2): the dz_plugin host helper the app runs
+# as its own process, and a test plugin. The VST3 SDK (MIT since 3.8.0) as its four pinned repos.
+option(DZ_WITH_VST3 "Build the VST3 host helper (dz_plugin) for STUDIO" ON)
+if(DZ_WITH_VST3)
+  include(FetchContent)
+  set(DZ_VST3_SDK ${CMAKE_BINARY_DIR}/vst3sdk)
+  foreach(part
+      "base;vst3_base;3d2e82f8e6bff59c1d8b7a27491a29c2286b5206;8f1d5f9ac0cd1e916ca3a196f5ee080ec4301b0b10a7ee7e564013f5d58b03cd"
+      "pluginterfaces;vst3_pluginterfaces;31d6eeba6daaa3e2a8bfbe3e7a90ca0b7fbfbc1c;7c9d19af0e81711edde34c3eb2e5e6d150ae1f449501bb5b352605b9590654d7"
+      "public.sdk;vst3_public_sdk;a3911a4615dabbfdfd9d181ee26b05c70c289a95;4cc8a9a57a970172b1efbef62025ae4f0656e132eed994f0e15ed19dfd9b0bb3"
+      "cmake;vst3_cmake;de6e54eeaaab35b7145f5c32c279b5e892146e04;ab4ce274563570fed11f2f0a31feb93280cd26543703f90c404a8720c1a486a5")
+    list(GET part 0 dir)
+    list(GET part 1 repo)
+    list(GET part 2 commit)
+    list(GET part 3 hash)
+    string(REPLACE "." "_" name "vst3_${dir}")
+    FetchContent_Declare(${name}
+      URL https://github.com/steinbergmedia/${repo}/archive/${commit}.tar.gz
+      URL_HASH SHA256=${hash}
+      SOURCE_DIR ${DZ_VST3_SDK}/${dir}
+      DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+    FetchContent_GetProperties(${name})
+    if(NOT ${name}_POPULATED)
+      FetchContent_Populate(${name})
+    endif()
+  endforeach()
+  set(SDK_ROOT ${DZ_VST3_SDK})
+  add_subdirectory(vst3)
+endif()
+
 # SCORE view (spec §20.4): Verovio, LGPL-3.0, stays a separate shared library loaded at run
 # time by the app; it is never linked into the core. Pinned source tarball, built once.
 option(DZ_WITH_VEROVIO "Build Verovio (LGPL-3.0) as a separate shared library for the SCORE view" ON)

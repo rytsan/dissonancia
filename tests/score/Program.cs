@@ -286,6 +286,25 @@ if (Verovio.TryCreate(out var vrvError) is { } vrv)
         }
 else Console.WriteLine("skip Verovio: " + vrvError);
 
+// S8: VST3 scanning through the out-of-process helper, against the core's test plugin.
+{
+    string build = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../core/build"));
+    PluginHost.HelperOverride = Path.Combine(build, OperatingSystem.IsWindows() ? "dz_plugin.exe" : "dz_plugin");
+    if (!PluginHost.Present) Console.WriteLine("skip VST3 scan: core built without DZ_WITH_VST3");
+    else
+    {
+        string cache = Path.Combine(Path.GetTempPath(), $"dz_plugins_{Environment.ProcessId}.json");
+        PluginHost.CacheOverride = cache;
+        Environment.SetEnvironmentVariable("DISSONANCIA_VST3_PATH", Path.Combine(build, "VST3"));
+        var scan = PluginHost.ScanAsync().Result;
+        var gain = scan.SelectMany(e => e.Plugins).FirstOrDefault(p => p.Name == "DZ Test Gain");
+        Check(gain is { Vendor: "Dissonancia", Cid: "6F1A3C214D2B47E89A1C5B3E7D0E2F41" }, "VST3 scan finds the test plugin out of process");
+        var again = PluginHost.ScanAsync().Result;   // unchanged bundles come from the cache
+        Check(again.Count == scan.Count && File.Exists(cache), "VST3 second scan agrees (unchanged bundles from the cache)");
+        File.Delete(cache);
+    }
+}
+
 Console.WriteLine(failures == 0 ? "all checks passed" : $"{failures} FAILED");
 return failures == 0 ? 0 : 1;
 

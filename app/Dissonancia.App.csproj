@@ -31,6 +31,12 @@
           Link="verovio-data/%(RecursiveDir)%(Filename)%(Extension)" Visible="false" />
   </ItemGroup>
 
+  <!-- VST3 host helper (STUDIO S8, optional): plugins run in their own process. -->
+  <ItemGroup>
+    <None Include="../core/build/dz_plugi?;../core/build/dz_plugin.ex?" CopyToOutputDirectory="PreserveNewest"
+          Link="%(Filename)%(Extension)" Visible="false" />
+  </ItemGroup>
+
   <!-- Demucs separation helper (STUDIO S3, optional): run as its own process; weights downloaded on demand. -->
   <ItemGroup>
     <!-- Wildcards so a build without the helper simply copies nothing. -->

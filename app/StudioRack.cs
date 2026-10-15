@@ -484,6 +484,30 @@ public sealed class StudioState
 
     public void Cancel() { _queue.Clear(); Job?.Cancel(); _sep?.Cancel(); _install?.Cancel(); }
 
+    // ---------------------------------------------------------------- S8 VST3 plugins
+
+    public List<PluginHost.Entry> PluginScan = PluginHost.Cached();
+    public IEnumerable<PluginHost.Plugin> Plugins => PluginScan.SelectMany(e => e.Plugins).OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase);
+    public bool ScanningPlugins;
+    public bool PluginView;   // the library shows the installed effects instead of the takes
+
+    public async void ScanPlugins()
+    {
+        if (!PluginHost.Present || ScanningPlugins) return;
+        ScanningPlugins = true;
+        Status = "procurando plugins VST3…";
+        Changed?.Invoke();
+        try
+        {
+            PluginScan = await PluginHost.ScanAsync((d, n) => Avalonia.Threading.Dispatcher.UIThread.Post(() => { Status = $"procurando plugins VST3… {d}/{n}"; Changed?.Invoke(); }));
+            int bad = PluginScan.Count(e => e.Error is not null);
+            Status = $"VST3: {Plugins.Count()} efeitos em {PluginScan.Count} pacotes" + (bad > 0 ? $" · {bad} com erro" : "");
+        }
+        catch (Exception e) when (e is IOException or System.ComponentModel.Win32Exception or InvalidOperationException) { Status = "VST3: " + e.Message; }
+        ScanningPlugins = false;
+        Changed?.Invoke();
+    }
+
     // ---------------------------------------------------------------- recording in STUDIO
     // The core's recorder (the same as LIVE's REC: input, count-in and metronome from START, a
     // take WAV + JSON sidecar in the takes folder); the take opens here when it is written.
@@ -913,10 +937,15 @@ public sealed class LibraryUnit : StudioUnit
 
     protected override void DrawContent(DrawingContext ctx, Rect r)
     {
-        var screen = new Rect(r.X, r.Y + 4, r.Width, r.Height - 52);
+        var screen = new Rect(r.X, r.Y + 4, r.Width, r.Height - 90);
         ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF0B0C0D)), null, screen.Inflate(3), 4, 4);
         ctx.DrawRectangle(PhosphorBg, null, screen, 2, 2);
         _rows.Clear();
+        int nPlugins = S.Plugins.Count();
+        Key(ctx, new Rect(r.X, r.Bottom - 76, r.Width, 30), S.PluginView ? "◀ TAKES" : $"EFEITOS VST3 · {nPlugins}", () => { S.PluginView = !S.PluginView; _scroll = 0; InvalidateVisual(); }, S.PluginView, Ui.Amber, PluginHost.Present || nPlugins > 0);
+        Key(ctx, new Rect(r.X, r.Bottom - 38, r.Width / 2 - 4, 32), "IMPORTAR", () => _ = ImportAsync(), false, null, !S.PluginView);
+        Key(ctx, new Rect(r.X + r.Width / 2 + 4, r.Bottom - 38, r.Width / 2 - 4, 32), "ATUALIZAR", () => { if (S.PluginView) S.ScanPlugins(); else S.ReloadLibrary(); InvalidateVisual(); });
+        if (S.PluginView) { DrawPlugins(ctx, screen); return; }
         double y = screen.Y + 6;
         string? group = null;
         foreach (var it in S.Library.Skip(_scroll))
@@ -932,8 +961,26 @@ public sealed class LibraryUnit : StudioUnit
             _rows.Add((row, it));
             y += 18;
         }
-        Key(ctx, new Rect(r.X, r.Bottom - 38, r.Width / 2 - 4, 32), "IMPORTAR", () => _ = ImportAsync());
-        Key(ctx, new Rect(r.X + r.Width / 2 + 4, r.Bottom - 38, r.Width / 2 - 4, 32), "ATUALIZAR", () => { S.ReloadLibrary(); InvalidateVisual(); });
+    }
+
+    /// The installed VST3 effects, by name; a bundle the scan could not read shows its error.
+    void DrawPlugins(DrawingContext ctx, Rect screen)
+    {
+        double y = screen.Y + 6;
+        Ui.Text(ctx, "▸ EFEITOS VST3", screen.X + 8, y, 9, PhosphorDim, Ui.Mono);
+        y += 16;
+        if (!PluginHost.Present) { Ui.Text(ctx, "host VST3 ausente nesta instalação", screen.X + 14, y, 9, PhosphorDim, Ui.Mono); return; }
+        var items = S.Plugins.Select(p => (Name: p.Name, Detail: p.Vendor, Error: false))
+            .Concat(S.PluginScan.Where(e => e.Error is not null).Select(e => (Name: Path.GetFileNameWithoutExtension(e.Bundle), Detail: e.Error!, Error: true))).Skip(_scroll);
+        if (S.ScanningPlugins) { Ui.Text(ctx, "procurando…", screen.X + 14, y, 10, Phosphor, Ui.Mono); y += 18; }
+        else if (!S.PluginScan.Any()) Ui.Text(ctx, "nenhum plugin: ATUALIZAR procura", screen.X + 14, y, 9, PhosphorDim, Ui.Mono);
+        foreach (var (name, detail, error) in items)
+        {
+            if (y > screen.Bottom - 30) break;
+            Ui.Text(ctx, name.Length > 26 ? name[..26] : name, screen.X + 14, y, 10, error ? Ui.Amber : Phosphor, Ui.Mono);
+            Ui.Text(ctx, detail.Length > 34 ? detail[..34] : detail, screen.X + 14, y + 13, 8, PhosphorDim, Ui.Mono);
+            y += 30;
+        }
     }
 
     protected override void Pressed(PointerPressedEventArgs e, Point p)
@@ -1574,6 +1621,7 @@ public sealed class StudioView : DockPanel
         Children.Add(new ScrollViewer { Content = body, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled });
         _s.Changed += Refresh;
         if (_s.Player is null) _s.Status = "núcleo nativo ausente: biblioteca sem reprodução nem análise";
+        _s.ScanPlugins();   // only bundles changed since the cache are scanned again
     }
 
     readonly StudioUnit _recorder, _console, _library;
@@ -1592,6 +1640,7 @@ public sealed class StudioView : DockPanel
     public void ShowConsole(bool on) { _s.ConsoleView = on; Refresh(); }
     public StudioState.InputHooks? Input { set => _s.Input = value; }
     public void ToggleRec() { _s.ToggleRec(); Refresh(); }
+    public void ShowPlugins() { _s.PluginView = true; Refresh(); }
     public void SelectChannel(int track) { _s.Selected = Math.Clamp(track, 0, _s.Tracks - 1); Refresh(); }
 
     public void TogglePlay() => _s.TogglePlay();

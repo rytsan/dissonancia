@@ -108,6 +108,7 @@ public sealed class MainWindow : Window
             ["StudioSeparate"] = () => _studio.SeparateCurrent(),
             ["StudioTick"] = () => _studio.Tick(),
             ["StudioRec"] = () => _studio.ToggleRec(),
+            ["StudioPlugins"] = () => _studio.ShowPlugins(),
             ["StudioConsole"] = () => _studio.ShowConsole(true),
             ["StudioPick"] = () => _studio.ReviewAction("pick"),
             ["StudioFixRoot"] = () => _studio.ReviewAction("root"),

@@ -179,8 +179,21 @@ this order because each stage needs the one before it, as in a studio.
   channel + tempo map), JSON (full result with confidences), text chart,
   WAV bounce of the mix and of each stem.
 
+### S8 — VST3 inserts, out-of-process host (spec M11, §20.2) — in progress
+- SDK: VST3 SDK 3.8.0 (MIT), its four repos (base, pluginterfaces, public.sdk, cmake) as
+  pinned tarballs; only the SDK libraries are built (no VSTGUI, no examples). Optional
+  component `DZ_WITH_VST3`: the `dz_plugin` helper ships next to the app when built.
+- Step 1 (done 2026-10-15) — scanning: `dz_plugin list` (standard VST3 folders +
+  `DISSONANCIA_VST3_PATH`), `dz_plugin scan <bundle>` one process per bundle (15 s timeout, a
+  crash loses only that bundle), cache by modification time in the app data folder. DS-L shows
+  EFEITOS VST3 (name, vendor; bundles that failed show their error). Test fixture: the core's
+  own `DZ Test Gain` plugin (gain parameter, state), never installed into the user's folders.
+- Step 2 — audio: the host renders a take offline through one plugin (kOffline, fixed block).
+- Step 3 — the pedal in DS-C: a VST3 unit in the chain with footswitch, cables and state saved
+  in the take project (in the tap's cache key).
+- Step 4 — the plugin's editor in its own window; latency and tail compensation.
+
 ### Later
-- S8: VST3 inserts, out-of-process host (spec M11, §20.2).
 - S9: choir by section, SATB (spec M9, §21) — experimental.
 
 ## How precision is measured
