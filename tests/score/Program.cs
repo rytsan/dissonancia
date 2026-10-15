@@ -322,6 +322,10 @@ else Console.WriteLine("skip Verovio: " + vrvError);
             var dl = ReadWav(Path.Combine(tmp, "d.wav"));
             bool aligned = dl.Length == 2 * sine.Length && Enumerable.Range(0, sine.Length).All(i => Math.Abs(dl[2 * i] - sine[i]) < 1e-6);
             Check(e4 is null && aligned, "VST3 latency: a 64-sample look-ahead plugin renders aligned with the take");
+            // Parameters as the controller has them after the state (the +6 dB state from the first render).
+            var ps = PluginHost.ParamsAsync(gain, Path.Combine(tmp, "state.bin")).Result;
+            Check(ps.Count == 2 && ps[0] is { Title: "Gain", Units: "dB", Editable: true } && Math.Abs(ps[0].Value - 0.625) < 1e-9 && ps[1] is { Steps: 1, Value: 0 },
+                "VST3 params: titles, units, steps and the values of the saved state");
             string? e3 = PluginHost.RenderAsync(gain with { Cid = "00000000000000000000000000000000" }, Path.Combine(tmp, "in.wav"), Path.Combine(tmp, "c.wav"), null, null).Result;
             Check(e3 is not null && e3.Contains("no class"), "VST3 render: a wrong plugin is an error, not a crash");
             Directory.Delete(tmp, true);

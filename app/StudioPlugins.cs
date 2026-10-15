@@ -79,6 +79,33 @@ public static class PluginHost
         return err.Length > 0 ? err : $"o plugin terminou com código {p.ExitCode}";   // a crash ends here, not in the app
     }
 
+    public sealed record Param(uint Id, string Title, string Units, double Default, double Value, int Steps, int Flags, string Text)
+    {
+        /// What a generic panel shows: not read-only, hidden, program change or the bypass switch.
+        public bool Editable => (Flags & (2 | 16 | 32768 | 65536)) == 0;
+    }
+
+    /// The plugin's parameters as its controller has them after the state.
+    public static async Task<List<Param>> ParamsAsync(Plugin plugin, string? stateIn, CancellationToken ct = default)
+    {
+        var args = new List<string> { "params", plugin.Bundle, plugin.Cid };
+        if (stateIn is not null && File.Exists(stateIn)) args.AddRange(["--state-in", stateIn]);
+        var (code, o, e) = await Run(ct, [.. args]);
+        if (code != 0) throw new IOException(e.Trim().Length > 0 ? e.Trim() : $"código {code}");
+        var list = new List<Param>();
+        foreach (var line in o.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            try
+            {
+                using var d = JsonDocument.Parse(line);
+                var r = d.RootElement;
+                list.Add(new Param(r.GetProperty("id").GetUInt32(), r.GetProperty("title").GetString() ?? "", r.GetProperty("units").GetString() ?? "",
+                    r.GetProperty("default").GetDouble(), r.GetProperty("value").GetDouble(), r.GetProperty("steps").GetInt32(), r.GetProperty("flags").GetInt32(),
+                    r.GetProperty("text").GetString() ?? ""));
+            }
+            catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException) { }
+        return list;
+    }
+
     public static List<Entry> Cached()
     {
         try { return File.Exists(CachePath) ? JsonSerializer.Deserialize<List<Entry>>(File.ReadAllText(CachePath)) ?? [] : []; }

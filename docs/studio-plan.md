@@ -205,8 +205,12 @@ this order because each stage needs the one before it, as in a studio.
   parameters are in, runs that many frames past the end and drops them from the start, so the
   render lines up with the take sample for sample (checked with DZ Test Gain's 64-sample
   look-ahead switch). Tails past the end are cut: a channel keeps the take's length.
-- Step 4 — parameters and editor: a generic parameter panel in the rack (any plugin), and the
-  plugin's own editor in a native window owned by the helper.
+- Step 4 — parameters (done 2026-10-15): `dz_plugin params` lists the controller's parameters
+  after the state (title, units, steps, value, text); a click on an insert's name in DV-0 opens
+  them as knobs where the analyser sits (eight a page; read-only, hidden, program and bypass
+  parameters left out). A change is kept in the take project and rendered 0.7 s after the last
+  one (the values are applied over the state at every render and are part of the render key).
+- Step 4 — editor: the plugin's own editor in a native window owned by the helper.
 
 ### Later
 - S9: choir by section, SATB (spec M9, §21) — experimental.

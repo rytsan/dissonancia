@@ -142,6 +142,8 @@ public sealed class VstInsert
     public string Name { get; set; } = "";
     public string Vendor { get; set; } = "";
     public bool On { get; set; } = true;
+    /// Values set in the rack's panel, applied over the state at every render.
+    public Dictionary<uint, double> Params { get; set; } = [];
     [System.Text.Json.Serialization.JsonIgnore] public PluginHost.Plugin Plugin => new(Bundle, Cid, Name, Vendor, "", "");
 }
 

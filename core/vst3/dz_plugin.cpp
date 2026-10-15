@@ -10,6 +10,9 @@
 //                                    fixed block), the plugin's latency compensated (its first
 //                                    samples dropped, the input padded); "progress x" lines on stdout; the plugin's state
 //                                    is restored from / saved to its own binary blob
+//   dz_plugin params <bundle.vst3> <cid> [--state-in f]
+//                                 -> one JSON line per parameter, as the controller has it after
+//                                    the state: {"id","title","units","default","value","steps","flags","text"}
 // The app runs one scan per bundle (a crashing bundle loses only itself) and caches the result.
 #include "miniaudio.h"
 #include "pluginterfaces/vst/ivstaudioprocessor.h"
@@ -76,6 +79,70 @@ using namespace Steinberg::Vst;
 
 int fail(const std::string& what) { std::fprintf(stderr, "%s\n", what.c_str()); return 3; }
 
+std::string utf8(const String128 s) {
+    std::string o;
+    for (int i = 0; i < 128 && s[i]; i++) {
+        const char16_t c = char16_t(s[i]);
+        if (c < 0x80) o += char(c);
+        else if (c < 0x800) { o += char(0xC0 | (c >> 6)); o += char(0x80 | (c & 0x3F)); }
+        else { o += char(0xE0 | (c >> 12)); o += char(0x80 | ((c >> 6) & 0x3F)); o += char(0x80 | (c & 0x3F)); }
+    }
+    return o;
+}
+
+// The plugin loaded and initialized, its state restored (shared by render and params).
+struct Loaded {
+    std::shared_ptr<VST3::Hosting::Module> module;
+    IPtr<PlugProvider> provider;
+    IPtr<IComponent> component;
+    IPtr<IEditController> controller;
+};
+
+int load(const std::string& bundle, const std::string& cid, const std::string& stateIn, Loaded& out) {
+    std::string error;
+    out.module = VST3::Hosting::Module::create(bundle, error);
+    if (!out.module) return fail(error);
+    auto factory = out.module->getFactory();
+    auto classes = factory.classInfos();
+    auto info = std::find_if(classes.begin(), classes.end(), [&](auto& c) { return c.ID().toString() == cid; });
+    if (info == classes.end()) return fail("no class " + cid + " in " + bundle);
+    static IPtr<HostApplication> host = owned(new HostApplication);
+    PluginContextFactory::instance().setPluginContext(host);
+    out.provider = owned(new PlugProvider(factory, *info, true));
+    if (!out.provider->initialize()) return fail("the plugin did not initialize");
+    out.component = out.provider->getComponentPtr();
+    out.controller = out.provider->getControllerPtr();
+    if (!stateIn.empty()) {
+        std::ifstream f(stateIn, std::ios::binary);
+        std::vector<char> bytes((std::istreambuf_iterator<char>(f)), {});
+        if (!bytes.empty()) {
+            auto ms = owned(new MemoryStream(bytes.data(), TSize(bytes.size())));
+            if (out.component->setState(ms) != kResultOk) return fail("the plugin refused its state");
+            int64 pos;
+            ms->seek(0, IBStream::kIBSeekSet, &pos);
+            if (out.controller) out.controller->setComponentState(ms);
+        }
+    }
+    return 0;
+}
+
+int params(int argc, char** argv) {
+    std::string stateIn = argc > 5 && std::string(argv[4]) == "--state-in" ? argv[5] : "";
+    Loaded p;
+    if (int r = load(argv[2], argv[3], stateIn, p)) return r;
+    if (!p.controller) return fail("the plugin has no controller");
+    for (int32 i = 0; i < p.controller->getParameterCount(); i++) {
+        ParameterInfo pi{};
+        if (p.controller->getParameterInfo(i, pi) != kResultOk) continue;
+        const ParamValue v = p.controller->getParamNormalized(pi.id);
+        String128 text{};
+        p.controller->getParamStringByValue(pi.id, v, text);
+        std::printf("{\"id\":%u,\"title\":%s,\"units\":%s,\"default\":%.9g,\"value\":%.9g,\"steps\":%d,\"flags\":%d,\"text\":%s}\n", pi.id,
+                    json(utf8(pi.title)).c_str(), json(utf8(pi.units)).c_str(), pi.defaultNormalizedValue, v, pi.stepCount, pi.flags, json(utf8(text)).c_str());
+    }
+    return 0;
+}
+
 int render(int argc, char** argv) {
     const std::string bundle = argv[2], cid = argv[3], inPath = argv[4], outPath = argv[5];
     std::string stateIn, stateOut;
@@ -106,31 +173,12 @@ int render(int argc, char** argv) {
     const size_t frames = in.size() / std::max<uint32_t>(1, fileCh);
 
     // The plugin: component + controller (connected), as the SDK's hosts do.
-    std::string error;
-    auto module = VST3::Hosting::Module::create(bundle, error);
-    if (!module) return fail(error);
-    auto factory = module->getFactory();
-    auto classes = factory.classInfos();
-    auto info = std::find_if(classes.begin(), classes.end(), [&](auto& c) { return c.ID().toString() == cid; });
-    if (info == classes.end()) return fail("no class " + cid + " in " + bundle);
-    static IPtr<HostApplication> host = owned(new HostApplication);
-    PluginContextFactory::instance().setPluginContext(host);
-    auto provider = owned(new PlugProvider(factory, *info, true));
-    if (!provider->initialize()) return fail("the plugin did not initialize");
-    auto component = provider->getComponentPtr();
-    auto controller = provider->getControllerPtr();
+    Loaded loaded;
+    if (int r = load(bundle, cid, stateIn, loaded)) return r;
+    auto component = loaded.component;
+    auto controller = loaded.controller;
     FUnknownPtr<IAudioProcessor> proc(component);
     if (!proc) return fail("not an audio processor");
-
-    if (!stateIn.empty()) {
-        std::ifstream f(stateIn, std::ios::binary);
-        std::vector<char> bytes((std::istreambuf_iterator<char>(f)), {});
-        auto ms = owned(new MemoryStream(bytes.data(), TSize(bytes.size())));
-        if (component->setState(ms) != kResultOk) return fail("the plugin refused its state");
-        int64 pos;
-        ms->seek(0, IBStream::kIBSeekSet, &pos);
-        if (controller) controller->setComponentState(ms);
-    }
 
     // Main buses: stereo if the plugin takes it, else its own channel counts.
     SpeakerArrangement st = SpeakerArr::kStereo;
@@ -207,6 +255,7 @@ int main(int argc, char** argv) {
     if (cmd == "list") return list();
     if (cmd == "scan" && argc > 2) return scan(argv[2]);
     if (cmd == "render" && argc > 5) return render(argc, argv);
+    if (cmd == "params" && argc > 3) return params(argc, argv);
     std::fprintf(stderr, "usage: dz_plugin list | scan <bundle.vst3> | render <bundle.vst3> <cid> <in.wav> <out.wav> [options]\n");
     return 1;
 }

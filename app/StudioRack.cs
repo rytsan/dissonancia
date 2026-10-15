@@ -526,7 +526,8 @@ public sealed class StudioState
         return src + "|" + string.Join("|", Channel(t).Vst.Where(v => v.On).Select(v =>
         {
             string st = StudioProject.VstStatePath(Current!, v.Id);
-            return v.Cid + ":" + (File.Exists(st) ? Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(st)))[..16] : "-");
+            return v.Cid + ":" + (File.Exists(st) ? Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(st)))[..16] : "-")
+                + ":" + string.Join(",", v.Params.OrderBy(p => p.Key).Select(p => FormattableString.Invariant($"{p.Key}={p.Value:R}")));
         }));
     }
 
@@ -544,6 +545,7 @@ public sealed class StudioState
     {
         if (Current is null) return;
         Channel(track).Vst.Remove(v);
+        if (OpenVst == v) OpenVst = null;
         try { File.Delete(StudioProject.VstStatePath(Current, v.Id)); } catch (IOException) { }
         StudioProject.SaveMix(Current, Mix);
         ApplyVst();
@@ -587,7 +589,7 @@ public sealed class StudioState
                 int k = i;
                 VstWhat = $"{on[i].Name} · canal {t + 1}";
                 err = await PluginHost.RenderAsync(on[i].Plugin, cur, next, StudioProject.VstStatePath(take, on[i].Id), StudioProject.VstStatePath(take, on[i].Id),
-                    null, f => Avalonia.Threading.Dispatcher.UIThread.Post(() => { VstProgress = (k + f) / on.Count; Changed?.Invoke(); }), cts.Token);
+                    on[i].Params, f => Avalonia.Threading.Dispatcher.UIThread.Post(() => { VstProgress = (k + f) / on.Count; Changed?.Invoke(); }), cts.Token);
                 if (cur != src) File.Delete(cur);
                 cur = next;
             }
@@ -610,6 +612,47 @@ public sealed class StudioState
         RenderingVst = false;
         VstProgress = 0;
         if (changed) { RefreshResult(); Changed?.Invoke(); }
+        if (OpenVst is { } ov) await LoadParams(ov);   // the texts as the plugin now has them
+    }
+
+    // The generic parameter panel of one insert (any plugin, no editor needed).
+    public VstInsert? OpenVst;
+    public List<PluginHost.Param> OpenParams = [];
+    public int ParamPage;
+    Avalonia.Threading.DispatcherTimer? _paramTimer;
+
+    public async void OpenPanel(VstInsert? v)
+    {
+        OpenVst = v;
+        OpenParams = [];
+        ParamPage = 0;
+        Changed?.Invoke();
+        if (v is not null) await LoadParams(v);
+    }
+
+    async Task LoadParams(VstInsert v)
+    {
+        if (Current is null) return;
+        try
+        {
+            var ps = await PluginHost.ParamsAsync(v.Plugin, StudioProject.VstStatePath(Current, v.Id));
+            if (OpenVst == v) { OpenParams = ps.Where(p => p.Editable).ToList(); Changed?.Invoke(); }
+        }
+        catch (IOException e) { Status = $"VST3 {v.Name}: {e.Message}"; Changed?.Invoke(); }
+    }
+
+    /// A knob in the panel: the value now, the render 0.7 s after the last change.
+    public void SetParam(VstInsert v, PluginHost.Param p, double value)
+    {
+        if (Current is null) return;
+        if (p.Steps > 0) value = Math.Round(value * p.Steps) / p.Steps;
+        v.Params[p.Id] = value;
+        int i = OpenParams.IndexOf(p);
+        if (i >= 0) OpenParams[i] = p with { Value = value, Text = "" };
+        StudioProject.SaveMix(Current, Mix);
+        _paramTimer ??= new Avalonia.Threading.DispatcherTimer(TimeSpan.FromMilliseconds(700), Avalonia.Threading.DispatcherPriority.Background, (_, _) => { _paramTimer!.Stop(); ApplyVst(); });
+        _paramTimer.Stop();
+        _paramTimer.Start();
     }
 
     // ---------------------------------------------------------------- recording in STUDIO
@@ -1416,12 +1459,39 @@ public sealed class ChainUnit : StudioUnit
 {
     public ChainUnit(StudioState s) : base(s, "DS-C", "CADEIA DO CANAL") { Height = 262; }
 
-    readonly List<(Rect R, VstInsert V)> _vstRows = [];
+    readonly List<(Rect R, VstInsert V)> _vstRows = [], _vstOpen = [];
 
     protected override void Pressed(PointerPressedEventArgs e, Point p)
     {
         foreach (var (r, v) in _vstRows)
-            if (r.Contains(p) && !S.RenderingVst) { S.ToggleVst(v); return; }   // a click on the slot: bypass / on
+            if (r.Contains(p) && !S.RenderingVst) { S.ToggleVst(v); return; }
+        foreach (var (r, v) in _vstOpen)
+            if (r.Contains(p)) { S.OpenPanel(S.OpenVst == v ? null : v); return; }
+    }
+
+    /// The open insert's parameters as knobs, eight a page, where the analyser sits.
+    void DrawParams(DrawingContext ctx, Rect an, VstInsert v)
+    {
+        DrawDevice(ctx, an, "DV-0", v.Name.Length > 22 ? v.Name[..22] : v.Name, v.On);
+        var ps = S.OpenParams;
+        int pages = Math.Max(1, (ps.Count + 7) / 8);
+        S.ParamPage = Math.Clamp(S.ParamPage, 0, pages - 1);
+        Key(ctx, new Rect(an.X + 12, an.Y + 24, 28, 22), "◀", () => S.ParamPage--, false, null, S.ParamPage > 0, withLed: false);
+        Key(ctx, new Rect(an.X + 44, an.Y + 24, 28, 22), "▶", () => S.ParamPage++, false, null, S.ParamPage < pages - 1, withLed: false);
+        Ui.Text(ctx, ps.Count == 0 ? "lendo…" : $"{ps.Count} parâm. · {S.ParamPage + 1}/{pages}", an.X + 80, an.Y + 29, 8, Ui.Label, Ui.Mono);
+        Key(ctx, new Rect(an.Right - 76, an.Y + 24, 64, 22), "FECHAR", () => S.OpenPanel(null), false, null, true, withLed: false);
+        double cw = (an.Width - 24) / 4;
+        foreach (var (p, i) in ps.Skip(S.ParamPage * 8).Take(8).Select((p, i) => (p, i)))
+        {
+            var c = new Point(an.X + 12 + cw * (i % 4 + 0.5), an.Y + 78 + (i / 4) * 66);
+            double value = v.Params.TryGetValue(p.Id, out var set) ? set : p.Value;
+            string text = p.Text.Length > 0 ? p.Text : p.Steps > 0 ? $"{Math.Round(value * p.Steps):0}" : $"{value * 100:0} %";
+            string title = p.Title.Length > 10 ? p.Title[..10] : p.Title;
+            var param = p;
+            Knob(ctx, c, 13, title.ToUpperInvariant(), (text + (p.Units.Length > 0 && p.Text.Length > 0 ? " " + p.Units : "")) is var t && t.Length > 12 ? t[..12] : t, value,
+                n => S.SetParam(v, param, n), v.On);
+        }
+        if (S.RenderingVst) Ui.Text(ctx, $"renderizando {S.VstProgress * 100:0} %", an.X + 14, an.Bottom - 16, 8, Ui.Amber, Ui.Mono);
     }
 
     static string Hz(double f) => f >= 1000 ? $"{f / 1000:0.#}k" : $"{f:0}";
@@ -1459,6 +1529,7 @@ public sealed class ChainUnit : StudioUnit
         Patch(ctx, new Point(inPlate.Center.X, inPlate.Center.Y + 6), new Point(x, y + h / 2), Lv(0), 14);
         DrawDevice(ctx, box, "DV-0", "VST3", vstOn);
         _vstRows.Clear();
+        _vstOpen.Clear();
         double vy = box.Y + 24;
         foreach (var v in c.Vst)
         {
@@ -1467,7 +1538,9 @@ public sealed class ChainUnit : StudioUnit
             Ui.Led(ctx, new Point(row.X + 8, row.Center.Y), 3, v.On, Ui.Red, Ui.RedOff);
             Ui.Text(ctx, v.Name.Length > 13 ? v.Name[..13] : v.Name, row.X + 15, row.Y + 5, 8, v.On ? Ui.LabelBright : Ui.Label, Ui.Mono);
             Key(ctx, new Rect(row.Right - 17, row.Y + 3, 15, 16), "✕", () => S.RemoveVst(sel, v), false, Ui.Red, !S.RenderingVst, withLed: false);
-            _vstRows.Add((new Rect(row.X, row.Y, row.Width - 20, row.Height), v));
+            _vstRows.Add((new Rect(row.X, row.Y, 14, row.Height), v));   // the LED: on / bypass
+            _vstOpen.Add((new Rect(row.X + 14, row.Y, row.Width - 34, row.Height), v));   // the name: its parameters
+            if (S.OpenVst == v) ctx.DrawRectangle(null, new ImmutablePen((IImmutableBrush)Ui.Amber, 1.2), row, 2, 2);
             vy += 26;
         }
         if (c.Vst.Count == 0) Ui.Text(ctx, PluginHost.Present ? "sem plugins" : "host ausente", box.Center.X, vy + 4, 8, Ui.Label, Ui.Mono, Ui.Align.Center);
@@ -1553,6 +1626,7 @@ public sealed class ChainUnit : StudioUnit
         if (an0.Length > 0) Patch(ctx, tap, new Point(x, box.Center.Y), Lv(5), 0, send: true);
 
         var an = new Rect(x, y, r.Right - x, h);
+        if (S.OpenVst is { } ov && c.Vst.Contains(ov)) { DrawParams(ctx, an, ov); return; }
         DrawDevice(ctx, an, an0.Length > 0 ? string.Join(" ", an0) : "DA", an0.Length > 0 ? "ANALISADOR · ENVIO PRÉ-FADER" : "ANALISADOR · canal sem análise", an0.Length > 0);
         string mode = S.Mode switch
         {
@@ -1790,6 +1864,7 @@ public sealed class StudioView : DockPanel
     public void ToggleRec() { _s.ToggleRec(); Refresh(); }
     public void ShowPlugins() { _s.PluginView = true; Refresh(); }
     public void AddFirstPlugin() { if (_s.Plugins.FirstOrDefault() is { } p) _s.AddVst(p); Refresh(); }
+    public void OpenFirstInsert() { if (_s.Channel(_s.Selected).Vst.FirstOrDefault() is { } v) _s.OpenPanel(v); Refresh(); }
     public void SelectChannel(int track) { _s.Selected = Math.Clamp(track, 0, _s.Tracks - 1); Refresh(); }
 
     public void TogglePlay() => _s.TogglePlay();
