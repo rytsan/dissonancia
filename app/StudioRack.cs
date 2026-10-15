@@ -641,6 +641,25 @@ public sealed class StudioState
         catch (IOException e) { Status = $"VST3 {v.Name}: {e.Message}"; Changed?.Invoke(); }
     }
 
+    public bool EditorOpen;
+
+    /// The plugin's own editor (a window of the helper); its edits join the panel's values.
+    public async void OpenEditor(VstInsert v)
+    {
+        if (Current is null || EditorOpen) return;
+        EditorOpen = true;
+        Status = $"editor de {v.Name} aberto: feche a janela dele para aplicar";
+        Changed?.Invoke();
+        string take = Current;
+        var r = await PluginHost.EditorAsync(v.Plugin, StudioProject.VstStatePath(take, v.Id), v.Params);
+        EditorOpen = false;
+        if (Current != take) return;
+        foreach (var (id, val) in r.Edits) v.Params[id] = val;
+        Status = r.Error is null ? $"{v.Name}: {r.Edits.Count} parâmetro(s) editado(s)" : $"VST3 {v.Name}: {r.Error}";
+        StudioProject.SaveMix(take, Mix);
+        ApplyVst();   // the state changed: a new render, then the panel reads it back
+    }
+
     /// A knob in the panel: the value now, the render 0.7 s after the last change.
     public void SetParam(VstInsert v, PluginHost.Param p, double value)
     {
@@ -1478,8 +1497,9 @@ public sealed class ChainUnit : StudioUnit
         S.ParamPage = Math.Clamp(S.ParamPage, 0, pages - 1);
         Key(ctx, new Rect(an.X + 12, an.Y + 24, 28, 22), "◀", () => S.ParamPage--, false, null, S.ParamPage > 0, withLed: false);
         Key(ctx, new Rect(an.X + 44, an.Y + 24, 28, 22), "▶", () => S.ParamPage++, false, null, S.ParamPage < pages - 1, withLed: false);
-        Ui.Text(ctx, ps.Count == 0 ? "lendo…" : $"{ps.Count} parâm. · {S.ParamPage + 1}/{pages}", an.X + 80, an.Y + 29, 8, Ui.Label, Ui.Mono);
-        Key(ctx, new Rect(an.Right - 76, an.Y + 24, 64, 22), "FECHAR", () => S.OpenPanel(null), false, null, true, withLed: false);
+        Ui.Text(ctx, ps.Count == 0 ? "lendo…" : pages > 1 ? $"{S.ParamPage + 1}/{pages}" : "", an.X + 80, an.Y + 29, 8, Ui.Label, Ui.Mono);
+        Key(ctx, new Rect(an.Right - 146, an.Y + 24, 66, 22), "EDITOR", () => S.OpenEditor(v), S.EditorOpen, Ui.Amber, !S.EditorOpen && !S.RenderingVst);
+        Key(ctx, new Rect(an.Right - 76, an.Y + 24, 64, 22), "FECHAR", () => S.OpenPanel(null), false, null, !S.EditorOpen, withLed: false);
         double cw = (an.Width - 24) / 4;
         foreach (var (p, i) in ps.Skip(S.ParamPage * 8).Take(8).Select((p, i) => (p, i)))
         {

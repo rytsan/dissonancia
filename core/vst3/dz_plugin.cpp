@@ -13,6 +13,11 @@
 //   dz_plugin params <bundle.vst3> <cid> [--state-in f]
 //                                 -> one JSON line per parameter, as the controller has it after
 //                                    the state: {"id","title","units","default","value","steps","flags","text"}
+//   dz_plugin edit <bundle.vst3> <cid> <state> [--param id=normalized]...
+//                                 -> the plugin's own editor in a native window, until it is
+//                                    closed; then the edits go to the processor, its state is saved
+//                                    to <state>, and every edited parameter is printed as
+//                                    "param <id> <value>" (exit 4: the plugin has no editor)
 // The app runs one scan per bundle (a crashing bundle loses only itself) and caches the result.
 #include "miniaudio.h"
 #include "pluginterfaces/vst/ivstaudioprocessor.h"
@@ -24,9 +29,13 @@
 #include "public.sdk/source/vst/hosting/parameterchanges.h"
 #include "public.sdk/source/vst/hosting/plugprovider.h"
 #include "public.sdk/source/vst/hosting/processdata.h"
+#include "editor_window.hpp"
+
+#include <map>
 
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <iterator>
 #include <vector>
@@ -143,6 +152,72 @@ int params(int argc, char** argv) {
     return 0;
 }
 
+// The editor's changes as a host receives them (IComponentHandler::performEdit).
+struct EditSink final : IComponentHandler {
+    std::map<ParamID, ParamValue> edits;
+    tresult PLUGIN_API beginEdit(ParamID) override { return kResultOk; }
+    tresult PLUGIN_API performEdit(ParamID id, ParamValue v) override { edits[id] = v; return kResultOk; }
+    tresult PLUGIN_API endEdit(ParamID) override { return kResultOk; }
+    tresult PLUGIN_API restartComponent(int32) override { return kResultOk; }
+    tresult PLUGIN_API queryInterface(const TUID iid, void** obj) override {
+        if (FUnknownPrivate::iidEqual(iid, IComponentHandler::iid) || FUnknownPrivate::iidEqual(iid, FUnknown::iid)) { *obj = this; return kResultOk; }
+        *obj = nullptr;
+        return kNoInterface;
+    }
+    uint32 PLUGIN_API addRef() override { return 1000; }
+    uint32 PLUGIN_API release() override { return 1000; }
+};
+
+int edit(int argc, char** argv) {
+    const std::string bundle = argv[2], cid = argv[3], state = argv[4];
+    std::map<ParamID, ParamValue> set;   // the panel's values, under the editor's
+    for (int i = 5; i + 1 < argc; i += 2)
+        if (std::string(argv[i]) == "--param" && std::strchr(argv[i + 1], '='))
+            set[ParamID(std::strtoul(argv[i + 1], nullptr, 10))] = std::atof(std::strchr(argv[i + 1], '=') + 1);
+    Loaded p;
+    if (int r = load(bundle, cid, state, p)) return r;
+    if (!p.controller) return fail("the plugin has no controller");
+    for (auto& [id, v] : set) p.controller->setParamNormalized(id, v);
+    EditSink sink;
+    p.controller->setComponentHandler(&sink);
+    IPtr<IPlugView> view = owned(p.controller->createView(ViewType::kEditor));
+    if (!view) { p.controller->setComponentHandler(nullptr); std::fprintf(stderr, "the plugin has no editor\n"); return 4; }
+    std::string error, title = "Dissonância · " + p.provider->getClassInfo().name();
+    const bool shown = run_editor_window(view, title, error);
+    view = nullptr;
+    p.controller->setComponentHandler(nullptr);
+    if (!shown) return fail(error);
+
+    // The processor learns the edits (one empty block of parameter changes), then saves its state.
+    FUnknownPtr<IAudioProcessor> proc(p.component);
+    for (auto& [id, v] : sink.edits) set[id] = v;
+    if (proc && !set.empty()) {
+        ProcessSetup setup{kOffline, kSample32, 512, 48000};
+        proc->setupProcessing(setup);
+        p.component->setActive(true);
+        proc->setProcessing(true);
+        HostProcessData data;
+        data.prepare(*p.component, 512, kSample32);
+        ParameterChanges changes(int32(set.size()) + 1);
+        for (auto& [id, v] : set) {
+            int32 qi, pi;
+            if (auto* q = changes.addParameterData(id, qi)) q->addPoint(0, v, pi);
+        }
+        data.numSamples = 0;
+        data.inputParameterChanges = &changes;
+        proc->process(data);
+        proc->setProcessing(false);
+        p.component->setActive(false);
+    }
+    auto ms = owned(new MemoryStream);
+    if (p.component->getState(ms) == kResultOk) {
+        std::ofstream f(state, std::ios::binary);
+        f.write(ms->getData(), std::streamsize(ms->getSize()));
+    }
+    for (auto& [id, v] : sink.edits) std::printf("param %u %.9g\n", id, v);
+    return 0;
+}
+
 int render(int argc, char** argv) {
     const std::string bundle = argv[2], cid = argv[3], inPath = argv[4], outPath = argv[5];
     std::string stateIn, stateOut;
@@ -256,6 +331,7 @@ int main(int argc, char** argv) {
     if (cmd == "scan" && argc > 2) return scan(argv[2]);
     if (cmd == "render" && argc > 5) return render(argc, argv);
     if (cmd == "params" && argc > 3) return params(argc, argv);
+    if (cmd == "edit" && argc > 4) return edit(argc, argv);
     std::fprintf(stderr, "usage: dz_plugin list | scan <bundle.vst3> | render <bundle.vst3> <cid> <in.wav> <out.wav> [options]\n");
     return 1;
 }

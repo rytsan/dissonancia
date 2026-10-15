@@ -79,6 +79,33 @@ public static class PluginHost
         return err.Length > 0 ? err : $"o plugin terminou com código {p.ExitCode}";   // a crash ends here, not in the app
     }
 
+    /// The plugin's own editor in a window of the helper, until the user closes it; the state is
+    /// saved to `state` and the edited parameters come back. NoEditor: the plugin has none.
+    public sealed record EditorResult(string? Error, Dictionary<uint, double> Edits, bool NoEditor = false);
+
+    public static async Task<EditorResult> EditorAsync(Plugin plugin, string state, IReadOnlyDictionary<uint, double>? parameters = null, CancellationToken ct = default)
+    {
+        var psi = new ProcessStartInfo(Helper) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
+        foreach (var a in new[] { "edit", plugin.Bundle, plugin.Cid, state }) psi.ArgumentList.Add(a);
+        foreach (var (id, v) in parameters ?? new Dictionary<uint, double>()) { psi.ArgumentList.Add("--param"); psi.ArgumentList.Add(FormattableString.Invariant($"{id}={v:R}")); }
+        using var p = Process.Start(psi)!;
+        var stdout = p.StandardOutput.ReadToEndAsync(ct);
+        var stderr = p.StandardError.ReadToEndAsync(ct);
+        try { await p.WaitForExitAsync(ct); }
+        catch (OperationCanceledException) { try { p.Kill(true); } catch (InvalidOperationException) { } return new("cancelado", []); }
+        var edits = new Dictionary<uint, double>();
+        foreach (var line in (await stdout).Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            if (line.Split(' ') is ["param", var id, var v] && uint.TryParse(id, out var pid)
+                && double.TryParse(v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var pv)) edits[pid] = pv;
+        string err = (await stderr).Trim();
+        return p.ExitCode switch
+        {
+            0 => new(null, edits),
+            4 => new("o plugin não tem editor próprio: use o painel", edits, NoEditor: true),
+            _ => new(err.Length > 0 ? err : $"o editor terminou com código {p.ExitCode}", edits),
+        };
+    }
+
     public sealed record Param(uint Id, string Title, string Units, double Default, double Value, int Steps, int Flags, string Text)
     {
         /// What a generic panel shows: not read-only, hidden, program change or the bypass switch.

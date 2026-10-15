@@ -179,7 +179,7 @@ this order because each stage needs the one before it, as in a studio.
   channel + tempo map), JSON (full result with confidences), text chart,
   WAV bounce of the mix and of each stem.
 
-### S8 — VST3 inserts, out-of-process host (spec M11, §20.2) — in progress
+### S8 — VST3 inserts, out-of-process host (spec M11, §20.2) — done 2026-10-15
 - SDK: VST3 SDK 3.8.0 (MIT), its four repos (base, pluginterfaces, public.sdk, cmake) as
   pinned tarballs; only the SDK libraries are built (no VSTGUI, no examples). Optional
   component `DZ_WITH_VST3`: the `dz_plugin` helper ships next to the app when built.
@@ -210,7 +210,15 @@ this order because each stage needs the one before it, as in a studio.
   them as knobs where the analyser sits (eight a page; read-only, hidden, program and bypass
   parameters left out). A change is kept in the take project and rendered 0.7 s after the last
   one (the values are applied over the state at every render and are part of the render key).
-- Step 4 — editor: the plugin's own editor in a native window owned by the helper.
+- Step 4 — editor (done 2026-10-15): EDITOR in the panel runs `dz_plugin edit`: the plugin's own
+  view in a native window of the helper (X11 with the VST3 Linux run loop — descriptors and
+  timers; Win32 written, not built here; macOS not yet), until the user closes it. The edits
+  arrive through IComponentHandler, go to the processor (an empty block of parameter changes),
+  the component state is saved and the edited values join the panel's; then a new render.
+  Checked under Xvfb with DZ Test Gain's view, which edits its gain from a run-loop timer
+  (`DZ_EDITOR_AUTOCLOSE_MS` closes the window in tests); without a display the check is skipped.
+- Not done: tails past the take's end (cut), parameter automation over time, VST3 on the master
+  bus, an instrument (only effects with audio in and out), the macOS editor window.
 
 ### Later
 - S9: choir by section, SATB (spec M9, §21) — experimental.

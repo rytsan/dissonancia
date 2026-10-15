@@ -5,12 +5,14 @@
 #include "base/source/fstreamer.h"
 #include "pluginterfaces/base/ibstream.h"
 #include "pluginterfaces/vst/ivstparameterchanges.h"
+#include "public.sdk/source/common/pluginview.h"
 #include "public.sdk/source/main/pluginfactory.h"
 #include "public.sdk/source/vst/vstsinglecomponenteffect.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <functional>
 
 using namespace Steinberg;
 using namespace Steinberg::Vst;
@@ -20,6 +22,38 @@ const FUID kTestGainUID(0x6F1A3C21, 0x4D2B47E8, 0x9A1C5B3E, 0x7D0E2F41);
 constexpr ParamID kGain = 0, kLatency = 1;
 constexpr int32 kDelay = 64;
 double to_lin(double norm) { return std::pow(10.0, (norm * 48 - 24) / 20); }
+
+// An editor with nothing to draw, for the host's window test: once attached (X11), a run-loop
+// timer edits the gain to 0.75 as a user would, through the component handler.
+class TestView : public CPluginView, public Linux::ITimerHandler {
+public:
+    TestView(std::function<void()> edit) : CPluginView(nullptr), edit_(std::move(edit)) { rect = ViewRect(0, 0, 320, 120); }
+    tresult PLUGIN_API isPlatformTypeSupported(FIDString type) SMTG_OVERRIDE {
+        return std::strcmp(type, kPlatformTypeX11EmbedWindowID) == 0 || std::strcmp(type, kPlatformTypeHWND) == 0 ? kResultTrue : kResultFalse;
+    }
+    tresult PLUGIN_API attached(void* parent, FIDString type) SMTG_OVERRIDE {
+        if (FUnknownPtr<Linux::IRunLoop> loop(plugFrame); loop) { loop_ = loop; loop_->registerTimer(this, 50); }
+        return CPluginView::attached(parent, type);
+    }
+    tresult PLUGIN_API removed() SMTG_OVERRIDE {
+        if (loop_) loop_->unregisterTimer(this);
+        loop_ = nullptr;
+        return CPluginView::removed();
+    }
+    void PLUGIN_API onTimer() SMTG_OVERRIDE {
+        if (edit_) edit_();
+        edit_ = nullptr;
+    }
+    OBJ_METHODS(TestView, CPluginView)
+    DEFINE_INTERFACES
+        DEF_INTERFACE(Linux::ITimerHandler)
+    END_DEFINE_INTERFACES(CPluginView)
+    REFCOUNT_METHODS(CPluginView)
+
+private:
+    std::function<void()> edit_;
+    IPtr<Linux::IRunLoop> loop_;
+};
 
 class TestGain : public SingleComponentEffect {
 public:
@@ -84,6 +118,10 @@ public:
         return SingleComponentEffect::setActive(on);
     }
     tresult PLUGIN_API setupProcessing(ProcessSetup& setup) SMTG_OVERRIDE { return SingleComponentEffect::setupProcessing(setup); }
+    IPlugView* PLUGIN_API createView(FIDString name) SMTG_OVERRIDE {
+        if (std::strcmp(name, ViewType::kEditor) != 0) return nullptr;
+        return new TestView([this] { beginEdit(kGain); setParamNormalized(kGain, 0.75); performEdit(kGain, 0.75); endEdit(kGain); });
+    }
     tresult PLUGIN_API canProcessSampleSize(int32 size) SMTG_OVERRIDE { return size == kSample32 ? kResultTrue : kResultFalse; }
 
 private:

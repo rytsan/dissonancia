@@ -326,6 +326,17 @@ else Console.WriteLine("skip Verovio: " + vrvError);
             var ps = PluginHost.ParamsAsync(gain, Path.Combine(tmp, "state.bin")).Result;
             Check(ps.Count == 2 && ps[0] is { Title: "Gain", Units: "dB", Editable: true } && Math.Abs(ps[0].Value - 0.625) < 1e-9 && ps[1] is { Steps: 1, Value: 0 },
                 "VST3 params: titles, units, steps and the values of the saved state");
+            // The editor window (X11 / Win32): the test plugin's view edits the gain from a run-loop
+            // timer; the helper closes the window by itself here and saves the state.
+            Environment.SetEnvironmentVariable("DZ_EDITOR_AUTOCLOSE_MS", "600");
+            var ed = PluginHost.EditorAsync(gain, Path.Combine(tmp, "edit.bin")).Result;
+            if (ed.Error is { } ee && (ee.Contains("display") || ee.Contains("not available"))) Console.WriteLine("skip VST3 editor window: " + ee);
+            else
+            {
+                var after = PluginHost.ParamsAsync(gain, Path.Combine(tmp, "edit.bin")).Result;
+                Check(ed.Error is null && ed.Edits.TryGetValue(0, out var g) && Math.Abs(g - 0.75) < 1e-9 && Math.Abs(after[0].Value - 0.75) < 1e-9,
+                    $"VST3 editor: the window, the plugin's edit, the saved state ({ed.Error})");
+            }
             string? e3 = PluginHost.RenderAsync(gain with { Cid = "00000000000000000000000000000000" }, Path.Combine(tmp, "in.wav"), Path.Combine(tmp, "c.wav"), null, null).Result;
             Check(e3 is not null && e3.Contains("no class"), "VST3 render: a wrong plugin is an error, not a crash");
             Directory.Delete(tmp, true);
