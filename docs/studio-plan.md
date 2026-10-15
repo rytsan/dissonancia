@@ -77,6 +77,29 @@ language as the LIVE rack. Mockup: https://claude.ai/artifact/1cES4MCBM9otq1qSVa
   pan, mute / solo, LED meters, fader, seven-segment dB; master strip with
   EQ, bus compressor, limiter and a pair of VU meters.
 
+### Signal flow and measuring tubes (decision 2026-10-15)
+
+The rack reads like a desk or a pedalboard: where the signal comes from, where it goes and
+where it splits is drawn, and every patch cable carries its level (core colour and a middle LED:
+dark = nothing, amber = signal, bright = over -6 dBFS, red = over 0).
+
+- **DS-P Signal flow (under the transport):** FONTE → MIX channel directly, and FONTE → DS-S
+  separator → one channel per stem (split bus); every channel that sounds drops into the sum bus
+  → DS-M → MASTER → SAÍDA (headphones / bounce); every analysed channel sends a copy from its tap
+  (dashed, post-inserts, pre-fader) along the send bus to DA-N / DA-C / DA-B / DA-T → SCORE.
+- **DS-C as a pedalboard:** IN plate → units in studio order, each gate / EQ / compressor with a
+  footswitch and its red LED (off = BYPASS), the level on every cable between units (core:
+  peak after each unit) → TAP, which splits: OUT to the channel's fader, a send to the analyser.
+- **DS-M as a desk:** each strip shows its source (FONTE direto / DS-S saída n), inserts with
+  the level they hand on, the analysis send, then pan, mute / solo, fader, and drops into the
+  sum bus drawn to the master; the master chain BUS → EQ → COMP → FADER → DL-6 → SAÍDA.
+- **DS-V Measuring tubes (phosphor CRTs, right column):** vectorscope with the phase
+  correlation bar, oscilloscope L / R (triggered), spectrum of the master or the selected
+  channel's tap (1/12 octave, peak hold), loudness history (30 s, momentary and short-term, -23
+  EBU and -14 streaming marks) with plasma readouts: integrated LUFS, short-term, momentary,
+  true peak, LRA (BS.1770-4 / EBU R128 in the core; ZERAR resets).
+- The rack is taller than a 900 px window and scrolls; in console view the library steps aside.
+
 ## Milestones (in studio order)
 
 Each one compiles, tests and measures, and is usable on its own. Built in

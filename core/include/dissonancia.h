@@ -453,6 +453,9 @@ ANA_API int32_t ana_player_bounce(PlayerHandle* p, const char* pathUtf8);
 ANA_API int32_t ana_player_scope(PlayerHandle* p, int32_t source, float* stereoOut, int32_t frames);
 ANA_API void ana_player_set_monitor(PlayerHandle* p, int32_t track);
 ANA_API void ana_player_reset_loudness(PlayerHandle* p);
+// Pulls `frames` through the mixer as the output device would and discards them: meters and scopes
+// without a device (screenshots, tests). Not for use while a device is open.
+ANA_API void ana_player_pull(PlayerHandle* p, int32_t frames);
 ANA_API int32_t ana_player_peaks(PlayerHandle* p, uint64_t startFrame, uint64_t endFrame, int32_t columns, float* minOut, float* maxOut);
 
 // STUDIO offline analysis: the whole file through session->mode's pipeline at session->quality on a

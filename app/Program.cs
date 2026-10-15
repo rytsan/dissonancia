@@ -115,6 +115,8 @@ public sealed class MainWindow : Window
             ["StudioClearReview"] = () => _studio.ReviewAction("clear"),
             ["StudioDeliver"] = () => _studio.ReviewAction("deliver"),
             ["StudioScore"] = () => _studio.ScoreCurrent(),
+            ["StudioPlayDemo"] = () => _studio.PlayHeadless(8, 12),   // screenshot tool: meters and tubes as if playing
+            ["StudioSelect2"] = () => _studio.SelectChannel(2),
             ["StudioSelectDemo"] = () => _studio.SelectRange(1.0, 6.0),   // screenshot tool: a selection to edit
             ["StudioTrim"] = () => _studio.EditAction("trim"),
             ["StudioCut"] = () => _studio.EditAction("cut"),

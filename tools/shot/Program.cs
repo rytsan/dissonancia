@@ -7,6 +7,7 @@ using Dissonancia;
 if (args.Length < 4) { Console.WriteLine("usage: out.png <tab> <mode> <seconds> [action...]"); return 1; }
 AppBuilder.Configure<ShotApp>().UseSkia().UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false }).SetupWithoutStarting();
 var w = new MainWindow();
+if (Environment.GetEnvironmentVariable("SHOT_H") is { Length: > 0 } sh) w.Height = int.Parse(sh);   // a taller window: the whole STUDIO rack
 double t = double.Parse(args[3], System.Globalization.CultureInfo.InvariantCulture);
 w.Clock = () => t;
 var mode = Enum.Parse<AppMode>(args[2]);

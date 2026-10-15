@@ -92,7 +92,21 @@ public sealed class StudioPlayer : IDisposable
         for (int c = 0; c < 2; c++) { m.MasterPeak[c] = n.MasterPeakDb[c]; m.MasterRms[c] = n.MasterRmsDb[c]; }
         m.MasterGr = n.MasterCompGrDb;
         m.LimiterGr = n.LimiterGrDb;
+        for (int i = 0; i < 8; i++) for (int k = 0; k < MixMeters.Stages; k++) m.Stage[i, k] = n.StagePeakDb[i * MixMeters.Stages + k];
+        (m.LufsM, m.LufsS, m.LufsI, m.Lra) = (n.LufsMomentary, n.LufsShortTerm, n.LufsIntegrated, n.LoudnessRange);
+        m.TruePeak = Math.Max(n.TruePeakDb[0], n.TruePeakDb[1]);
     }
+
+    /// The latest output, stereo interleaved, oldest first: source 0 the master, 1 the monitored
+    /// track at its tap. Returns the frames filled.
+    public unsafe int Scope(int source, float[] stereo)
+    {
+        fixed (float* p = stereo) return MixApi.Scope(_p, source, p, stereo.Length / 2);
+    }
+    public void Monitor(int track) => MixApi.SetMonitor(_p, track);
+    public void ResetLoudness() => MixApi.ResetLoudness(_p);
+    /// Renders without a device (screenshot tool): meters and scopes as if playing.
+    public void Pull(int frames) => MixApi.Pull(_p, frames);
 
     public unsafe void Peaks(ulong a, ulong b, float[] mn, float[] mx, int columns)
     {

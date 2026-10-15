@@ -243,6 +243,11 @@ int32_t ana_player_scope(PlayerHandle* p, int32_t source, float* out, int32_t fr
 }
 void ana_player_set_monitor(PlayerHandle* p, int32_t track) { if (p) p->player.set_monitor(track); }
 void ana_player_reset_loudness(PlayerHandle* p) { if (p) p->player.reset_loudness(); }
+void ana_player_pull(PlayerHandle* p, int32_t frames) {
+    if (!p || frames <= 0) return;
+    std::vector<float> out(512 * 2);
+    for (int32_t done = 0; done < frames; done += 512) p->player.render(out.data(), uint32_t(std::min(512, frames - done)), 2);
+}
 
 int32_t ana_player_peaks(PlayerHandle* p, uint64_t a, uint64_t b, int32_t columns, float* mn, float* mx) {
     if (!p || columns <= 0 || !mn || !mx) return ANA_ERR_ARG;

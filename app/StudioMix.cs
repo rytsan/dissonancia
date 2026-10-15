@@ -40,6 +40,9 @@ unsafe struct MixMetersNative
     public float MasterCompGrDb, LimiterGrDb;
     public int Tracks;
     uint _pad0;
+    public fixed float StagePeakDb[8 * 6];   // [track][in, trim, filter, gate, EQ, compressor]
+    public float LufsMomentary, LufsShortTerm, LufsIntegrated, LoudnessRange;
+    public fixed float TruePeakDb[2];
 }
 
 static partial class MixApi
@@ -52,6 +55,10 @@ static partial class MixApi
     [LibraryImport(Lib, EntryPoint = "ana_player_set_channel")] public static partial int SetChannel(nint p, int track, in ChannelParamsNative c);
     [LibraryImport(Lib, EntryPoint = "ana_player_set_master")] public static partial void SetMaster(nint p, in MasterParamsNative m);
     [LibraryImport(Lib, EntryPoint = "ana_player_meters")] public static partial void Meters(nint p, out MixMetersNative m);
+    [LibraryImport(Lib, EntryPoint = "ana_player_scope")] public static unsafe partial int Scope(nint p, int source, float* stereo, int frames);
+    [LibraryImport(Lib, EntryPoint = "ana_player_set_monitor")] public static partial void SetMonitor(nint p, int track);
+    [LibraryImport(Lib, EntryPoint = "ana_player_reset_loudness")] public static partial void ResetLoudness(nint p);
+    [LibraryImport(Lib, EntryPoint = "ana_player_pull")] public static partial void Pull(nint p, int frames);
     [LibraryImport(Lib, EntryPoint = "ana_player_render_tap", StringMarshalling = StringMarshalling.Utf8)] public static partial int RenderTap(nint p, uint mask, string path);
     [LibraryImport(Lib, EntryPoint = "ana_player_bounce", StringMarshalling = StringMarshalling.Utf8)] public static partial int Bounce(nint p, string path);
 }
@@ -180,4 +187,7 @@ public sealed class MixMeters
     public float[] MasterPeak = new float[2], MasterRms = new float[2];
     public float MasterGr, LimiterGr;
     public int Tracks;
+    public const int Stages = 6;                   // in, trim, filter, gate, EQ, compressor
+    public float[,] Stage = new float[8, Stages];  // peak after each unit: the cable levels
+    public float LufsM = -120, LufsS = -120, LufsI = -120, Lra, TruePeak = -120;
 }

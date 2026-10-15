@@ -284,7 +284,26 @@ public sealed class StudioState
         Changed?.Invoke();
     }
 
-    public void PollMeters() { if (Player is not null) Player.ReadMeters(Meters); }
+    public readonly ScopeData Scopes = new();
+    public void PollMeters(long? nowMs = null)
+    {
+        if (Player is null) return;
+        Player.Monitor(Selected);
+        Player.Refresh();
+        Player.ReadMeters(Meters);
+        Scopes.Update(Player, Meters, Rate, Player.Playing, nowMs ?? Environment.TickCount64);
+    }
+    public void ResetLoudness() { Player?.ResetLoudness(); Array.Fill(Scopes.Momentary, -120f); Array.Fill(Scopes.ShortTerm, -120f); }
+
+    /// The analysers a channel's tap feeds (Plan): the voice notes, the harmony, the bass line, the beats.
+    public string[] AnalysersOf(int track)
+    {
+        if (Stems.Count == 0) return track == 0 ? [Mode is AppMode.VoiceMono or AppMode.InstrumentMono ? "DA-N" : "DA-C"] : [];
+        return track == 0 ? [] : NameOf(track) switch
+        {
+            "vocals" => ["DA-N"], "bass" => ["DA-C", "DA-B"], "drums" => ["DA-T"], _ => ["DA-C"],
+        };
+    }
     public void Select() => Changed?.Invoke();
     public bool ConsoleView;
 
@@ -582,6 +601,61 @@ public abstract class StudioUnit : Control
         }
     }
 
+    // ----------------------------------------------------------------- signal flow
+    // Patch cables carry the signal's level in their core colour (dark: nothing; amber: signal;
+    // bright: hot, over -6 dBFS; red: over 0) and an LED at the middle, so the route reads at a
+    // glance, as on a desk or a pedalboard.
+    static readonly IPen CableJacket = new ImmutablePen(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF0B0C0D)), 7, lineCap: PenLineCap.Round);
+    static readonly IPen CableJacketThin = new ImmutablePen(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF0B0C0D)), 4, lineCap: PenLineCap.Round);
+    static IBrush LevelBrush(float db) => new ImmutableSolidColorBrush(Color.FromUInt32(
+        db > -0.5f ? 0xFFFF3B30u : db > -6 ? 0xFFFFD27Au : db > -60 ? 0xFFFFB000u : 0xFF4A3A12u));
+    protected static IBrush LevelLed(float db) => db > -0.5f ? Ui.Red : db > -6 ? Ui.Amber : Ui.Green;
+
+    /// A patch cable from a to b with its sag; dashed for a send (a copy of the signal, not its path).
+    protected static void Patch(DrawingContext ctx, Point a, Point b, float db, double sag = 18, bool send = false, bool thin = false, bool led = true)
+    {
+        var g = new StreamGeometry();
+        using (var c = g.Open())
+        {
+            c.BeginFigure(a, false);
+            if (sag == 0) c.LineTo(b);
+            else c.CubicBezierTo(new Point(a.X + (b.X - a.X) * 0.3, Math.Max(a.Y, b.Y) + sag), new Point(a.X + (b.X - a.X) * 0.7, Math.Max(a.Y, b.Y) + sag), b);
+            c.EndFigure(false);
+        }
+        var core = LevelBrush(db);
+        if (send) ctx.DrawGeometry(null, new ImmutablePen((IImmutableBrush)core, 1.6, new ImmutableDashStyle([3, 2.5], 0)), g);
+        else
+        {
+            ctx.DrawGeometry(null, thin ? CableJacketThin : CableJacket, g);
+            ctx.DrawGeometry(null, new ImmutablePen((IImmutableBrush)core, thin ? 2 : 4, lineCap: PenLineCap.Round), g);
+        }
+        if (led && !send)
+        {
+            var m = sag == 0 ? new Point((a.X + b.X) / 2, (a.Y + b.Y) / 2) : new Point((a.X + b.X) / 2, Math.Max(a.Y, b.Y) + sag * 0.75);
+            Ui.Led(ctx, m, 2.4, db > -60, LevelLed(db), Ui.GreenOff);
+        }
+    }
+
+    /// A jack socket on a panel.
+    protected static void Jack(DrawingContext ctx, Point c)
+    {
+        ctx.DrawEllipse(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF5B6068)), null, c, 6, 6);
+        ctx.DrawEllipse(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF0B0C0D)), null, c, 2.5, 2.5);
+    }
+
+    static readonly IBrush Chrome = new ImmutableRadialGradientBrush(
+        [new ImmutableGradientStop(0, Color.FromUInt32(0xFFE4E8EE)), new ImmutableGradientStop(0.6, Color.FromUInt32(0xFF8A9099)), new ImmutableGradientStop(1, Color.FromUInt32(0xFF3A3E44))],
+        center: new RelativePoint(0.35, 0.3, RelativeUnit.Relative), radiusX: new RelativeScalar(0.8, RelativeUnit.Relative), radiusY: new RelativeScalar(0.8, RelativeUnit.Relative));
+
+    /// A pedal's footswitch: chrome stomp button in its nut, the red LED above it lit when engaged.
+    protected void Footswitch(DrawingContext ctx, Point c, bool on, Action toggle, bool enabled = true)
+    {
+        ctx.DrawEllipse(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF1A1C1F)), KnobRim, c, 13, 13);
+        ctx.DrawEllipse(Chrome, KnobRim, c, 9, 9);
+        Ui.Led(ctx, new Point(c.X, c.Y - 21), 3, on, Ui.Red, Ui.RedOff);
+        if (enabled) _keys.Add((new Rect(c.X - 14, c.Y - 26, 28, 40), toggle));
+    }
+
     // Knobs and faders: a value in 0..1 with its setter. Knobs follow a vertical drag (200 px =
     // the whole range) and the wheel; a fader follows the pointer along its slot.
     sealed record Control1(Rect R, double Norm, Action<double> Set, bool Fader);
@@ -745,6 +819,23 @@ public sealed class TransportUnit : StudioUnit
             Ui.Text(ctx, parts[i].Item1, lx + 16 + i * 44, y + 22, 7, parts[i].Item2 ? Ui.LabelBright : Ui.Label, Ui.SansBold, Ui.Align.Center);
         }
         Ui.Text(ctx, S.Session.KeySet ? S.Session.Key.Label : "sem armadura", lx + 16, y + 40, 10, Ui.Label, Ui.Mono);
+        Ui.Text(ctx, $"CPU {Cpu():0} %", r.Right, y + 40, 10, Ui.Label, Ui.Mono, Ui.Align.Right);
+    }
+
+    // Process CPU over the last second, across all cores (100 % = one core busy).
+    static readonly System.Diagnostics.Process Proc = System.Diagnostics.Process.GetCurrentProcess();
+    static TimeSpan _cpuBusy;
+    static long _cpuAt;
+    static double _cpu;
+    static double Cpu()
+    {
+        long now = Environment.TickCount64;
+        if (now - _cpuAt < 1000) return _cpu;
+        Proc.Refresh();
+        var busy = Proc.TotalProcessorTime;
+        if (_cpuAt > 0) _cpu = (busy - _cpuBusy).TotalMilliseconds / (now - _cpuAt) * 100;
+        (_cpuBusy, _cpuAt) = (busy, now);
+        return _cpu;
     }
 }
 
@@ -753,7 +844,7 @@ public sealed class LibraryUnit : StudioUnit
 {
     int _scroll;
     readonly List<(Rect R, StudioLibrary.Item It)> _rows = [];
-    public LibraryUnit(StudioState s) : base(s, "DS-L", "BIBLIOTECA") { Width = 270; }
+    public LibraryUnit(StudioState s) : base(s, "DS-L", "BIBLIOTECA") { Width = 230; }
 
     protected override void DrawContent(DrawingContext ctx, Rect r)
     {
@@ -790,6 +881,7 @@ public sealed class LibraryUnit : StudioUnit
     {
         _scroll = Math.Clamp(_scroll - Math.Sign(e.Delta.Y), 0, Math.Max(0, S.Library.Count - 1));
         InvalidateVisual();
+        e.Handled = true;
     }
 
     async Task ImportAsync()
@@ -861,7 +953,7 @@ public sealed class RecorderUnit : StudioUnit
 
         // Channel card + screen.
         var area = new Rect(r.X, r.Y + 38, r.Width, r.Height - 38);
-        var card = new Rect(area.X, area.Y, 150, area.Height);
+        var card = new Rect(area.X, area.Y, 170, area.Height);
         ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF24272B)), new ImmutablePen(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF0B0C0D)), 1), card, 3, 3);
         Ui.Text(ctx, "CANAIS", card.X + 8, card.Y + 4, 8, Ui.Label, Ui.SansBold);
         double laneH = 44;
@@ -873,7 +965,7 @@ public sealed class RecorderUnit : StudioUnit
         _cards.Add((mixRow, 0));
         if (S.Selected == 0 && S.Current is not null) ctx.DrawRectangle(null, selPen, mixRow, 3, 3);
         Tape(ctx, card.X + 10, card.Y + 26, S.Current is null ? "—" : "MIX");
-        if (S.Channel(0).Mute) Ui.Text(ctx, "MUDO", card.X + 16, card.Y + 82, 8, Ui.Amber, Ui.SansBold);
+        if (S.Current is not null) CardControls(ctx, 0, card.X + 10, card.Y + 78, card.Width - 20);
         Plasma.DotText(ctx, "1", card.Right - 22, card.Y + 26, 2.4, 1);
         Ui.Led(ctx, new Point(card.X + 16, card.Y + 64), 3.5, S.Player?.Playing == true, Ui.Green, Ui.GreenOff);
         Ui.Text(ctx, "PLAY", card.X + 24, card.Y + 58, 8, Ui.Label, Ui.SansBold);
@@ -889,6 +981,7 @@ public sealed class RecorderUnit : StudioUnit
             if (S.Selected == i + 1) ctx.DrawRectangle(null, selPen, row, 3, 3);
             Tape(ctx, card.X + 10, sy + stemH / 2 - 10, stemNames.GetValueOrDefault(S.Stems[i].Name, S.Stems[i].Name.ToUpperInvariant()), i % 2 == 0 ? 1.2 : -1.2);
             Plasma.DotText(ctx, $"{i + 2}", card.Right - 22, sy + stemH / 2 - 8, 2.2, 1);
+            CardControls(ctx, i + 1, card.Right - 82, sy + stemH / 2 - 9, 52, compact: true);
         }
         Ui.Text(ctx, laneName, card.X + 16, area.Y + 22 + trackH + stemH * S.Stems.Count + 14, 10, S.ResultTake is null ? Ui.Label : Ui.Amber, Ui.SansBold);
 
@@ -1025,6 +1118,20 @@ public sealed class RecorderUnit : StudioUnit
         for (double y = bezel.Y + 6; y < bezel.Bottom - 6; y += 3) ctx.DrawLine(new ImmutablePen(new ImmutableSolidColorBrush(Color.FromUInt32(0x22000000)), 1), new Point(bezel.X + 5, y), new Point(bezel.Right - 5, y));
     }
 
+    /// Mute / solo keys and the level of a channel on its card.
+    void CardControls(DrawingContext ctx, int track, double x, double y, double w, bool compact = false)
+    {
+        var c = S.Channel(track);
+        double kw = compact ? 24 : 30;
+        Key(ctx, new Rect(x, y, kw, 18), "M", () => { c.Mute = !c.Mute; S.MixChanged(); }, c.Mute, Ui.Amber);
+        Key(ctx, new Rect(x + kw + 4, y, kw, 18), "S", () => { c.Solo = !c.Solo; S.MixChanged(); }, c.Solo, Ui.Green);
+        float pk = S.Meters.Peak[Math.Min(track, 7)];
+        int n = compact ? 6 : 12;
+        double lx = compact ? x : x + 2 * kw + 14, ly = compact ? y + 23 : y + 9, step = compact ? (2 * kw + 4) / n : (w - 2 * kw - 14) / n;
+        for (int i = 0; i < n; i++)
+            Ui.Led(ctx, new Point(lx + step * (i + 0.5), ly), compact ? 1.5 : 2.2, pk > -54 + i * 54.0 / n, i >= n - 1 ? Ui.Red : i >= n - 3 ? Ui.Amber : Ui.Green, Ui.GreenOff);
+    }
+
     protected override void Pressed(PointerPressedEventArgs e, Point p)
     {
         foreach (var (row, track) in _cards)
@@ -1080,34 +1187,50 @@ public sealed class RecorderUnit : StudioUnit
 /// (the only unit at work before S4: the others are mounted and wait for the mixing milestone).
 public sealed class ChainUnit : StudioUnit
 {
-    public ChainUnit(StudioState s) : base(s, "DS-C", "CADEIA DO CANAL") { Height = 240; }
-
-    static readonly IPen CableBlack = new ImmutablePen(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF0B0C0D)), 7, lineCap: PenLineCap.Round);
-    static readonly IPen CableAmber = new ImmutablePen(new ImmutableSolidColorBrush(Color.FromUInt32(0xFFFFB000)), 4, lineCap: PenLineCap.Round);
+    public ChainUnit(StudioState s) : base(s, "DS-C", "CADEIA DO CANAL") { Height = 262; }
 
     static string Hz(double f) => f >= 1000 ? $"{f / 1000:0.#}k" : $"{f:0}";
+    static readonly IBrush BypassVeil = new ImmutableSolidColorBrush(Color.FromUInt32(0x77111214));
 
     protected override void DrawContent(DrawingContext ctx, Rect r)
     {
         var names = new Dictionary<string, string> { ["mix"] = "MIX", ["vocals"] = "VOZ", ["bass"] = "BAIXO", ["other"] = "OUTROS", ["drums"] = "BATERIA", ["guitar"] = "VIOLÃO", ["piano"] = "PIANO" };
-        Tape(ctx, r.X, r.Y, S.Current is null ? "—" : names.GetValueOrDefault(S.NameOf(S.Selected), S.NameOf(S.Selected)), -1);
-        Ui.Text(ctx, "ordem fixa de estúdio · cabos de patch na sequência do sinal · análise lê pós-insertos, pré-fader · clique na fita do canal para escolhê-lo", r.X + 90, r.Y + 2, 9, Ui.Label, Ui.Mono);
-        double x = r.X, y = r.Y + 26, h = r.Height - 26;
-        var c = S.Channel(S.Selected);
+        int sel = S.Selected, mt = Math.Min(sel, 7);
+        string chName = S.Current is null ? "—" : names.GetValueOrDefault(S.NameOf(sel), S.NameOf(sel));
+        Tape(ctx, r.X, r.Y, chName, -1);
+        var an0 = S.AnalysersOf(sel);
+        string from = sel == 0 ? "FONTE (direto)" : $"DS-S saída {sel}";
+        Ui.Text(ctx, $"IN ◀ {from}   ·   ordem fixa de estúdio, como um pedalboard: footswitch liga / desliga (bypass)   ·   OUT ▶ fader do canal {sel + 1} no DS-M   ·   envio pré-fader ▶ {(an0.Length > 0 ? string.Join(" + ", an0) : "nenhuma análise")}",
+            r.X + 90, r.Y + 2, 9, Ui.Label, Ui.Mono);
+        double y = r.Y + 30, h = r.Height - 30;
+        var c = S.Channel(sel);
         void Changed() => S.MixChanged();
         bool has = S.Current is not null;
-        double ky = y + h / 2 + 4;
+        double ky = y + h / 2 - 6, fy = y + h - 22;   // knob row, footswitch row
+        float Lv(int stage) => S.Meters.Stage[mt, stage];
+
+        // IN plate.
+        var inPlate = new Rect(r.X, y + h / 2 - 22, 30, 44);
+        ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF1A1C1F)), Ui.FaceEdge, inPlate, 3, 3);
+        Ui.Text(ctx, "IN", inPlate.Center.X, inPlate.Y + 3, 8, Ui.LabelBright, Ui.SansBold, Ui.Align.Center);
+        Jack(ctx, new Point(inPlate.Center.X, inPlate.Center.Y + 6));
+        double x = inPlate.Right + 22;
+        Patch(ctx, new Point(inPlate.Center.X, inPlate.Center.Y + 6), new Point(x, y + h / 2), Lv(0), 14);
+
+        Rect box;
+        void Next(int stage) { Patch(ctx, new Point(box.Right, box.Center.Y), new Point(box.Right + 24, box.Center.Y), Lv(stage), 22); x = box.Right + 24; }
+        void Veil(bool on) { if (!on && has) { ctx.DrawRectangle(BypassVeil, null, box, 4, 4); Ui.Text(ctx, "BYPASS", box.Center.X + 22, fy - 6, 8, Ui.Amber, Ui.SansBold); } }
 
         // DS-1 TRIM
-        var box = new Rect(x, y, 96, h);
+        box = new Rect(x, y, 88, h);
         DrawDevice(ctx, box, "DS-1", "TRIM", has);
-        Knob(ctx, new Point(box.Center.X, ky - 6), 18, "GANHO", $"{c.Trim:+0.0;-0.0} dB", LinNorm(c.Trim, -24, 24), n => { c.Trim = (float)Math.Round(FromLin(n, -24, 24), 1); Changed(); });
-        float pk = S.Meters.Peak[Math.Min(S.Selected, 7)];
-        for (int i = 0; i < 10; i++) Ui.Led(ctx, new Point(box.X + 14 + i * 8, box.Bottom - 14), 2.6, pk > -50 + i * 5.5, i > 7 ? Ui.Red : i > 5 ? Ui.Amber : Ui.Green, Ui.GreenOff);
-        Cable(ctx, box.Right, box.Center.Y);
-        x = box.Right + 26;
+        Knob(ctx, new Point(box.Center.X, ky), 18, "GANHO", $"{c.Trim:+0.0;-0.0} dB", LinNorm(c.Trim, -24, 24), n => { c.Trim = (float)Math.Round(FromLin(n, -24, 24), 1); Changed(); });
+        float pk = Lv(1);
+        for (int i = 0; i < 10; i++) Ui.Led(ctx, new Point(box.X + 12 + i * 7, fy + 4), 2.6, pk > -50 + i * 5.5, i > 7 ? Ui.Red : i > 5 ? Ui.Amber : Ui.Green, Ui.GreenOff);
+        Ui.Text(ctx, "NÍVEL", box.Center.X, fy + 10, 7, Ui.Label, Ui.SansBold, Ui.Align.Center);
+        Next(1);
 
-        // DF-2 FILTRO
+        // DF-2 FILTRO (HP and LP each switch on their own)
         box = new Rect(x, y, 132, h);
         DrawDevice(ctx, box, "DF-2", "FILTRO", c.HpOn || c.LpOn);
         Key(ctx, new Rect(box.X + 12, box.Y + 24, 36, 20), "HP", () => { c.HpOn = !c.HpOn; Changed(); }, c.HpOn, Ui.Green, has);
@@ -1115,51 +1238,62 @@ public sealed class ChainUnit : StudioUnit
         Key(ctx, new Rect(box.X + 88, box.Y + 24, 36, 20), c.Steep ? "24" : "12", () => { c.Steep = !c.Steep; Changed(); }, c.Steep, Ui.Amber, has);
         Knob(ctx, new Point(box.X + 38, ky + 10), 16, "HP", Hz(c.Hp), LogNorm(c.Hp, 20, 1000), n => { c.Hp = (float)Math.Round(FromLog(n, 20, 1000)); Changed(); }, c.HpOn);
         Knob(ctx, new Point(box.X + 96, ky + 10), 16, "LP", Hz(c.Lp), LogNorm(c.Lp, 1000, 20000), n => { c.Lp = (float)Math.Round(FromLog(n, 1000, 20000), -1); Changed(); }, c.LpOn);
-        Cable(ctx, box.Right, box.Center.Y);
-        x = box.Right + 26;
+        if (!(c.HpOn || c.LpOn) && has) Ui.Text(ctx, "BYPASS", box.Center.X, fy, 8, Ui.Amber, Ui.SansBold, Ui.Align.Center);
+        Next(2);
 
         // DG-3 GATE
-        box = new Rect(x, y, 140, h);
+        box = new Rect(x, y, 132, h);
         DrawDevice(ctx, box, "DG-3", "GATE", c.GateOn);
-        Key(ctx, new Rect(box.X + 12, box.Y + 24, 40, 20), "ON", () => { c.GateOn = !c.GateOn; Changed(); }, c.GateOn, Ui.Green, has);
-        Ui.Led(ctx, new Point(box.X + 66, box.Y + 34), 3.5, c.GateOn && S.Meters.GateOpen[Math.Min(S.Selected, 7)], Ui.Green, Ui.GreenOff);
-        Ui.Text(ctx, "ABERTO", box.X + 74, box.Y + 28, 7, Ui.Label, Ui.SansBold);
-        Knob(ctx, new Point(box.X + 28, ky + 10), 14, "LIMIAR", $"{c.GateThreshold:0}", LinNorm(c.GateThreshold, -80, 0), n => { c.GateThreshold = (float)Math.Round(FromLin(n, -80, 0)); Changed(); }, c.GateOn);
-        Knob(ctx, new Point(box.X + 70, ky + 10), 14, "SOLTURA", $"{c.GateRelease:0} ms", LogNorm(c.GateRelease, 5, 1000), n => { c.GateRelease = (float)Math.Round(FromLog(n, 5, 1000)); Changed(); }, c.GateOn);
-        Knob(ctx, new Point(box.X + 112, ky + 10), 14, "FAIXA", $"{c.GateRange:0} dB", LinNorm(c.GateRange, 0, 80), n => { c.GateRange = (float)Math.Round(FromLin(n, 0, 80)); Changed(); }, c.GateOn);
-        Cable(ctx, box.Right, box.Center.Y);
-        x = box.Right + 26;
+        Ui.Led(ctx, new Point(box.X + 18, box.Y + 32), 3.5, c.GateOn && S.Meters.GateOpen[mt], Ui.Green, Ui.GreenOff);
+        Ui.Text(ctx, "ABERTO", box.X + 26, box.Y + 26, 7, Ui.Label, Ui.SansBold);
+        Knob(ctx, new Point(box.X + 28, ky + 4), 14, "LIMIAR", $"{c.GateThreshold:0}", LinNorm(c.GateThreshold, -80, 0), n => { c.GateThreshold = (float)Math.Round(FromLin(n, -80, 0)); Changed(); }, c.GateOn);
+        Knob(ctx, new Point(box.X + 70, ky + 4), 14, "SOLTURA", $"{c.GateRelease:0} ms", LogNorm(c.GateRelease, 5, 1000), n => { c.GateRelease = (float)Math.Round(FromLog(n, 5, 1000)); Changed(); }, c.GateOn);
+        Knob(ctx, new Point(box.X + 112, ky + 4), 14, "FAIXA", $"{c.GateRange:0} dB", LinNorm(c.GateRange, 0, 80), n => { c.GateRange = (float)Math.Round(FromLin(n, 0, 80)); Changed(); }, c.GateOn);
+        Veil(c.GateOn);
+        Footswitch(ctx, new Point(box.Center.X, fy), c.GateOn, () => { c.GateOn = !c.GateOn; Changed(); }, has);
+        Next(3);
 
         // DQ-4 EQ (4 bands: low shelf, two bells, high shelf; frequency and gain per band)
-        box = new Rect(x, y, 216, h);
+        box = new Rect(x, y, 208, h);
         DrawDevice(ctx, box, "DQ-4", "EQ", c.EqOn);
-        Key(ctx, new Rect(box.X + 12, box.Y + 24, 40, 20), "ON", () => { c.EqOn = !c.EqOn; Changed(); }, c.EqOn, Ui.Green, has);
         string[] bandNames = ["GRAVE", "MÉDIO-G", "MÉDIO-A", "AGUDO"];
         for (int b = 0; b < Math.Min(4, c.Bands.Length); b++)
         {
             var band = c.Bands[b];
             double bx = box.X + 28 + b * 52;
-            Knob(ctx, new Point(bx, ky - 14), 12, bandNames[b], Hz(band.Freq), LogNorm(band.Freq, 20, 20000), n => { band.Freq = (float)Math.Round(FromLog(n, 20, 20000)); Changed(); }, c.EqOn);
-            Knob(ctx, new Point(bx, ky + 40), 12, "GANHO", $"{band.Gain:+0;-0}", LinNorm(band.Gain, -15, 15), n => { band.Gain = (float)Math.Round(FromLin(n, -15, 15), 1); Changed(); }, c.EqOn);
+            Knob(ctx, new Point(bx, y + 44), 12, bandNames[b], Hz(band.Freq), LogNorm(band.Freq, 20, 20000), n => { band.Freq = (float)Math.Round(FromLog(n, 20, 20000)); Changed(); }, c.EqOn);
+            Knob(ctx, new Point(bx, y + 100), 12, "GANHO", $"{band.Gain:+0;-0}", LinNorm(band.Gain, -15, 15), n => { band.Gain = (float)Math.Round(FromLin(n, -15, 15), 1); Changed(); }, c.EqOn);
         }
-        Cable(ctx, box.Right, box.Center.Y);
-        x = box.Right + 26;
+        Veil(c.EqOn);
+        Footswitch(ctx, new Point(box.Center.X, fy), c.EqOn, () => { c.EqOn = !c.EqOn; Changed(); }, has);
+        Next(4);
 
         // DC-5 COMP
-        box = new Rect(x, y, 184, h);
+        box = new Rect(x, y, 176, h);
         DrawDevice(ctx, box, "DC-5", "COMP", c.CompOn);
-        Key(ctx, new Rect(box.X + 12, box.Y + 24, 40, 20), "ON", () => { c.CompOn = !c.CompOn; Changed(); }, c.CompOn, Ui.Green, has);
-        float gr = S.Meters.Gr[Math.Min(S.Selected, 7)];
-        for (int i = 0; i < 8; i++) Ui.Led(ctx, new Point(box.X + 62 + i * 13, box.Y + 34), 3, c.CompOn && gr > 1 + i * 1.5, Ui.Amber, Ui.AmberOff);
-        Knob(ctx, new Point(box.X + 30, ky + 10), 13, "LIMIAR", $"{c.CompThreshold:0}", LinNorm(c.CompThreshold, -50, 0), n => { c.CompThreshold = (float)Math.Round(FromLin(n, -50, 0)); Changed(); }, c.CompOn);
-        Knob(ctx, new Point(box.X + 68, ky + 10), 13, "RAZÃO", $"{c.CompRatio:0.#}:1", LogNorm(c.CompRatio, 1, 20), n => { c.CompRatio = (float)Math.Round(FromLog(n, 1, 20), 1); Changed(); }, c.CompOn);
-        Knob(ctx, new Point(box.X + 106, ky + 10), 13, "ATAQUE", $"{c.CompAttack:0.#}", LogNorm(c.CompAttack, 0.1, 100), n => { c.CompAttack = (float)Math.Round(FromLog(n, 0.1, 100), 1); Changed(); }, c.CompOn);
-        Knob(ctx, new Point(box.X + 144, ky + 10), 13, "GANHO", $"{c.CompMakeup:+0}", LinNorm(c.CompMakeup, 0, 24), n => { c.CompMakeup = (float)Math.Round(FromLin(n, 0, 24)); Changed(); }, c.CompOn);
-        Cable(ctx, box.Right, box.Center.Y);
-        x = box.Right + 26;
+        float gr = S.Meters.Gr[mt];
+        for (int i = 0; i < 8; i++) Ui.Led(ctx, new Point(box.X + 18 + i * 13, box.Y + 32), 3, c.CompOn && gr > 1 + i * 1.5, Ui.Amber, Ui.AmberOff);
+        Ui.Text(ctx, "REDUÇÃO", box.X + 122, box.Y + 26, 7, Ui.Label, Ui.SansBold);
+        Knob(ctx, new Point(box.X + 30, ky + 4), 13, "LIMIAR", $"{c.CompThreshold:0}", LinNorm(c.CompThreshold, -50, 0), n => { c.CompThreshold = (float)Math.Round(FromLin(n, -50, 0)); Changed(); }, c.CompOn);
+        Knob(ctx, new Point(box.X + 68, ky + 4), 13, "RAZÃO", $"{c.CompRatio:0.#}:1", LogNorm(c.CompRatio, 1, 20), n => { c.CompRatio = (float)Math.Round(FromLog(n, 1, 20), 1); Changed(); }, c.CompOn);
+        Knob(ctx, new Point(box.X + 106, ky + 4), 13, "ATAQUE", $"{c.CompAttack:0.#}", LogNorm(c.CompAttack, 0.1, 100), n => { c.CompAttack = (float)Math.Round(FromLog(n, 0.1, 100), 1); Changed(); }, c.CompOn);
+        Knob(ctx, new Point(box.X + 144, ky + 4), 13, "GANHO", $"{c.CompMakeup:+0}", LinNorm(c.CompMakeup, 0, 24), n => { c.CompMakeup = (float)Math.Round(FromLin(n, 0, 24)); Changed(); }, c.CompOn);
+        Veil(c.CompOn);
+        Footswitch(ctx, new Point(box.Center.X, fy), c.CompOn, () => { c.CompOn = !c.CompOn; Changed(); }, has);
+
+        // The tap: the signal splits — OUT to the channel's fader, a send to the analyser.
+        var tap = new Point(box.Right + 14, box.Center.Y);
+        Patch(ctx, new Point(box.Right, box.Center.Y), tap, Lv(5), 0, led: false);
+        ctx.DrawEllipse(Ui.Amber, null, tap, 4, 4);
+        Ui.Text(ctx, "TAP", tap.X, tap.Y + 8, 7, Ui.Amber, Ui.SansBold, Ui.Align.Center);
+        Patch(ctx, tap, new Point(tap.X, y - 8), Lv(5), 0, led: false);
+        Patch(ctx, new Point(tap.X, y - 8), new Point(r.Right - 96, y - 8), Lv(5), 0, thin: true);
+        Ui.Text(ctx, $"OUT ▶ FADER {sel + 1} · DS-M", r.Right, y - 14, 8, Ui.LabelBright, Ui.SansBold, Ui.Align.Right);
+        x = box.Right + 28;
+        if (an0.Length > 0) Patch(ctx, tap, new Point(x, box.Center.Y), Lv(5), 0, send: true);
 
         var an = new Rect(x, y, r.Right - x, h);
-        DrawDevice(ctx, an, S.Mode is AppMode.VoiceMono or AppMode.InstrumentMono ? "DA-N" : "DA-C", "ANALISADOR", true);
+        DrawDevice(ctx, an, an0.Length > 0 ? string.Join(" ", an0) : "DA", an0.Length > 0 ? "ANALISADOR · ENVIO PRÉ-FADER" : "ANALISADOR · canal sem análise", an0.Length > 0);
         string mode = S.Mode switch
         {
             AppMode.VoiceMono => "VOZ", AppMode.InstrumentMono => "MELODIA", AppMode.GuitarChords => "VIOLÃO", AppMode.PianoChords => "PIANO", _ => "GERAL",
@@ -1188,7 +1322,8 @@ public sealed class ChainUnit : StudioUnit
             Plasma.Text(ctx, notes ? "NOTAS" : "ACORDES", win.X + 84, win.Y + 6, 13);
             string how = S.Stems.Count > 0 ? $"{t.Notes.Count} notas da voz · {t.Chords.Count} acordes · faixas separadas"
                 : notes ? "voz: take inteiro" : "take inteiro · Viterbi" + (S.FromTake && S.Edits.KeepsGrid ? " · grade do metrônomo" : "");
-            Plasma.Text(ctx, how.Length > 44 ? how[..44] : how, win.X + 84, win.Y + 24, 9, false);
+            int fit = (int)((win.Width - 92) / 6.2);   // mono 9 px
+            Plasma.Text(ctx, how.Length > fit ? how[..fit] : how, win.X + 84, win.Y + 24, 9, false);
         }
         else Plasma.Text(ctx, S.Separating ? $"SEPARANDO {S.SepProgress * 100:0} %" : S.Running ? $"{S.Progress * 100:0} %" : "—", win.X + 12, win.Y + 12, 16, S.Running || S.Separating);
     }
@@ -1208,19 +1343,6 @@ public sealed class ChainUnit : StudioUnit
             ctx.DrawEllipse(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF0B0C0D)), null, new Point(jx, box.Center.Y), 2.5, 2.5);
         }
     }
-
-    static void Cable(DrawingContext ctx, double x, double y)
-    {
-        var g = new StreamGeometry();
-        using (var c = g.Open())
-        {
-            c.BeginFigure(new Point(x, y), false);
-            c.CubicBezierTo(new Point(x + 8, y + 26), new Point(x + 18, y + 26), new Point(x + 26, y));
-            c.EndFigure(false);
-        }
-        ctx.DrawGeometry(null, CableBlack, g);
-        ctx.DrawGeometry(null, CableAmber, g);
-    }
 }
 
 /// DS-M: the console — one strip per channel (number, tape label, trim, insert LEDs in console order,
@@ -1237,31 +1359,48 @@ public sealed class ConsoleUnit : StudioUnit
     {
         if (S.Current is null) { Ui.Text(ctx, "escolha um take na biblioteca", r.Center.X, r.Center.Y, 12, Ui.Label, Ui.Mono, Ui.Align.Center); return; }
         var names = new Dictionary<string, string> { ["mix"] = "MIX", ["vocals"] = "VOZ", ["bass"] = "BAIXO", ["other"] = "OUTROS", ["drums"] = "BATERIA", ["guitar"] = "VIOLÃO", ["piano"] = "PIANO" };
-        double w = 118, x = r.X;
+        // ponytail: strips narrow down to 84 px; past six stems the master overlaps them — scroll the strips if that matters.
+        double w = Math.Clamp((r.Width - 308) / S.Tracks - 8, 84, 118), x = r.X, busY = r.Bottom - 8, stH = r.Height - 22;
+        float master = Math.Max(S.Meters.MasterPeak[0], S.Meters.MasterPeak[1]);
+        bool anySolo = Enumerable.Range(0, S.Tracks).Any(k => S.Channel(k).Solo);
         for (int t = 0; t < S.Tracks; t++, x += w + 8)
         {
             var c = S.Channel(t);
-            int track = t;
-            var st = new Rect(x, r.Y, w, r.Height);
+            int track = t, mt = Math.Min(t, 7);
+            var st = new Rect(x, r.Y, w, stH);
             ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF2A2D32)), t == S.Selected ? new ImmutablePen((IImmutableBrush)Ui.Amber, 1.5) : Ui.FaceEdge, st, 4, 4);
             Plasma.DotText(ctx, $"{t + 1}", st.X + 8, st.Y + 8, 2.2, 1);
             Tape(ctx, st.X + 26, st.Y + 6, names.GetValueOrDefault(S.NameOf(t), S.NameOf(t)), t % 2 == 0 ? -1.2 : 1.2);
-            Knob(ctx, new Point(st.Center.X, st.Y + 52), 13, "TRIM", $"{c.Trim:+0;-0} dB", LinNorm(c.Trim, -24, 24), n => { c.Trim = (float)Math.Round(FromLin(n, -24, 24)); S.MixChanged(); });
-            (string, bool)[] ins = [("FILT", c.HpOn || c.LpOn), ("GATE", c.GateOn), ("EQ", c.EqOn), ("COMP", c.CompOn)];
+            // Where the channel's signal comes from.
+            Ui.Led(ctx, new Point(st.X + 12, st.Y + 36), 2.4, S.Meters.Stage[mt, 0] > -60, LevelLed(S.Meters.Stage[mt, 0]), Ui.GreenOff);
+            Ui.Text(ctx, t == 0 ? "◀ FONTE direto" : $"◀ DS-S saída {t}", st.X + 20, st.Y + 30, 8, Ui.Label, Ui.Mono);
+            Knob(ctx, new Point(st.Center.X, st.Y + 62), 13, "TRIM", $"{c.Trim:+0;-0} dB", LinNorm(c.Trim, -24, 24), n => { c.Trim = (float)Math.Round(FromLin(n, -24, 24)); S.MixChanged(); });
+            // Inserts in signal order, joined by a thin cable, each with the level it hands on.
+            (string, bool, int)[] ins = [("FILT", c.HpOn || c.LpOn, 2), ("GATE", c.GateOn, 3), ("EQ", c.EqOn, 4), ("COMP", c.CompOn, 5)];
+            ctx.DrawLine(new ImmutablePen(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF0B0C0D)), 3), new Point(st.X + 5, st.Y + 100), new Point(st.X + 5, st.Y + 100 + ins.Length * 17));
             for (int i = 0; i < ins.Length; i++)
             {
-                var rr = new Rect(st.X + 8, st.Y + 88 + i * 17, w - 16, 15);
+                var rr = new Rect(st.X + 10, st.Y + 100 + i * 17, w - 18, 15);
                 ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(ins[i].Item2 ? 0xFF24272Bu : 0xFF16181Bu)), Ui.FaceEdge, rr, 2, 2);
                 Ui.Text(ctx, ins[i].Item1, rr.X + 5, rr.Y + 1, 8, ins[i].Item2 ? Ui.LabelBright : Ui.Label, Ui.Mono);
+                if (!ins[i].Item2) Ui.Text(ctx, "bypass", rr.X + 40, rr.Y + 2, 7, Ui.Label, Ui.Mono);
+                float lv = S.Meters.Stage[mt, ins[i].Item3];
+                Ui.Led(ctx, new Point(rr.Right - 18, rr.Center.Y), 2.2, lv > -60, LevelLed(lv), Ui.GreenOff);
                 Ui.Led(ctx, new Point(rr.Right - 7, rr.Center.Y), 2.6, ins[i].Item2, Ui.Green, Ui.GreenOff);
             }
-            Key(ctx, new Rect(st.X + 8, st.Y + 160, w - 16, 18), "CADEIA ↓", () => { S.Selected = track; S.Select(); }, t == S.Selected, Ui.Amber);
-            Knob(ctx, new Point(st.Center.X, st.Y + 204), 12, "PAN", c.Pan == 0 ? "C" : c.Pan < 0 ? $"L{-c.Pan * 100:0}" : $"R{c.Pan * 100:0}", (c.Pan + 1) / 2, n => { c.Pan = (float)Math.Round(n * 2 - 1, 2); if (Math.Abs(c.Pan) < 0.04f) c.Pan = 0; S.MixChanged(); });
-            Key(ctx, new Rect(st.X + 14, st.Y + 244, 40, 22), "M", () => { c.Mute = !c.Mute; S.MixChanged(); }, c.Mute, Ui.Amber);
-            Key(ctx, new Rect(st.Right - 54, st.Y + 244, 40, 22), "S", () => { c.Solo = !c.Solo; S.MixChanged(); }, c.Solo, Ui.Green);
+            // The send to the analysis: a copy from the tap, before the fader.
+            var an = S.AnalysersOf(t);
+            var send = new Rect(st.X + 10, st.Y + 172, w - 18, 15);
+            ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(an.Length > 0 ? 0xFF2E2614u : 0xFF16181Bu)), new ImmutablePen(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF5A4410)), 1, new ImmutableDashStyle([3, 2], 0)), send, 2, 2);
+            Ui.Text(ctx, an.Length > 0 ? "ENVIO ▶ " + string.Join(" ", an) : "sem envio", send.X + 5, send.Y + 1, 8, an.Length > 0 ? Ui.Amber : Ui.Label, Ui.Mono);
+            Key(ctx, new Rect(st.X + 8, st.Y + 194, w - 16, 18), "CADEIA ↓", () => { S.Selected = track; S.Select(); }, t == S.Selected, Ui.Amber);
+            Knob(ctx, new Point(st.Center.X, st.Y + 236), 12, "PAN", c.Pan == 0 ? "C" : c.Pan < 0 ? $"L{-c.Pan * 100:0}" : $"R{c.Pan * 100:0}", (c.Pan + 1) / 2, n => { c.Pan = (float)Math.Round(n * 2 - 1, 2); if (Math.Abs(c.Pan) < 0.04f) c.Pan = 0; S.MixChanged(); });
+            double kw = Math.Min(40, (w - 30) / 2);
+            Key(ctx, new Rect(st.Center.X - kw - 5, st.Y + 274, kw, 22), "M", () => { c.Mute = !c.Mute; S.MixChanged(); }, c.Mute, Ui.Amber);
+            Key(ctx, new Rect(st.Center.X + 5, st.Y + 274, kw, 22), "S", () => { c.Solo = !c.Solo; S.MixChanged(); }, c.Solo, Ui.Green);
             // Meter (post-fader peak) and fader.
-            var slot = new Rect(st.Center.X + 6, st.Y + 282, 20, st.Bottom - st.Y - 282 - 34);
-            float pk = S.Meters.Peak[Math.Min(t, 7)];
+            var slot = new Rect(st.Center.X + 6, st.Y + 312, 20, Math.Max(40, st.Bottom - st.Y - 312 - 34));
+            float pk = S.Meters.Peak[mt];
             int segs = (int)(slot.Height / 7);
             for (int i = 0; i < segs; i++)
             {
@@ -1271,30 +1410,48 @@ public sealed class ConsoleUnit : StudioUnit
             }
             Fader(ctx, slot, FaderNorm(c.Fader), n => { c.Fader = FaderDb(n); S.MixChanged(); });
             Plasma.Text(ctx, c.Fader <= -90 ? "-inf" : $"{c.Fader:+0.0;-0.0}", st.Center.X, st.Bottom - 24, 11, true, Ui.Mono, Ui.Align.Center);
+            // Into the sum bus — open while the channel sounds.
+            bool sounding = !c.Mute && !(anySolo && !c.Solo);
+            Jack(ctx, new Point(st.Center.X, st.Bottom));
+            if (sounding) Patch(ctx, new Point(st.Center.X, st.Bottom), new Point(st.Center.X, busY), pk, 0, thin: true, led: false);
+            else Ui.Text(ctx, "✕", st.Center.X + 8, st.Bottom + 2, 9, Ui.Amber, Ui.SansBold);
         }
 
         // Master.
         var m = S.Mix.Master;
         double mw = 300, mx = r.Right - mw;
-        var ms = new Rect(mx, r.Y, mw, r.Height);
+        var ms = new Rect(mx, r.Y, mw, stH);
+        Patch(ctx, new Point(r.X + w / 2, busY), new Point(ms.X + 26, busY), master, 0, thin: true, led: false);
+        Ui.Text(ctx, "BUS DE SOMA ▶ MASTER", (r.X + w / 2 + ms.X) / 2, busY - 12, 7, Ui.Label, Ui.SansBold, Ui.Align.Center);
+        Patch(ctx, new Point(ms.X + 26, busY), new Point(ms.X + 26, ms.Bottom), master, 0, thin: true, led: false);
         ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF2A2D32)), new ImmutablePen((IImmutableBrush)Ui.Amber, 1), ms, 4, 4);
+        Jack(ctx, new Point(ms.X + 26, ms.Bottom));
         Tape(ctx, ms.X + 10, ms.Y + 6, "MASTER", -1);
+        Ui.Text(ctx, "BUS ▶ EQ ▶ COMP ▶ FADER ▶ DL-6 ▶ SAÍDA", ms.Right - 10, ms.Y + 10, 7, Ui.Label, Ui.SansBold, Ui.Align.Right);
         float vuL = S.Meters.MasterRms[0] + 18, vuR = S.Meters.MasterRms[1] + 18;   // 0 VU = -18 dBFS
         InputModule.DrawVu(ctx, new Rect(ms.X + 12, ms.Y + 34, 134, 80), vuL);
         InputModule.DrawVu(ctx, new Rect(ms.X + 154, ms.Y + 34, 134, 80), vuR);
-        Key(ctx, new Rect(ms.X + 12, ms.Y + 126, 60, 22), "EQ", () => { m.EqOn = !m.EqOn; S.MixChanged(); }, m.EqOn, Ui.Green);
-        Key(ctx, new Rect(ms.X + 78, ms.Y + 126, 60, 22), "COMP", () => { m.CompOn = !m.CompOn; S.MixChanged(); }, m.CompOn, Ui.Green);
-        Key(ctx, new Rect(ms.X + 144, ms.Y + 126, 72, 22), "LIMITER", () => { m.LimiterOn = !m.LimiterOn; S.MixChanged(); }, m.LimiterOn, Ui.Green);
+        // The master chain in signal order (the fader sits before the limiter, as in the core).
+        var keys = new[] { new Rect(ms.X + 12, ms.Y + 126, 60, 22), new Rect(ms.X + 84, ms.Y + 126, 60, 22), new Rect(ms.X + 156, ms.Y + 126, 86, 22) };
+        Key(ctx, keys[0], "EQ", () => { m.EqOn = !m.EqOn; S.MixChanged(); }, m.EqOn, Ui.Green);
+        Key(ctx, keys[1], "COMP", () => { m.CompOn = !m.CompOn; S.MixChanged(); }, m.CompOn, Ui.Green);
+        Key(ctx, keys[2], "DL-6 LIMIT", () => { m.LimiterOn = !m.LimiterOn; S.MixChanged(); }, m.LimiterOn, Ui.Green);
+        for (int i = 0; i < 2; i++) Patch(ctx, new Point(keys[i].Right, keys[i].Center.Y + 4), new Point(keys[i + 1].X, keys[i + 1].Center.Y + 4), master, 6, thin: true, led: false);
         Knob(ctx, new Point(ms.X + 40, ms.Y + 186), 14, "LIMIAR", $"{m.CompThreshold:0}", LinNorm(m.CompThreshold, -40, 0), n => { m.CompThreshold = (float)Math.Round(FromLin(n, -40, 0)); S.MixChanged(); }, m.CompOn);
         Knob(ctx, new Point(ms.X + 100, ms.Y + 186), 14, "RAZÃO", $"{m.CompRatio:0.#}:1", LogNorm(m.CompRatio, 1, 10), n => { m.CompRatio = (float)Math.Round(FromLog(n, 1, 10), 1); S.MixChanged(); }, m.CompOn);
         Knob(ctx, new Point(ms.X + 160, ms.Y + 186), 14, "TETO", $"{m.Ceiling:0.0}", LinNorm(m.Ceiling, -12, 0), n => { m.Ceiling = (float)Math.Round(FromLin(n, -12, 0), 1); S.MixChanged(); }, m.LimiterOn);
         for (int i = 0; i < 8; i++) Ui.Led(ctx, new Point(ms.X + 196 + i * 11, ms.Y + 186), 3, S.Meters.LimiterGr > 0.5 + i, Ui.Red, Ui.RedOff);
         Ui.Text(ctx, "LIMITANDO", ms.X + 196, ms.Y + 196, 7, Ui.Label, Ui.SansBold);
-        var mslot = new Rect(ms.X + 40, ms.Y + 236, 20, ms.Bottom - ms.Y - 236 - 34);
+        var mslot = new Rect(ms.X + 40, ms.Y + 236, 20, Math.Max(40, ms.Bottom - ms.Y - 236 - 34));
         Fader(ctx, mslot, FaderNorm(m.Fader), n => { m.Fader = FaderDb(n); S.MixChanged(); });
         Plasma.Text(ctx, $"{m.Fader:+0.0;-0.0}", mslot.Center.X, ms.Bottom - 24, 11, true, Ui.Mono, Ui.Align.Center);
-        Key(ctx, new Rect(ms.X + 120, ms.Bottom - 70, 150, 34), "BOUNCE WAV", S.Bounce, false, Ui.Amber);
-        Ui.Text(ctx, "escuta e bounce; não a transcrição", ms.X + 120, ms.Bottom - 30, 7, Ui.Label, Ui.Mono);
+        // Output: headphones / the bounce.
+        var outJ = new Point(ms.Right - 22, mslot.Y + 6);
+        Jack(ctx, outJ);
+        Ui.Text(ctx, "SAÍDA · fone / bounce", outJ.X + 8, outJ.Y + 10, 7, Ui.LabelBright, Ui.SansBold, Ui.Align.Right);
+        Patch(ctx, new Point(mslot.Center.X + 20, outJ.Y), outJ, master, 0, thin: true);
+        Key(ctx, new Rect(ms.X + 110, ms.Bottom - 70, 150, 34), "BOUNCE WAV", S.Bounce, false, Ui.Amber);
+        Ui.Text(ctx, "escuta e bounce; não a transcrição", ms.X + 110, ms.Bottom - 30, 7, Ui.Label, Ui.Mono);
     }
 }
 
@@ -1317,39 +1474,50 @@ public sealed class StudioView : DockPanel
         var recorder = new RecorderUnit(_s);
         var chain = new ChainUnit(_s);
         var console = new ConsoleUnit(_s) { IsVisible = false };
+        var flow = new FlowUnit(_s) { Margin = new Thickness(0, 0, 0, 6) };
+        var meters = new MeterUnit(_s) { Margin = new Thickness(6, 0, 0, 0) };
         _recorder = recorder;
         _console = console;
-        _units = [transport, library, recorder, console, chain];
+        _library = library;
+        _units = [transport, flow, library, recorder, console, meters, chain];
         var left = new RackRail();
         var right = new RackRail();
         SetDock(left, Dock.Left);
         SetDock(right, Dock.Right);
         Children.Add(left);
         Children.Add(right);
-        var body = new DockPanel { Margin = new Thickness(6, 0) };
+        // Top to bottom as the signal goes: transport, the session's flow, the channels (library,
+        // recorder or console, measuring tubes), the selected channel's chain. Taller than a small
+        // window: the rack scrolls.
+        var body = new DockPanel { Margin = new Thickness(6, 0), MinHeight = 1060 };
         SetDock(transport, Dock.Top);
         transport.Margin = new Thickness(0, 6);
+        SetDock(flow, Dock.Top);
         SetDock(_status, Dock.Bottom);
         SetDock(chain, Dock.Bottom);
         chain.Margin = new Thickness(0, 6, 0, 0);
         SetDock(library, Dock.Left);
         library.Margin = new Thickness(0, 0, 6, 0);
+        SetDock(meters, Dock.Right);
         body.Children.Add(transport);
+        body.Children.Add(flow);
         body.Children.Add(_status);
         body.Children.Add(chain);
         body.Children.Add(library);
+        body.Children.Add(meters);
         body.Children.Add(new Panel { Children = { recorder, console } });
-        Children.Add(body);
+        Children.Add(new ScrollViewer { Content = body, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled });
         _s.Changed += Refresh;
         if (_s.Player is null) _s.Status = "núcleo nativo ausente: biblioteca sem reprodução nem análise";
     }
 
-    readonly StudioUnit _recorder, _console;
+    readonly StudioUnit _recorder, _console, _library;
 
     void Refresh()
     {
         _recorder.IsVisible = !_s.ConsoleView;
         _console.IsVisible = _s.ConsoleView;
+        _library.IsVisible = !_s.ConsoleView;   // mixing: the console takes the library's width
         foreach (var u in _units) u.InvalidateVisual();
         _status.Text = _s.Status;
     }
@@ -1357,6 +1525,7 @@ public sealed class StudioView : DockPanel
     /// Animation tick from the window: job progress, meters, playhead, readouts.
     public void Tick() { _s.Poll(); _s.PollMeters(); Refresh(); }
     public void ShowConsole(bool on) { _s.ConsoleView = on; Refresh(); }
+    public void SelectChannel(int track) { _s.Selected = Math.Clamp(track, 0, _s.Tracks - 1); Refresh(); }
 
     public void TogglePlay() => _s.TogglePlay();
     public void OpenFirst() { if (_s.Library.Count > 0) _s.Open(_s.Library[0].Path); Refresh(); }
@@ -1375,6 +1544,16 @@ public sealed class StudioView : DockPanel
             case "clear": _s.ClearFixes(); _s.ApplyKey(null); break;
             case "deliver": _s.Deliver(); break;
         }
+        Refresh();
+    }
+    /// Screenshot tool: plays from `seconds` for `forSeconds` without a device.
+    public void PlayHeadless(double seconds, double forSeconds)
+    {
+        if (_s.Player is not { } p) return;
+        p.Seek((ulong)(seconds * _s.Rate));
+        p.Play();
+        long now = Environment.TickCount64;
+        for (double t = 0; t < forSeconds; t += 0.05) { p.Pull((int)(0.05 * _s.Rate)); _s.PollMeters(now += 50); }
         Refresh();
     }
     public void SelectRange(double fromSeconds, double toSeconds) { _s.SelStart = fromSeconds * _s.Rate; _s.SelEnd = toSeconds * _s.Rate; Refresh(); }
