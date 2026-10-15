@@ -484,8 +484,59 @@ public sealed class StudioState
 
     public void Cancel() { _queue.Clear(); Job?.Cancel(); _sep?.Cancel(); _install?.Cancel(); }
 
+    // ---------------------------------------------------------------- recording in STUDIO
+    // The core's recorder (the same as LIVE's REC: input, count-in and metronome from START, a
+    // take WAV + JSON sidecar in the takes folder); the take opens here when it is written.
+
+    /// The window's side: the live frame (input level, REC state), REC itself (null or an error),
+    /// the input's name.
+    public sealed record InputHooks(Func<LiveFrame> Frame, Func<string?> ToggleRec, Func<string> Device);
+    public InputHooks? Input;
+    public string InputName = "";
+    bool _ownRec, _wasRec;
+    DateTime _recStarted;
+    long _openBy;
+    public LiveFrame? InputFrame => Input?.Frame();
+    public bool Recording => InputFrame is { Simulated: false } f && (f.Recording || f.CountingIn);
+
+    public void ToggleRec()
+    {
+        if (Input is null) { Status = "gravação ausente nesta instalação"; Changed?.Invoke(); return; }
+        bool starting = !Recording;
+        if (starting)
+        {
+            if (Running || Separating) { Status = "espere a análise / separação terminar para gravar"; Changed?.Invoke(); return; }
+            Player?.Stop();
+            InputName = Input.Device();
+            _recStarted = DateTime.Now;
+        }
+        var err = Input.ToggleRec();
+        if (err is not null) { Status = "REC: " + err; Changed?.Invoke(); return; }
+        _ownRec = true;
+        Status = starting ? $"REC armado: contagem de {Session.CountInBars} compasso(s) a {Session.Bpm:0} BPM · entrada {InputName}" : "REC parado: gravando o take…";
+        Changed?.Invoke();
+    }
+
+    void PollRecording()
+    {
+        bool rec = Recording;
+        if (_wasRec && !rec && _ownRec) _openBy = Environment.TickCount64 + 5000;   // the core finishes the WAV and the sidecar
+        _wasRec = rec;
+        if (_openBy == 0) return;
+        if (Environment.TickCount64 > _openBy) { _openBy = 0; _ownRec = false; Status = "take gravado, mas não apareceu na biblioteca: ATUALIZAR"; Changed?.Invoke(); return; }
+        var take = Directory.Exists(Take.Folder) ? Directory.GetFiles(Take.Folder, "take-*.wav").Where(p => File.GetLastWriteTime(p) >= _recStarted.AddSeconds(-1)).OrderByDescending(File.GetLastWriteTime).FirstOrDefault() : null;
+        if (take is null || !File.Exists(Path.ChangeExtension(take, ".json"))) return;
+        _openBy = 0;
+        _ownRec = false;
+        ReloadLibrary();
+        Open(take);
+        Status = $"take gravado: {Path.GetFileNameWithoutExtension(take)} · entrada {InputName}";
+        Changed?.Invoke();
+    }
+
     public void Poll()
     {
+        PollRecording();
         PollSeparation();
         if (!Running || Job is null || _pass is null) return;
         var (state, progress) = Job.Poll();
@@ -784,27 +835,41 @@ public sealed class TransportUnit : StudioUnit
         Key(ctx, new Rect(x, y + 4, 48, 34), p?.Playing == true ? "■" : "▶", S.TogglePlay, p?.Playing == true);
         Key(ctx, new Rect(x + 56, y + 4, 48, 34), "LOOP", S.ToggleLoop, p?.Looping == true, Ui.Amber);
         Key(ctx, new Rect(x + 112, y + 4, 82, 34), S.ConsoleView ? "GRAVADOR" : "CONSOLE", () => { S.ConsoleView = !S.ConsoleView; S.Select(); }, S.ConsoleView, Ui.Amber);
-        x += 214;
-        double sec = (p?.Position ?? 0) / S.Rate, mus = sec - S.GridOrigin;
-        int bar = (int)Math.Floor(mus / S.Bar), beat = (int)Math.Floor((mus - bar * S.Bar) / S.Beat), six = (int)Math.Floor((mus - bar * S.Bar - beat * S.Beat) / (S.Beat / 4));
-        x += Readout(ctx, x, y, mus < 0 ? "0.0.0" : $"{bar + 1}.{beat + 1}.{six + 1}", 7, 3.4, "POSIÇÃO") + 12;
-        var t = TimeSpan.FromSeconds(Math.Max(0, sec));
-        x += Readout(ctx, x, y, $"{(int)t.TotalMinutes}:{t.Seconds:00}.{t.Milliseconds / 10:00}", 7, 2.6, "TEMPO") + 12;
-        x += Readout(ctx, x, y, $"{(S.Review.TempoFromDrums && S.ResultTake is { } rt ? rt.Bpm : S.Session.Bpm):0.0}", 5, 2.6, S.Review.TempoFromDrums ? "BPM BATERIA" : "BPM") + 12;
-        x += Readout(ctx, x, y, $"{S.Session.BeatsPerBar}/{S.Session.BeatUnit}", 3, 2.6, "COMPASSO") + 12;
+        // REC: the core's recorder through the START input; the LED blinks on the count-in.
+        var inF = S.InputFrame;
+        bool rec = S.Recording, countIn = rec && inF!.CountingIn;
+        Key(ctx, new Rect(x + 202, y + 4, 48, 34), "●", S.ToggleRec, rec && (!countIn || inF!.BeatInBar % 2 == 1), Ui.Red, S.Input is not null);
+        x += 268;
+        if (rec)
+        {   // while recording the readouts show the take, not the player
+            double rs = inF!.RecordedSeconds;
+            var rts = TimeSpan.FromSeconds(Math.Max(0, rs));
+            x += Readout(ctx, x, y, countIn ? $"-{Math.Ceiling(-rs):0}" : $"{(int)rts.TotalMinutes}:{rts.Seconds:00}.{rts.Milliseconds / 10:00}", 7, 3.0, countIn ? "CONTAGEM" : "GRAVANDO") + 12;
+            x += Readout(ctx, x, y, $"{inF.PeakDbfs:0.0}", 6, 2.4, "ENTRADA dBFS") + 12;
+        }
+        else
+        {
+            double sec = (p?.Position ?? 0) / S.Rate, mus = sec - S.GridOrigin;
+            int bar = (int)Math.Floor(mus / S.Bar), beat = (int)Math.Floor((mus - bar * S.Bar) / S.Beat), six = (int)Math.Floor((mus - bar * S.Bar - beat * S.Beat) / (S.Beat / 4));
+            x += Readout(ctx, x, y, mus < 0 ? "0.0.0" : $"{bar + 1}.{beat + 1}.{six + 1}", 7, 3.0, "POSIÇÃO") + 12;
+            var t = TimeSpan.FromSeconds(Math.Max(0, sec));
+            x += Readout(ctx, x, y, $"{(int)t.TotalMinutes}:{t.Seconds:00}.{t.Milliseconds / 10:00}", 7, 2.4, "TEMPO") + 12;
+        }
+        x += Readout(ctx, x, y, $"{(S.Review.TempoFromDrums && S.ResultTake is { } rt ? rt.Bpm : S.Session.Bpm):0.0}", 5, 2.2, S.Review.TempoFromDrums ? "BPM BATERIA" : "BPM") + 12;
+        x += Readout(ctx, x, y, $"{S.Session.BeatsPerBar}/{S.Session.BeatUnit}", 3, 2.2, "COMPASSO") + 12;
         // S6: the key is the user's; STUDIO only suggests. Tempo: the metronome, or the drums' map.
         string KeyShort(KeyOption k) => k.Tonic.Replace("♭", "b").Replace("♯", "#") + (k.Minor ? "m" : "");
-        x += Readout(ctx, x, y, S.Session.KeySet ? KeyShort(S.Session.Key) : "--", 3, 2.6, "TOM") + 8;
+        x += Readout(ctx, x, y, S.Session.KeySet ? KeyShort(S.Session.Key) : "--", 3, 2.2, "TOM") + 8;
         if (S.Suggestion is { } sg && !(S.Session.KeySet && S.Session.Key == sg.Key))
         {
             bool unsure = sg.Margin < 0.05 || sg.Correlation < 0.6;
-            Key(ctx, new Rect(x, y, 112, 20), $"APLICAR {KeyShort(sg.Key)}", () => S.ApplyKey(sg.Key), false, Ui.Amber, !S.Running);
-            Ui.Text(ctx, $"sugestão {sg.Correlation * 100:0}%{(unsure ? " · incerta" : "")}", x + 56, y + 22, 7, unsure ? Ui.Label : Ui.Amber, Ui.SansBold, Ui.Align.Center);
+            Key(ctx, new Rect(x, y, 100, 20), $"APLICAR {KeyShort(sg.Key)}", () => S.ApplyKey(sg.Key), false, Ui.Amber, !S.Running);
+            Ui.Text(ctx, $"sugestão {sg.Correlation * 100:0}%{(unsure ? " · incerta" : "")}", x + 50, y + 22, 7, unsure ? Ui.Label : Ui.Amber, Ui.SansBold, Ui.Align.Center);
         }
         else if (S.Session.KeySet)
-            Key(ctx, new Rect(x, y, 112, 20), "SEM TOM", () => S.ApplyKey(null), false, Ui.Amber, !S.Running);
+            Key(ctx, new Rect(x, y, 100, 20), "SEM TOM", () => S.ApplyKey(null), false, Ui.Amber, !S.Running);
         if (S.ResultTake is { Beats.Count: > 0 } || S.Review.TempoFromDrums)
-            Key(ctx, new Rect(x, y + 34, 112, 20), S.Review.TempoFromDrums ? "TEMPO BATERIA" : "TEMPO CLICK", S.ToggleTempoSource, S.Review.TempoFromDrums, Ui.Amber);
+            Key(ctx, new Rect(x, y + 34, 100, 20), S.Review.TempoFromDrums ? "TEMPO BATERIA" : "TEMPO CLICK", S.ToggleTempoSource, S.Review.TempoFromDrums, Ui.Amber);
         if (p is { Looping: true } && S.HasSelection)
         {
             x += Readout(ctx, x, y, $"{S.SelStart / S.Rate:0.00}", 5, 2.2, "LOOP INÍCIO") + 8;
@@ -1525,6 +1590,8 @@ public sealed class StudioView : DockPanel
     /// Animation tick from the window: job progress, meters, playhead, readouts.
     public void Tick() { _s.Poll(); _s.PollMeters(); Refresh(); }
     public void ShowConsole(bool on) { _s.ConsoleView = on; Refresh(); }
+    public StudioState.InputHooks? Input { set => _s.Input = value; }
+    public void ToggleRec() { _s.ToggleRec(); Refresh(); }
     public void SelectChannel(int track) { _s.Selected = Math.Clamp(track, 0, _s.Tracks - 1); Refresh(); }
 
     public void TogglePlay() => _s.TogglePlay();

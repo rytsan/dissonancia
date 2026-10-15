@@ -99,6 +99,12 @@ dark = nothing, amber = signal, bright = over -6 dBFS, red = over 0).
   EBU and -14 streaming marks) with plasma readouts: integrated LUFS, short-term, momentary,
   true peak, LRA (BS.1770-4 / EBU R128 in the core; ZERAR resets).
 - The rack is taller than a 900 px window and scrolls; in console view the library steps aside.
+- **REC in STUDIO (decision 2026-10-15):** ● on DS-T records through the core's recorder — the
+  same as LIVE's REC: input, rate, count-in and metronome from START, a take WAV + JSON sidecar
+  in the takes folder. If START has not opened the input, the ● opens it with the START options.
+  While armed / recording the transport shows the count-in or the recorded time and the input
+  level, and DS-P's FONTE becomes ENTRADA · ● REC with the device and its level; the player stops.
+  When the take is written it opens in STUDIO. LIVE is unchanged.
 
 ## Milestones (in studio order)
 

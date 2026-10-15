@@ -107,6 +107,7 @@ public sealed class MainWindow : Window
             ["StudioAnalyze"] = () => _studio.AnalyzeCurrent(),
             ["StudioSeparate"] = () => _studio.SeparateCurrent(),
             ["StudioTick"] = () => _studio.Tick(),
+            ["StudioRec"] = () => _studio.ToggleRec(),
             ["StudioConsole"] = () => _studio.ShowConsole(true),
             ["StudioPick"] = () => _studio.ReviewAction("pick"),
             ["StudioFixRoot"] = () => _studio.ReviewAction("root"),
@@ -133,6 +134,7 @@ public sealed class MainWindow : Window
         _scoreTab = new TabItem { Header = "SCORE", Content = BuildScoreTab() };
         _studio = new StudioView(_session);
         _studio.ScoreRequested += json => ShowScore(json);
+        _studio.Input = new StudioState.InputHooks(() => _frame, StudioRec, InputName);
         _studioTab = new TabItem { Header = "STUDIO", Content = _studio };
         _tabs.ItemsSource = new[]
         {
@@ -184,6 +186,25 @@ public sealed class MainWindow : Window
             }
         }
         _tabs.SelectedItem = _liveTab;
+    }
+
+    /// REC from STUDIO: the core's recorder with the START options; opens the input if START has not.
+    string? StudioRec()
+    {
+        if (_source is not NativeLiveSource)
+        {
+            if (_core is null) return $"núcleo nativo ausente ({_coreError})";
+            try { _source = _core.Start(_session); }
+            catch (InvalidOperationException e) { _source = new FakeLiveSource(_session); return "a entrada não abriu: " + e.Message; }
+        }
+        _source.ToggleRec(Clock());
+        return (_source as NativeLiveSource)?.LastError;
+    }
+
+    string InputName()
+    {
+        var devices = _core?.CaptureDevices() ?? [];
+        return _session.CaptureDevice >= 0 && _session.CaptureDevice < devices.Length ? devices[_session.CaptureDevice] : "padrão do sistema";
     }
 
     /// Default rack preset per mode (spec §22.4): the chord timeline only makes sense in chord modes.

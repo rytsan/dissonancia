@@ -40,9 +40,21 @@ public sealed class FlowUnit : StudioUnit
 
         // FONTE and DS-S.
         var src = new Rect(r.X, yBox, 128, hBox);
-        Box(ctx, src, "", "FONTE", has);
-        string take = S.Current is null ? "—" : Path.GetFileNameWithoutExtension(S.Current);
-        Ui.Text(ctx, take.Length > 20 ? take[..20] : take, src.X + 7, src.Y + 17, 9, Ui.LabelBright, Ui.Mono);
+        if (S.Recording && S.InputFrame is { } inF)
+        {   // recording: the source is the input, its level on the jack, the take being written
+            Box(ctx, src, "", inF.CountingIn ? "ENTRADA · CONTAGEM" : "ENTRADA · ● REC", true);
+            Ui.Led(ctx, new Point(src.Right - 18, src.Y + 8), 3, !inF.CountingIn, Ui.Red, Ui.RedOff);
+            string dev = S.InputName.Length > 19 ? S.InputName[..19] : S.InputName;
+            Ui.Text(ctx, dev, src.X + 7, src.Y + 17, 9, Ui.LabelBright, Ui.Mono);
+            for (int i = 0; i < 10; i++) Ui.Led(ctx, new Point(src.X + 10 + i * 11, src.Bottom + 6), 2, inF.PeakDbfs > -54 + i * 5.4, i > 8 ? Ui.Red : i > 6 ? Ui.Amber : Ui.Green, Ui.GreenOff);
+            Ui.Text(ctx, "▶ grava o take na biblioteca", src.X, src.Bottom + 12, 7, Ui.Red, Ui.SansBold);
+        }
+        else
+        {
+            Box(ctx, src, "", "FONTE", has);
+            string take = S.Current is null ? "—" : Path.GetFileNameWithoutExtension(S.Current);
+            Ui.Text(ctx, take.Length > 20 ? take[..20] : take, src.X + 7, src.Y + 17, 9, Ui.LabelBright, Ui.Mono);
+        }
         Jack(ctx, new Point(src.Right, src.Center.Y));
         var sep = new Rect(src.Right + 34, yBox, 118, hBox);
         Box(ctx, sep, "DS-S", "SEPARADOR", stems);
