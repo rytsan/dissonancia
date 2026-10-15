@@ -201,7 +201,12 @@ this order because each stage needs the one before it, as in a studio.
   the bounce all hear it. Render cached by a key of the source and each insert's saved state;
   the key is part of the tap's cache key; analysis waits for a render. A failing plugin leaves
   the channel playing without its VST3, with the helper's error on the status line.
-- Step 4 — the plugin's editor in its own window; latency and tail compensation.
+- Step 4 — latency (done 2026-10-15): the render asks the plugin's latency after its state and
+  parameters are in, runs that many frames past the end and drops them from the start, so the
+  render lines up with the take sample for sample (checked with DZ Test Gain's 64-sample
+  look-ahead switch). Tails past the end are cut: a channel keeps the take's length.
+- Step 4 — parameters and editor: a generic parameter panel in the rack (any plugin), and the
+  plugin's own editor in a native window owned by the helper.
 
 ### Later
 - S9: choir by section, SATB (spec M9, §21) — experimental.

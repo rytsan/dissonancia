@@ -23,7 +23,12 @@ public static class PluginHost
 
     static long Stamp(string bundle)
     {
-        try { return Directory.Exists(bundle) ? Directory.GetLastWriteTimeUtc(bundle).Ticks : File.GetLastWriteTimeUtc(bundle).Ticks; }
+        try   // a bundle is a folder: its newest file (a rebuilt binary leaves the folder's own time alone)
+        {
+            return Directory.Exists(bundle)
+                ? Directory.EnumerateFiles(bundle, "*", SearchOption.AllDirectories).Select(f => File.GetLastWriteTimeUtc(f).Ticks).DefaultIfEmpty(Directory.GetLastWriteTimeUtc(bundle).Ticks).Max()
+                : File.GetLastWriteTimeUtc(bundle).Ticks;
+        }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return 0; }
     }
 

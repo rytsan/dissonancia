@@ -7,7 +7,8 @@
 //   dz_plugin render <bundle.vst3> <cid> <in.wav> <out.wav> [--state-in f] [--state-out f]
 //                    [--param id=normalized]... [--block frames]
 //                                 -> the file through the effect, offline (kOffline, 32-bit float,
-//                                    fixed block); "progress x" lines on stdout; the plugin's state
+//                                    fixed block), the plugin's latency compensated (its first
+//                                    samples dropped, the input padded); "progress x" lines on stdout; the plugin's state
 //                                    is restored from / saved to its own binary blob
 // The app runs one scan per bundle (a crashing bundle loses only itself) and caches the result.
 #include "miniaudio.h"
@@ -156,22 +157,31 @@ int render(int argc, char** argv) {
     ProcessContext context{};
     context.sampleRate = rate;
     data.processContext = &context;
+    // Latency: run `latency` frames past the end (silence in) and drop as many from the start, so
+    // the render lines up with the take sample for sample. Asked after the parameters and state
+    // are in (a latency switch changes it): one empty block carries the parameter changes first.
+    data.numSamples = 0;
+    data.inputParameterChanges = &changes;
+    proc->process(data);
+    data.inputParameterChanges = nullptr;
+    const size_t latency = proc->getLatencySamples(), total = frames + latency;
     std::vector<float> out(frames * size_t(outCh), 0.f);
-    for (size_t pos = 0; pos < frames; pos += size_t(block)) {
-        const int32 n = int32(std::min<size_t>(size_t(block), frames - pos));
+    for (size_t pos = 0; pos < total; pos += size_t(block)) {
+        const int32 n = int32(std::min<size_t>(size_t(block), total - pos));
         for (int32 c = 0; c < inCh; c++) {
             float* b = data.inputs[0].channelBuffers32[c];
             const uint32_t src = std::min<uint32_t>(uint32_t(c), fileCh - 1);
-            for (int32 i = 0; i < n; i++) b[i] = in[(pos + size_t(i)) * fileCh + src];
+            for (int32 i = 0; i < n; i++) b[i] = pos + size_t(i) < frames ? in[(pos + size_t(i)) * fileCh + src] : 0.f;
         }
         data.numSamples = n;
-        data.inputParameterChanges = pos == 0 ? &changes : nullptr;
         context.projectTimeSamples = TSamples(pos);
         if (proc->process(data) != kResultOk) return fail("process failed");
         for (int32 c = 0; c < outCh; c++)
-            for (int32 i = 0; i < n; i++) out[(pos + size_t(i)) * size_t(outCh) + size_t(c)] = data.outputs[0].channelBuffers32[c][i];
-        if ((pos / size_t(block)) % 64 == 0) { std::printf("progress %.3f\n", double(pos) / double(frames)); std::fflush(stdout); }
+            for (int32 i = 0; i < n; i++)
+                if (size_t at = pos + size_t(i); at >= latency) out[(at - latency) * size_t(outCh) + size_t(c)] = data.outputs[0].channelBuffers32[c][i];
+        if ((pos / size_t(block)) % 64 == 0) { std::printf("progress %.3f\n", double(pos) / double(total)); std::fflush(stdout); }
     }
+    std::fprintf(stderr, "latency %zu\n", latency);
     proc->setProcessing(false);
     component->setActive(false);
 
