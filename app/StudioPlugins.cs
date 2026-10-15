@@ -46,6 +46,34 @@ public static class PluginHost
         return (p.ExitCode, await stdout, await stderr);
     }
 
+    /// Renders a file through one effect, offline, in the helper (no timeout: a long take takes its
+    /// time; cancel kills the process). The state blob is read from / written to the given files.
+    public static async Task<string?> RenderAsync(Plugin plugin, string input, string output, string? stateIn, string? stateOut,
+        IReadOnlyDictionary<uint, double>? parameters = null, Action<float>? progress = null, CancellationToken ct = default)
+    {
+        var psi = new ProcessStartInfo(Helper) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
+        foreach (var a in new[] { "render", plugin.Bundle, plugin.Cid, input, output }) psi.ArgumentList.Add(a);
+        if (stateIn is not null && File.Exists(stateIn)) { psi.ArgumentList.Add("--state-in"); psi.ArgumentList.Add(stateIn); }
+        if (stateOut is not null) { psi.ArgumentList.Add("--state-out"); psi.ArgumentList.Add(stateOut); }
+        foreach (var (id, v) in parameters ?? new Dictionary<uint, double>())
+        {
+            psi.ArgumentList.Add("--param");
+            psi.ArgumentList.Add(FormattableString.Invariant($"{id}={v:R}"));
+        }
+        using var p = Process.Start(psi)!;
+        var stderr = p.StandardError.ReadToEndAsync(ct);
+        try
+        {
+            while (await p.StandardOutput.ReadLineAsync(ct) is { } line)
+                if (line.StartsWith("progress ") && float.TryParse(line[9..], System.Globalization.CultureInfo.InvariantCulture, out var f)) progress?.Invoke(f);
+            await p.WaitForExitAsync(ct);
+        }
+        catch (OperationCanceledException) { try { p.Kill(true); } catch (InvalidOperationException) { } return "cancelado"; }
+        if (p.ExitCode == 0) return null;
+        string err = (await stderr).Trim();
+        return err.Length > 0 ? err : $"o plugin terminou com código {p.ExitCode}";   // a crash ends here, not in the app
+    }
+
     public static List<Entry> Cached()
     {
         try { return File.Exists(CachePath) ? JsonSerializer.Deserialize<List<Entry>>(File.ReadAllText(CachePath)) ?? [] : []; }

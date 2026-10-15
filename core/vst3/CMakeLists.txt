@@ -30,8 +30,10 @@ elseif(APPLE)
 else()
   set(DZ_VST3_MODULE ${SDK_ROOT}/public.sdk/source/vst/hosting/module_linux.cpp)
 endif()
-add_executable(dz_plugin dz_plugin.cpp ${DZ_VST3_MODULE})
-target_link_libraries(dz_plugin PRIVATE sdk_hosting)
+add_executable(dz_plugin dz_plugin.cpp ${DZ_VST3_MODULE}
+  ${SDK_ROOT}/public.sdk/source/vst/hosting/plugprovider.cpp
+  ${SDK_ROOT}/public.sdk/source/common/memorystream.cpp)
+target_link_libraries(dz_plugin PRIVATE sdk_hosting miniaudio)
 if(APPLE)
   target_link_libraries(dz_plugin PRIVATE "-framework CoreFoundation" "-framework Foundation")
 endif()

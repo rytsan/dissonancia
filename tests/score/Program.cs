@@ -302,7 +302,49 @@ else Console.WriteLine("skip Verovio: " + vrvError);
         var again = PluginHost.ScanAsync().Result;   // unchanged bundles come from the cache
         Check(again.Count == scan.Count && File.Exists(cache), "VST3 second scan agrees (unchanged bundles from the cache)");
         File.Delete(cache);
+
+        // S8 step 2: offline render through the plugin; its state restores the same sound.
+        if (gain is not null)
+        {
+            string tmp = Path.Combine(Path.GetTempPath(), $"dz_vst_{Environment.ProcessId}");
+            Directory.CreateDirectory(tmp);
+            var sine = Enumerable.Range(0, 48000).Select(i => (float)(0.25 * Math.Sin(2 * Math.PI * 440 * i / 48000))).ToArray();
+            WriteWav(Path.Combine(tmp, "in.wav"), sine, 48000);
+            string? e1 = PluginHost.RenderAsync(gain, Path.Combine(tmp, "in.wav"), Path.Combine(tmp, "a.wav"), null, Path.Combine(tmp, "state.bin"),
+                new Dictionary<uint, double> { [0] = 0.625 }).Result;   // +6 dB
+            var a = ReadWav(Path.Combine(tmp, "a.wav"));
+            Check(e1 is null && a.Length == 2 * sine.Length && Math.Abs(20 * Math.Log10(a.Max() / sine.Max()) - 6) < 0.01, $"VST3 render: +6 dB through the plugin, stereo, same length ({e1})");
+            string? e2 = PluginHost.RenderAsync(gain, Path.Combine(tmp, "in.wav"), Path.Combine(tmp, "b.wav"), Path.Combine(tmp, "state.bin"), null).Result;
+            var b = ReadWav(Path.Combine(tmp, "b.wav"));
+            Check(e2 is null && b.SequenceEqual(a), "VST3 state: the saved state renders the same sound");
+            string? e3 = PluginHost.RenderAsync(gain with { Cid = "00000000000000000000000000000000" }, Path.Combine(tmp, "in.wav"), Path.Combine(tmp, "c.wav"), null, null).Result;
+            Check(e3 is not null && e3.Contains("no class"), "VST3 render: a wrong plugin is an error, not a crash");
+            Directory.Delete(tmp, true);
+        }
     }
+}
+
+static void WriteWav(string path, float[] mono, int rate)
+{
+    using var w = new BinaryWriter(File.Create(path));
+    w.Write("RIFF"u8); w.Write(36 + mono.Length * 4); w.Write("WAVE"u8);
+    w.Write("fmt "u8); w.Write(16); w.Write((short)3); w.Write((short)1); w.Write(rate); w.Write(rate * 4); w.Write((short)4); w.Write((short)32);
+    w.Write("data"u8); w.Write(mono.Length * 4);
+    foreach (var v in mono) w.Write(v);
+}
+
+static float[] ReadWav(string path)   // float32 data chunk, any channel count, interleaved
+{
+    if (!File.Exists(path)) return [];
+    var d = File.ReadAllBytes(path);
+    for (int i = 12; i + 8 <= d.Length;)
+    {
+        int size = BitConverter.ToInt32(d, i + 4);
+        if (d[i] == 'd' && d[i + 1] == 'a' && d[i + 2] == 't' && d[i + 3] == 'a')
+            return Enumerable.Range(0, size / 4).Select(k => BitConverter.ToSingle(d, i + 8 + 4 * k)).ToArray();
+        i += 8 + size + (size & 1);
+    }
+    return [];
 }
 
 Console.WriteLine(failures == 0 ? "all checks passed" : $"{failures} FAILED");

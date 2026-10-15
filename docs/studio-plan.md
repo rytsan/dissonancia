@@ -188,7 +188,11 @@ this order because each stage needs the one before it, as in a studio.
   crash loses only that bundle), cache by modification time in the app data folder. DS-L shows
   EFEITOS VST3 (name, vendor; bundles that failed show their error). Test fixture: the core's
   own `DZ Test Gain` plugin (gain parameter, state), never installed into the user's folders.
-- Step 2 — audio: the host renders a take offline through one plugin (kOffline, fixed block).
+- Step 2 (done 2026-10-15) — audio: `dz_plugin render <bundle> <cid> in.wav out.wav` through
+  one effect, offline (kOffline, 32-bit float, 1024-frame blocks), component + controller
+  connected (the SDK's PlugProvider), stereo buses or the plugin's own, parameters at the start
+  (`--param id=value`), state blob in / out. Checked: +6 dB through DZ Test Gain sample-exact,
+  the saved state renders the same file, a wrong class is an error from the helper.
 - Step 3 — the pedal in DS-C: a VST3 unit in the chain with footswitch, cables and state saved
   in the take project (in the tap's cache key).
 - Step 4 — the plugin's editor in its own window; latency and tail compensation.
