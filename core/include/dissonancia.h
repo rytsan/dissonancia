@@ -437,6 +437,10 @@ ANA_API int32_t ana_player_save_wav(PlayerHandle* p, const char* pathUtf8);   //
 // next audio block, without blocking playback.
 ANA_API int32_t ana_player_add_track(PlayerHandle* p, const char* pathUtf8);
 ANA_API void ana_player_clear_tracks(PlayerHandle* p);
+// STUDIO S8: a track's pre-chain source — the channel's audio rendered through its VST3 inserts by
+// the host helper (offline), decoded to the take's length; NULL or "" restores the original. Load,
+// edits and clear_tracks drop every source (they were rendered from other audio).
+ANA_API int32_t ana_player_set_source(PlayerHandle* p, int32_t track, const char* pathUtf8);
 ANA_API void ana_channel_defaults(ChannelParams* out);
 ANA_API void ana_master_defaults(MasterParams* out);
 ANA_API int32_t ana_player_set_channel(PlayerHandle* p, int32_t track, const ChannelParams* params);

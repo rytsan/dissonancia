@@ -214,3 +214,21 @@ TEST_CASE("meters: levels between the units, the scope ring") {
     p.stop();
     std::remove("dz_stage.wav");
 }
+
+TEST_CASE("mix: a track's pre-chain source (VST3 render) replaces its audio until cleared") {
+    Player p;
+    REQUIRE(p.load(wav("dz_src_a.wav", sine(1000, 0.25, 0.5)).c_str()) == ANA_OK);
+    REQUIRE(p.set_source(0, wav("dz_src_b.wav", sine(1000, 0.5, 0.3)).c_str()) == ANA_OK);   // shorter: padded to the take
+    auto y = play(p);
+    CHECK(y.size() == size_t(24000) * 2);
+    CHECK(peak_db(y, 4800) == Approx(-6.02).margin(0.05));        // the source, not the take (-12)
+    CHECK(std::fabs(y[2 * 20000]) < 1e-6f);                     // past the source's end: silence
+    REQUIRE(p.set_source(0, nullptr) == ANA_OK);
+    CHECK(peak_db(play(p), 4800) == Approx(-12.04).margin(0.05));
+    CHECK(p.set_source(3, "dz_src_b.wav") == ANA_ERR_ARG);       // no such track
+    REQUIRE(p.set_source(0, "dz_src_b.wav") == ANA_OK);
+    REQUIRE(p.load("dz_src_a.wav") == ANA_OK);                   // new audio drops the source
+    CHECK(peak_db(play(p), 4800) == Approx(-12.04).margin(0.05));
+    std::remove("dz_src_a.wav");
+    std::remove("dz_src_b.wav");
+}

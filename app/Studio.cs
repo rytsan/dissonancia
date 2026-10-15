@@ -80,6 +80,7 @@ public sealed class StudioPlayer : IDisposable
     // S4 mixing.
     public int AddTrack(string path) => MixApi.AddTrack(_p, path);
     public void ClearTracks() => MixApi.ClearTracks(_p);
+    public string? SetSource(int track, string? path) => MixApi.SetSource(_p, track, path) == 0 ? null : Marshal.PtrToStringUTF8(PlayerApi.LastError(_p)) ?? "set_source failed";
     public void SetChannel(int track, ChannelMix c) => MixApi.SetChannel(_p, track, c.Native);
     public void SetMaster(MasterMix m) => MixApi.SetMaster(_p, m.Native);
     public bool RenderTap(uint mask, string path) => MixApi.RenderTap(_p, mask, path) == 0;
@@ -184,6 +185,10 @@ public static class StudioProject
     public static string ResultPath(string source, string suffix = "") => Stem(source) + suffix + ".events.json";
     static string ProjectPath(string source, string suffix = "") => Stem(source) + suffix + ".studio.json";
     public static string StemsDir(string source) => Stem(source) + "-stems";
+    // S8: a channel rendered through its VST3 inserts (and its key), an insert's plugin state.
+    public static string VstRenderPath(string source, string channel) => Stem(source) + "." + channel + ".vst.wav";
+    public static string VstStatePath(string source, string insertId) => Stem(source) + "." + insertId + ".vststate";
+    public static string EditedPath(string source) => Stem(source) + ".edited.wav";
     public static string LeadSheetPath(string source) => Stem(source) + ".leadsheet.json";
     public static string TapPath(string source, string channel) => Stem(source) + "." + channel + ".tap.wav";
     public static string BouncePath(string source) => Stem(source) + ".bounce.wav";

@@ -50,6 +50,7 @@ static partial class MixApi
     const string Lib = "dissonancia";
     [LibraryImport(Lib, EntryPoint = "ana_player_add_track", StringMarshalling = StringMarshalling.Utf8)] public static partial int AddTrack(nint p, string path);
     [LibraryImport(Lib, EntryPoint = "ana_player_clear_tracks")] public static partial void ClearTracks(nint p);
+    [LibraryImport(Lib, EntryPoint = "ana_player_set_source", StringMarshalling = StringMarshalling.Utf8)] public static partial int SetSource(nint p, int track, string? path);
     [LibraryImport(Lib, EntryPoint = "ana_channel_defaults")] public static partial void ChannelDefaults(out ChannelParamsNative c);
     [LibraryImport(Lib, EntryPoint = "ana_master_defaults")] public static partial void MasterDefaults(out MasterParamsNative m);
     [LibraryImport(Lib, EntryPoint = "ana_player_set_channel")] public static partial int SetChannel(nint p, int track, in ChannelParamsNative c);
@@ -101,6 +102,10 @@ public sealed class ChannelMix
     public float Pan { get; set; }
     public bool Mute { get; set; }
     public bool Solo { get; set; }
+    /// S8: VST3 effects before the chain (rendered offline by the host helper), in order.
+    public List<VstInsert> Vst { get; set; } = [];
+    /// What the rendered VST3 source is (set when it is in the player): part of the tap's key.
+    [System.Text.Json.Serialization.JsonIgnore] public string VstSignature { get; set; } = "";
 
     public static ChannelMix Default()
     {
@@ -125,7 +130,19 @@ public sealed class ChannelMix
     static byte B(bool v) => (byte)(v ? 1 : 0);
 
     /// What changes the audio at the analysis tap (fader, pan, mute, solo do not): the cache key.
-    public string TapKey => JsonSerializer.Serialize(new { Trim, HpOn, Hp, LpOn, Lp, Steep, GateOn, GateThreshold, GateAttack, GateRelease, GateRange, EqOn, Bands, CompOn, CompThreshold, CompRatio, CompAttack, CompRelease, CompMakeup });
+    public string TapKey => JsonSerializer.Serialize(new { Trim, HpOn, Hp, LpOn, Lp, Steep, GateOn, GateThreshold, GateAttack, GateRelease, GateRange, EqOn, Bands, CompOn, CompThreshold, CompRatio, CompAttack, CompRelease, CompMakeup, VstSignature });
+}
+
+/// One VST3 effect on a channel, before its chain; its state lives next to the take project.
+public sealed class VstInsert
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N")[..12];
+    public string Bundle { get; set; } = "";
+    public string Cid { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string Vendor { get; set; } = "";
+    public bool On { get; set; } = true;
+    [System.Text.Json.Serialization.JsonIgnore] public PluginHost.Plugin Plugin => new(Bundle, Cid, Name, Vendor, "", "");
 }
 
 public sealed class MasterMix

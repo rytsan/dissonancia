@@ -193,8 +193,14 @@ this order because each stage needs the one before it, as in a studio.
   connected (the SDK's PlugProvider), stereo buses or the plugin's own, parameters at the start
   (`--param id=value`), state blob in / out. Checked: +6 dB through DZ Test Gain sample-exact,
   the saved state renders the same file, a wrong class is an error from the helper.
-- Step 3 — the pedal in DS-C: a VST3 unit in the chain with footswitch, cables and state saved
-  in the take project (in the tap's cache key).
+- Step 3 (done 2026-10-15) — the unit in DS-C: DV-0 VST3 between IN and DS-1 TRIM, up to five
+  effects per channel in order (click a slot: on / bypass; ✕ removes; + VST3 opens the library's
+  effects, a click inserts on the selected channel). Offline means before the chain: the
+  channel's source (the edited take or the stem) is rendered insert by insert in the helper and
+  the player reads the render (core `ana_player_set_source`), so the strip, the analysis tap and
+  the bounce all hear it. Render cached by a key of the source and each insert's saved state;
+  the key is part of the tap's cache key; analysis waits for a render. A failing plugin leaves
+  the channel playing without its VST3, with the helper's error on the status line.
 - Step 4 — the plugin's editor in its own window; latency and tail compensation.
 
 ### Later

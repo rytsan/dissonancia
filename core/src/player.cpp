@@ -62,7 +62,23 @@ int Player::add_track(const char* path) {
     return tracks() - 1;
 }
 
-void Player::clear_tracks() { reopen_after([&] { stems_.clear(); }); }
+void Player::clear_tracks() {
+    reopen_after([&] {
+        stems_.clear();
+        for (int t = 1; t < ANA_MAX_TRACKS; t++) sources_[t].clear();
+    });
+}
+
+int Player::set_source(int track, const char* path) {
+    if (track < 0 || track >= tracks()) { error_ = "no such track"; return ANA_ERR_ARG; }
+    std::vector<float> x;
+    if (path && *path) {
+        x = decode_stereo(path, rate_, frames());
+        if (x.empty()) { error_ = std::string("cannot decode ") + path; return ANA_ERR_IO; }
+    }
+    reopen_after([&] { sources_[track].swap(x); });
+    return ANA_OK;
+}
 
 int Player::set_channel(int track, const ChannelParams& p) {
     if (track < 0 || track >= ANA_MAX_TRACKS) return ANA_ERR_ARG;
@@ -73,6 +89,7 @@ int Player::set_channel(int track, const ChannelParams& p) {
 void Player::set_master(const MasterParams& p) { write_slot(masterSlot_, p); }
 
 void Player::sample(int track, uint64_t i, float& l, float& r) const {
+    if (const auto& src = sources_[track]; !src.empty()) { l = src[2 * i]; r = src[2 * i + 1]; return; }
     if (track == 0) {
         l = samples_[i * channels_];
         r = samples_[i * channels_ + (channels_ > 1 ? 1 : 0)];
@@ -128,6 +145,7 @@ int Player::load(const char* path) {
     pos_ = 0;
     loopA_ = loopB_ = 0;
     restart_meters();
+    for (auto& src : sources_) src.clear();   // rendered from the previous audio
     build_mipmap();
     if (reopen && open_device(ctx) != ANA_OK) return ANA_ERR_DEVICE;
     return ANA_OK;
@@ -174,6 +192,7 @@ int Player::apply_edits(const EditSegment* segs, int count, uint64_t fadeIn, uin
     pos_ = std::min<uint64_t>(pos_.load(), frames());
     loopA_ = loopB_ = 0;
     restart_meters();
+    for (auto& src : sources_) src.clear();   // rendered from the previous audio
     build_mipmap();
     if (reopen && open_device(ctx) != ANA_OK) return ANA_ERR_DEVICE;
     if (playing) play();

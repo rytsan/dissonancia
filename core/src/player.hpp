@@ -38,6 +38,9 @@ public:
     // S4 mixing (see ana_player_add_track ...): track 0 = the edited take, 1.. = stems.
     int add_track(const char* path);
     void clear_tracks();
+    // S8: a track's pre-chain source — its audio rendered through the channel's VST3 inserts
+    // (offline, by the host helper), the take's length; nullptr / "" restores the original.
+    int set_source(int track, const char* path);
     int set_channel(int track, const ChannelParams& p);
     void set_master(const MasterParams& p);
     void meters(MixMeters& out) const;
@@ -68,6 +71,8 @@ private:
     std::vector<std::vector<float>> mipMin_, mipMax_;
     // Stems: stereo at rate_, the take's length. Changed only with the device closed.
     std::vector<std::vector<float>> stems_;
+    // S8 pre-chain sources per track (stereo at rate_, the take's length); empty = the original.
+    std::vector<float> sources_[ANA_MAX_TRACKS];
     // Parameters cross to the audio thread through a seqlock per slot (writer: odd while copying).
     struct ChannelSlot { std::atomic<uint32_t> seq{0}; ChannelParams p{}; };
     struct MasterSlot { std::atomic<uint32_t> seq{0}; MasterParams p{}; };

@@ -109,6 +109,7 @@ public sealed class MainWindow : Window
             ["StudioTick"] = () => _studio.Tick(),
             ["StudioRec"] = () => _studio.ToggleRec(),
             ["StudioPlugins"] = () => _studio.ShowPlugins(),
+            ["StudioAddVst"] = () => _studio.AddFirstPlugin(),   // screenshot tool: the first effect on the selected channel
             ["StudioConsole"] = () => _studio.ShowConsole(true),
             ["StudioPick"] = () => _studio.ReviewAction("pick"),
             ["StudioFixRoot"] = () => _studio.ReviewAction("root"),

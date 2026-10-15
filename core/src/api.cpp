@@ -241,6 +241,12 @@ int32_t ana_player_scope(PlayerHandle* p, int32_t source, float* out, int32_t fr
     if (!p || !out || frames < 0) return ANA_ERR_ARG;
     return p->player.scope(source, out, frames);
 }
+int32_t ana_player_set_source(PlayerHandle* p, int32_t track, const char* path) {
+    if (!p) return ANA_ERR_ARG;
+    int32_t r = p->player.set_source(track, path);
+    if (r < 0) p->error = p->player.error();
+    return r;
+}
 void ana_player_set_monitor(PlayerHandle* p, int32_t track) { if (p) p->player.set_monitor(track); }
 void ana_player_reset_loudness(PlayerHandle* p) { if (p) p->player.reset_loudness(); }
 void ana_player_pull(PlayerHandle* p, int32_t frames) {
