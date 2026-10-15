@@ -103,7 +103,7 @@ std::vector<ChoirFrame> choir_frames(const float* x, size_t n, uint32_t rate, in
             R[k] = Y[k] = Y[k] * g;
         }
 
-        // Iterative estimation and cancellation, while a voice is still a fifth as salient as the
+        // Iterative estimation and cancellation, while a voice is still 30 % as salient as the
         // first (Klapuri's Σ s / j^γ polyphony test stopped at three voices of a four-part choir:
         // the assignment below drops what is spurious).
         double first = 0;
@@ -116,7 +116,7 @@ std::vector<ChoirFrame> choir_frames(const float* x, size_t n, uint32_t rate, in
                 if (s > sal[best]) best = c;
             }
             const double s = sal[best];
-            if (s <= 0 || (j > 1 && s < 0.2 * first)) break;
+            if (s <= 0 || (j > 1 && s < 0.3 * first)) break;
             if (j == 1) first = s;
             // Refine on the first harmonics' peaks (parabolic), weighted by their level.
             const auto& ps = partials[best];
@@ -315,6 +315,36 @@ std::vector<ChoirNote> choir_notes(const std::vector<ChoirFrame>& input, const C
         }
         if (open) emit(a, F - 1, r0);
     }
+
+    // Per section, a note interrupted by a short gap (≤ 80 ms) or by a short excursion (< 250 ms,
+    // a ghost or a beating partial) between two notes of the same pitch is one note.
+    std::vector<ChoirNote> out;
+    for (int k = 0; k < kSections; k++) {
+        std::vector<ChoirNote> line;
+        for (auto& n : notes) if (n.section == k) line.push_back(n);
+        for (bool changed = true; changed;) {
+            changed = false;
+            for (size_t i = 0; i + 1 < line.size(); i++) {
+                auto& a = line[i];
+                if (line[i + 1].midi == a.midi && line[i + 1].start - a.end <= 0.08) {
+                    const double la = a.end - a.start, lb = line[i + 1].end - line[i + 1].start;
+                    a.hz = float((a.hz * la + line[i + 1].hz * lb) / (la + lb));
+                    a.confidence = float((a.confidence * la + line[i + 1].confidence * lb) / (la + lb));
+                    a.end = line[i + 1].end;
+                    a.ambiguous = a.ambiguous && line[i + 1].ambiguous;
+                    line.erase(line.begin() + std::ptrdiff_t(i) + 1);
+                    changed = true;
+                } else if (i + 2 < line.size() && line[i + 2].midi == a.midi && line[i + 1].end - line[i + 1].start < 0.25
+                           && line[i + 2].start - a.end <= 0.33) {
+                    line.erase(line.begin() + std::ptrdiff_t(i) + 1);   // the excursion; the merge above joins the two
+                    line[i + 1].start = a.end;
+                    changed = true;
+                }
+            }
+        }
+        out.insert(out.end(), line.begin(), line.end());
+    }
+    notes = out;
     std::sort(notes.begin(), notes.end(), [](auto& a, auto& b) { return a.start != b.start ? a.start < b.start : a.section < b.section; });
     return notes;
 }

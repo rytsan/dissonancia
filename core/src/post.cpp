@@ -4,6 +4,8 @@
 #include <cstdio>
 
 #include "beats.hpp"
+#include "choir.hpp"
+#include "theory.hpp"
 #include "decode.hpp"
 #include "live_config.hpp"
 #include "miniaudio.h"
@@ -31,7 +33,7 @@ void PostJob::status(PostStatus& out) const {
     out.state = PostState(state_.load());
 }
 
-int PostJob::start(const SessionConfig& s, double comp, const char* in, const char* out, bool grid, bool beats) {
+int PostJob::start(const SessionConfig& s, double comp, const char* in, const char* out, uint8_t flags) {
     if (state_.load() == uint8_t(PostState::Running)) { set_error("a job is already running"); return ANA_ERR_STATE; }
     join();
     cancel_ = false;
@@ -39,15 +41,16 @@ int PostJob::start(const SessionConfig& s, double comp, const char* in, const ch
     set_error("");
     state_ = uint8_t(PostState::Running);
     std::string i = in, o = out;
-    thread_ = std::thread([this, s, comp, i, o, grid, beats] {
+    thread_ = std::thread([this, s, comp, i, o, flags] {
         int r = ANA_ERR_STATE;
-        try { r = run(s, comp, i, o, grid, beats); } catch (const std::exception& e) { set_error(e.what()); }
+        try { r = run(s, comp, i, o, flags); } catch (const std::exception& e) { set_error(e.what()); }
         state_ = uint8_t(r == ANA_OK ? PostState::Done : cancel_.load() ? PostState::Cancelled : PostState::Failed);
     });
     return ANA_OK;
 }
 
-int PostJob::run(const SessionConfig& session, double comp, const std::string& in, const std::string& out, bool grid, bool beats) {
+int PostJob::run(const SessionConfig& session, double comp, const std::string& in, const std::string& out, uint8_t flags) {
+    const bool grid = flags & ANA_POST_GRID, beats = flags & ANA_POST_BEATS, choir = flags & ANA_POST_CHOIR;
     // Decode to mono float at the file's rate (miniaudio mixes the channels down).
     ma_decoder dec;
     ma_decoder_config dc = ma_decoder_config_init(ma_format_f32, 1, 0);
@@ -77,7 +80,35 @@ int PostJob::run(const SessionConfig& session, double comp, const std::string& i
         return !cancelled;
     };
     BeatTrack track;
-    if (beats) {
+    std::vector<const char*> parts;   // choir: the part of each note event
+    if (choir) {
+        auto frames = choir_frames(x.data(), x.size(), rate, 5, report);
+        if (cancelled) { set_error("cancelled"); return ANA_ERR_STATE; }
+        auto notes = choir_notes(frames);
+        // Spelled per section in the session's key, as sounding (the score gives each part its clef).
+        Speller sp[kSections];
+        int previous[kSections] = {-1, -1, -1, -1};
+        for (auto& sx : sp) sx.configure(s.keySet ? s.keyFifths : 0, s.keySet ? s.keyMode : KeyMode::Major);
+        for (const ChoirNote& n : notes) {
+            AnalyzerEvent ev{};
+            ev.type = AnalyzerEventType::NoteEnd;
+            ev.sequence = uint32_t(events.size());
+            MusicalNoteEvent& m = ev.data.note;
+            m.startTimeSeconds = n.start - comp;
+            m.endTimeSeconds = n.end - comp;
+            m.durationSeconds = n.end - n.start;
+            m.midi = int8_t(n.midi);
+            const Spelled spelled = sp[n.section].spell(n.midi, previous[n.section]);
+            Speller::name(spelled, 0, m.writtenName);
+            previous[n.section] = n.midi;
+            m.avgHz = m.medianHz = n.hz;
+            m.avgCents = float(100 * (12 * std::log2(n.hz / 440) + 69 - n.midi));
+            m.confidence = n.confidence;
+            m.chromatic = !spelled.diatonic;
+            events.push_back(ev);
+            parts.push_back(kChoirPart[n.section]);
+        }
+    } else if (beats) {
         progress_.store(0.1f, std::memory_order_relaxed);
         track = track_beats(x.data(), x.size(), rate, grid ? s.bpm : 0);
     } else if (!is_chord_mode(s.mode)) {
@@ -108,7 +139,7 @@ int PostJob::run(const SessionConfig& session, double comp, const std::string& i
                  "  \"events\": [",
                  int(s.mode), int(s.quality), s.referenceA4, s.keySet ? "true" : "false", s.keyFifths, int(s.keyMode), int(s.clef),
                  s.meter.numerator, s.meter.denominator, s.bpm, s.countInBars, rate, (unsigned long long)x.size(), comp * 1000);
-    write_events_json(f, events, 0.0);
+    write_events_json(f, events, 0.0, choir ? &parts : nullptr);
     std::fprintf(f, "\n  ]");
     if (beats) {
         std::fprintf(f, ",\n  \"tempoBpm\": %.3f,\n  \"beats\": [", track.bpm);

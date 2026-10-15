@@ -15,15 +15,16 @@ class PostJob {
 public:
     ~PostJob() { cancel(); join(); }
     // compensationSeconds: subtracted from event times (a REC take's round-trip latency, else 0).
-    // metronomeGrid: the file starts on a downbeat of the session's tempo and meter (a REC take).
-    // beats: track the beats (beats.hpp) instead of transcribing.
-    int start(const SessionConfig& s, double compensationSeconds, const char* inPath, const char* outJsonPath, bool metronomeGrid, bool beats = false);
+    // flags (ANA_POST_*): GRID — the file starts on a downbeat of the session's tempo and meter (a
+    // REC take); BEATS — track the beats (beats.hpp) instead of transcribing; CHOIR — the choir by
+    // section (choir.hpp): notes with their part S / A / T / B.
+    int start(const SessionConfig& s, double compensationSeconds, const char* inPath, const char* outJsonPath, uint8_t flags = 0);
     void cancel() { cancel_.store(true); }
     void status(PostStatus& out) const;
     std::string error() const;
 
     // Synchronous body (tests, tools): returns ANA_OK, or an error / ANA_ERR_STATE when cancelled.
-    int run(const SessionConfig& s, double compensationSeconds, const std::string& in, const std::string& out, bool metronomeGrid = false, bool beats = false);
+    int run(const SessionConfig& s, double compensationSeconds, const std::string& in, const std::string& out, uint8_t flags = 0);
 
 private:
     void join() { if (thread_.joinable()) thread_.join(); }

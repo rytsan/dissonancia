@@ -71,7 +71,9 @@ public sealed class StudioState
     public void Pick(string? kind, double start = 0) { Picked = kind is null ? null : (kind, start); Changed?.Invoke(); }
 
     TakeChord? PickedChord => Picked is ("chord", var s) ? ResultTake?.Chords.MinBy(c => Math.Abs(c.Start - s)) : null;
-    TakeNote? PickedNote => Picked is (var k, var s) && k != "chord" ? (k == "bass" ? ResultTake?.BassNotes : ResultTake?.Notes)?.MinBy(n => Math.Abs(n.Start - s)) : null;
+    TakeNote? PickedNote => Picked is (var k, var s) && k != "chord"
+        ? (k == "bass" ? ResultTake?.BassNotes : k is ['n', 'o', 't', 'e', ':', var part] && part != 'S' ? ResultTake?.Choir.GetValueOrDefault(part.ToString()) : ResultTake?.Notes)?.MinBy(n => Math.Abs(n.Start - s))
+        : null;
     public string PickedLabel => PickedChord is { } c ? c.Symbol : PickedNote is { } n ? n.Sounding.Name : "";
 
     public void FixChord(int rootStep = 0, bool nextQuality = false, bool nextBass = false)
@@ -117,7 +119,8 @@ public sealed class StudioState
         if (ResultTake is not { } t || Player is null) return;
         double now = Player.Position / Rate - Compensation + 0.05;
         var spots = t.Chords.Where(c => c.Confidence < 0.5f).Select(c => ("chord", c.Start))
-            .Concat(t.Notes.Where(n => n.Confidence < 0.5f).Select(n => ("note", n.Start))).OrderBy(x => x.Start).ToList();
+            .Concat(t.Notes.Where(n => n.Confidence < 0.5f).Select(n => (t.IsChoir ? "note:S" : "note", n.Start)))
+            .Concat(t.Choir.SelectMany(kv => kv.Value.Where(n => n.Confidence < 0.5f).Select(n => ("note:" + kv.Key, n.Start)))).OrderBy(x => x.Start).ToList();
         if (spots.Count == 0) { Status = "nenhum ponto duvidoso"; Changed?.Invoke(); return; }
         var next = spots.FirstOrDefault(x => x.Start > now, spots[0]);
         Picked = next;
@@ -125,7 +128,7 @@ public sealed class StudioState
         Status = $"{spots.Count} pontos duvidosos · este: {PickedLabel}";
         Changed?.Invoke();
     }
-    public int Doubts => ResultTake is { } t ? t.Chords.Count(c => c.Confidence < 0.5f) + t.Notes.Count(n => n.Confidence < 0.5f) : 0;
+    public int Doubts => ResultTake is { } t ? t.Chords.Count(c => c.Confidence < 0.5f) + t.Notes.Count(n => n.Confidence < 0.5f) + t.Choir.Values.Sum(l => l.Count(n => n.Confidence < 0.5f)) : 0;
     public bool Running;
     public float Progress;
     public string Status = "";
@@ -300,10 +303,10 @@ public sealed class StudioState
     /// The analysers a channel's tap feeds (Plan): the voice notes, the harmony, the bass line, the beats.
     public string[] AnalysersOf(int track)
     {
-        if (Stems.Count == 0) return track == 0 ? [Mode is AppMode.VoiceMono or AppMode.InstrumentMono ? "DA-N" : "DA-C"] : [];
+        if (Stems.Count == 0) return track == 0 ? Choir ? ["DA-K", "DA-C"] : [Mode is AppMode.VoiceMono or AppMode.InstrumentMono ? "DA-N" : "DA-C"] : [];
         return track == 0 ? [] : NameOf(track) switch
         {
-            "vocals" => ["DA-N"], "bass" => ["DA-C", "DA-B"], "drums" => ["DA-T"], _ => ["DA-C"],
+            "vocals" => [Choir ? "DA-K" : "DA-N"], "bass" => ["DA-C", "DA-B"], "drums" => ["DA-T"], _ => ["DA-C"],
         };
     }
     public void Select() => Changed?.Invoke();
@@ -353,7 +356,7 @@ public sealed class StudioState
     // ---------------------------------------------------------------- analysis
 
     /// One analysis of the queue: a session (mode), the tracks whose analysis tap it reads, its result suffix.
-    sealed record Pass(Session Session, uint Mask, string Input, string Suffix, string Options, bool Beats = false);
+    sealed record Pass(Session Session, uint Mask, string Input, string Suffix, string Options, bool Beats = false, bool Choir = false);
     readonly Queue<Pass> _queue = new();
     Pass? _pass;
     string? _passSource;
@@ -378,6 +381,14 @@ public sealed class StudioState
     List<Pass> Plan()
     {
         if (Current is null) return [];
+        if (Stems.Count == 0 && Choir)
+        {   // S9: the choir by section and its harmony, both on the mix
+            var cs = AnalysisSession(AppMode.VoiceMono);
+            var hs = AnalysisSession(AppMode.GeneralChords);
+            string tap = ";tap=" + Channel(0).TapKey;
+            return [new Pass(cs, 1, StudioProject.TapPath(Current, "mix"), ".choir", Options(cs, ";choir" + tap), Choir: true),
+                    new Pass(hs, 1, StudioProject.TapPath(Current, "mix"), ".harmony", Options(hs, tap))];
+        }
         if (Stems.Count == 0)
         {
             var s = AnalysisSession();
@@ -390,7 +401,9 @@ public sealed class StudioState
         uint vm = Mask("vocals"), hm = Mask("other", "bass", "guitar", "piano"), bm = Mask("bass");
         var passes = new List<Pass>
         {
-            new(voice, vm, StudioProject.TapPath(Current, "voice"), ".voice", Options(voice, ";stems=" + StemsKey + ";tap=" + Keys(vm))),
+            Choir   // S9: the vocals stem is the choir
+                ? new(voice, vm, StudioProject.TapPath(Current, "voice"), ".choir", Options(voice, ";choir;stems=" + StemsKey + ";tap=" + Keys(vm)), Choir: true)
+                : new(voice, vm, StudioProject.TapPath(Current, "voice"), ".voice", Options(voice, ";stems=" + StemsKey + ";tap=" + Keys(vm))),
             new(harmony, hm, StudioProject.TapPath(Current, "harmony"), ".harmony", Options(harmony, ";stems=" + StemsKey + ";tap=" + Keys(hm))),
         };
         if (bm != 0)
@@ -439,7 +452,7 @@ public sealed class StudioState
         {
             static System.Text.Json.Nodes.JsonNode Read(string p) => System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(p))!;
             var bass = results.TryGetValue(".bass", out var b) ? Read(b)["events"]!.AsArray() : null;
-            var root = LeadSheet.Merge(Read(results[".harmony"]).AsObject(), Read(results[".voice"])["events"]!.AsArray(), bass);
+            var root = LeadSheet.Merge(Read(results[".harmony"]).AsObject(), Read(results.TryGetValue(".choir", out var ch) ? ch : results[".voice"])["events"]!.AsArray(), bass);
             if (results.TryGetValue(".beats", out var d)) LeadSheet.AddBeats(root, Read(d).AsObject(), FromTake && Edits.KeepsGrid ? Session.Bpm : 0);
             var path = StudioProject.LeadSheetPath(Current!);
             File.WriteAllText(path, root.ToJsonString());
@@ -448,7 +461,15 @@ public sealed class StudioState
         catch (Exception e) when (e is IOException or JsonException or InvalidOperationException or NullReferenceException) { return null; }
     }
 
-    public void CycleMode() { Mode = (AppMode)(((int)Mode + 1) % 5); RefreshResult(); }
+    /// S9: the choir by section (EXPERIMENTAL), after the five modes in the analyser's cycle.
+    public bool Choir;
+    public void CycleMode()
+    {
+        if (Choir) { Choir = false; Mode = AppMode.VoiceMono; }
+        else if (Mode == AppMode.GeneralChords) Choir = true;
+        else Mode = (AppMode)((int)Mode + 1);
+        RefreshResult();
+    }
 
     public void Analyze()
     {
@@ -474,7 +495,7 @@ public sealed class StudioState
     {
         if (Job is null || _passSource is null) return;
         if (!_queue.TryDequeue(out var p)) { Running = false; _pass = null; RefreshResult(); FinishStatus(); return; }
-        var err = Job.Start(p.Session, Compensation, p.Input, StudioProject.ResultPath(_passSource, p.Suffix), FromTake && Edits.KeepsGrid, p.Beats);
+        var err = Job.Start(p.Session, Compensation, p.Input, StudioProject.ResultPath(_passSource, p.Suffix), FromTake && Edits.KeepsGrid, p.Beats, p.Choir);
         if (err is not null) { Running = false; Status = "falhou: " + err; return; }
         (_pass, Running) = (p, true);
         Status = p.Suffix switch { ".voice" => "transcrevendo a voz…", ".harmony" => "transcrevendo a harmonia…", ".bass" => "transcrevendo o baixo…", ".beats" => "rastreando a bateria…", _ => "analisando…" };
@@ -1200,6 +1221,8 @@ public sealed class RecorderUnit : StudioUnit
 
     public RecorderUnit(StudioState s) : base(s, "DS-A", "GRAVADOR DE FAIXAS") { }
 
+    static readonly IBrush[] ChoirInk = [Plasma.Lit, new ImmutableSolidColorBrush(Color.FromUInt32(0xFFFFD27A)), new ImmutableSolidColorBrush(Color.FromUInt32(0xFF5AA9FF)), new ImmutableSolidColorBrush(Color.FromUInt32(0xFF9DFFC8))];
+
     double FrameAt(double x) => S.ViewStart + Math.Clamp((x - _screen.X) / Math.Max(1, _screen.Width), 0, 1) * (S.ViewEnd - S.ViewStart);
     double XAt(double frame) => _screen.X + (frame - S.ViewStart) / Math.Max(1, S.ViewEnd - S.ViewStart) * _screen.Width;
 
@@ -1260,7 +1283,7 @@ public sealed class RecorderUnit : StudioUnit
         Ui.Text(ctx, "PLAY", card.X + 24, card.Y + 58, 8, Ui.Label, Ui.SansBold);
         Ui.Led(ctx, new Point(card.X + 70, card.Y + 64), 3.5, !S.Edits.IsEmpty, Ui.Amber, Ui.AmberOff);
         Ui.Text(ctx, "EDITADO", card.X + 78, card.Y + 58, 8, Ui.Label, Ui.SansBold);
-        string laneName = S.Stems.Count > 0 ? "↳ VOZ + CIFRAS" : S.Mode is AppMode.VoiceMono or AppMode.InstrumentMono ? "↳ NOTAS" : "↳ ACORDES";
+        string laneName = S.Choir ? "↳ CORO SATB + CIFRAS" : S.Stems.Count > 0 ? "↳ VOZ + CIFRAS" : S.Mode is AppMode.VoiceMono or AppMode.InstrumentMono ? "↳ NOTAS" : "↳ ACORDES";
         var stemNames = new Dictionary<string, string> { ["vocals"] = "VOZ", ["bass"] = "BAIXO", ["other"] = "OUTROS", ["drums"] = "BATERIA", ["guitar"] = "VIOLÃO", ["piano"] = "PIANO" };
         for (int i = 0; i < S.Stems.Count; i++)
         {
@@ -1372,19 +1395,28 @@ public sealed class RecorderUnit : StudioUnit
                 _events.Add((box, "chord", ch.Start));
                 if (box.Width > 26) Plasma.DotText(ctx, ch.Symbol.Length > 6 ? ch.Symbol[..6] : ch.Symbol, box.X + 4, box.Y + 6, 2.6, dim: low);
             }
-            if (take.Notes.Count > 0)
+            // The melody, or a choir's four sections (S9) in their colours, on one pitch axis.
+            var lines = take.IsChoir
+                ? new List<(string Kind, List<TakeNote> Notes, IBrush Brush)> { ("note:S", take.Notes, ChoirInk[0]) }
+                    .Concat(new[] { "A", "T", "B" }.Select((p, i) => (Kind: $"note:{p}", Notes: take.Choir.GetValueOrDefault(p) ?? [], Brush: ChoirInk[i + 1]))).ToList()
+                : new List<(string Kind, List<TakeNote> Notes, IBrush Brush)> { ("note", take.Notes, Plasma.Lit) };
+            var all = lines.SelectMany(l => l.Notes).ToList();
+            if (all.Count > 0)
             {
-                int lo = take.Notes.Min(n => n.Midi), hi = Math.Max(lo + 12, take.Notes.Max(n => n.Midi));
-                foreach (var n in take.Notes)
-                {
-                    double a = XAt((n.Start + off) * S.Rate), b = XAt((n.End + off) * S.Rate);
-                    if (b < _lane.X || a > _lane.Right) continue;
-                    double yy = _lane.Bottom - 6 - (n.Midi - lo) / (double)(hi - lo) * (_lane.Height - 12);
-                    var nr = new Rect(Math.Max(a, _lane.X), yy - 2, Math.Max(2, b - a - 1), 4);
-                    bool picked = S.Picked is ("note", var ps) && Math.Abs(ps - n.Start) < Review.MatchSeconds;
-                    ctx.DrawRectangle(picked ? Ui.LabelBright : Plasma.Lit, picked ? new ImmutablePen((IImmutableBrush)Ui.Amber, 1) : null, picked ? nr.Inflate(1.5) : nr, 1, 1);
-                    _events.Insert(0, (nr.Inflate(new Thickness(1, 4)), "note", n.Start));   // notes before the chord boxes they sit in
-                }
+                int lo = all.Min(n => n.Midi), hi = Math.Max(lo + 12, all.Max(n => n.Midi));
+                foreach (var (kind, notes, ink) in lines)
+                    foreach (var n in notes)
+                    {
+                        double a = XAt((n.Start + off) * S.Rate), b = XAt((n.End + off) * S.Rate);
+                        if (b < _lane.X || a > _lane.Right) continue;
+                        double yy = _lane.Bottom - 6 - (n.Midi - lo) / (double)(hi - lo) * (_lane.Height - 12);
+                        var nr = new Rect(Math.Max(a, _lane.X), yy - 1.5, Math.Max(2, b - a - 1), take.IsChoir ? 3 : 4);
+                        bool picked = S.Picked is (var pk, var ps) && pk == kind && Math.Abs(ps - n.Start) < Review.MatchSeconds;
+                        ctx.DrawRectangle(picked ? Ui.LabelBright : ink, picked ? new ImmutablePen((IImmutableBrush)Ui.Amber, 1) : null, picked ? nr.Inflate(1.5) : nr, 1, 1);
+                        _events.Insert(0, (nr.Inflate(new Thickness(1, 3)), kind, n.Start));   // notes before the chord boxes they sit in
+                    }
+                if (take.IsChoir)
+                    for (int i = 0; i < 4; i++) Ui.Text(ctx, "SATB"[i].ToString(), _lane.Right - 44 + i * 10, _lane.Y + 2, 8, ChoirInk[i], Ui.Mono);
             }
         }
         else Ui.Text(ctx, S.Running ? "analisando…" : "sem transcrição: DA · ANALISAR", _lane.X + 8, _lane.Y + 14, 10, PhosphorDim, Ui.Mono);
@@ -1648,7 +1680,7 @@ public sealed class ChainUnit : StudioUnit
         var an = new Rect(x, y, r.Right - x, h);
         if (S.OpenVst is { } ov && c.Vst.Contains(ov)) { DrawParams(ctx, an, ov); return; }
         DrawDevice(ctx, an, an0.Length > 0 ? string.Join(" ", an0) : "DA", an0.Length > 0 ? "ANALISADOR · ENVIO PRÉ-FADER" : "ANALISADOR · canal sem análise", an0.Length > 0);
-        string mode = S.Mode switch
+        string mode = S.Choir ? "CORO" : S.Mode switch
         {
             AppMode.VoiceMono => "VOZ", AppMode.InstrumentMono => "MELODIA", AppMode.GuitarChords => "VIOLÃO", AppMode.PianoChords => "PIANO", _ => "GERAL",
         };
@@ -1671,10 +1703,11 @@ public sealed class ChainUnit : StudioUnit
         if (S.ResultTake is { } t)
         {
             bool notes = t.Notes.Count > 0;
-            string main = notes ? $"{t.Notes.Count}" : $"{t.Chords.Count}";
+            string main = t.IsChoir ? $"{t.Notes.Count + t.Choir.Values.Sum(l => l.Count)}" : notes ? $"{t.Notes.Count}" : $"{t.Chords.Count}";
             Plasma.DotText(ctx, main, win.X + 8, win.Y + 6, 3, 3);
-            Plasma.Text(ctx, notes ? "NOTAS" : "ACORDES", win.X + 84, win.Y + 6, 13);
-            string how = S.Stems.Count > 0 ? $"{t.Notes.Count} notas da voz · {t.Chords.Count} acordes · faixas separadas"
+            Plasma.Text(ctx, t.IsChoir ? "NOTAS SATB" : notes ? "NOTAS" : "ACORDES", win.X + 84, win.Y + 6, 13);
+            string how = t.IsChoir ? $"S {t.Notes.Count} A {t.Choir.GetValueOrDefault("A")?.Count ?? 0} T {t.Choir.GetValueOrDefault("T")?.Count ?? 0} B {t.Choir.GetValueOrDefault("B")?.Count ?? 0} · experimental"
+                : S.Stems.Count > 0 ? $"{t.Notes.Count} notas da voz · {t.Chords.Count} acordes · faixas separadas"
                 : notes ? "voz: take inteiro" : "take inteiro · Viterbi" + (S.FromTake && S.Edits.KeepsGrid ? " · grade do metrônomo" : "");
             int fit = (int)((win.Width - 92) / 6.2);   // mono 9 px
             Plasma.Text(ctx, how.Length > fit ? how[..fit] : how, win.X + 84, win.Y + 24, 9, false);
@@ -1883,6 +1916,7 @@ public sealed class StudioView : DockPanel
     public StudioState.InputHooks? Input { set => _s.Input = value; }
     public void ToggleRec() { _s.ToggleRec(); Refresh(); }
     public void ShowPlugins() { _s.PluginView = true; Refresh(); }
+    public void ChoirMode() { while (!_s.Choir) _s.CycleMode(); Refresh(); }
     public void AddFirstPlugin() { if (_s.Plugins.FirstOrDefault() is { } p) _s.AddVst(p); Refresh(); }
     public void OpenFirstInsert() { if (_s.Channel(_s.Selected).Vst.FirstOrDefault() is { } v) _s.OpenPanel(v); Refresh(); }
     public void SelectChannel(int track) { _s.Selected = Math.Clamp(track, 0, _s.Tracks - 1); Refresh(); }

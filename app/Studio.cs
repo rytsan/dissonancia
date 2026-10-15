@@ -152,8 +152,8 @@ public sealed class StudioJob : IDisposable
     public enum State { Idle, Running, Done, Failed, Cancelled }
 
     /// metronomeGrid: the file starts on a downbeat of the session's tempo and meter (a REC take).
-    public string? Start(Session s, double compensationSeconds, string input, string outJson, bool metronomeGrid, bool beats = false) =>
-        PostApi.Start(_h, NativeCore.Config(s), compensationSeconds, input, outJson, (byte)((metronomeGrid ? 1 : 0) | (beats ? 2 : 0))) == 0 ? null : Error;
+    public string? Start(Session s, double compensationSeconds, string input, string outJson, bool metronomeGrid, bool beats = false, bool choir = false) =>
+        PostApi.Start(_h, NativeCore.Config(s), compensationSeconds, input, outJson, (byte)((metronomeGrid ? 1 : 0) | (beats ? 2 : 0) | (choir ? 4 : 0))) == 0 ? null : Error;
 
     public (State State, float Progress) Poll()
     {

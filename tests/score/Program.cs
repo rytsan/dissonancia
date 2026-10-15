@@ -262,8 +262,37 @@ for (int i = 0; i + 2 <= lmid.Length; i++) if (lmid[i] == 0xFF && lmid[i + 1] ==
 Check(ltracks == 4 && tempos == 3 && lmid.AsSpan().IndexOf(new byte[] { 0xFF, 0x51, 3, 0x07, 0xEF, 0x40 }) > 0,   // 0.52 s per beat = 520000 us
       $"lead sheet midi: {ltracks} tracks (bass), tempo map {tempos} events");
 
+// STUDIO S9: a choir take (the core's "part": S / A / T / B notes, sounding) -> four staves, SATB,
+// same bars: soprano with the symbols, alto treble, tenor treble 8vb, bass F; a MIDI track each.
+string choirJson = Path.Combine(Path.GetTempPath(), $"dz_choir_{Environment.ProcessId}.json");
+File.WriteAllText(choirJson, """
+{"session": {"mode": 0, "quality": 1, "keySet": false, "keyFifths": 0, "keyMode": 0, "clef": 0, "meter": [4, 4], "bpm": 60},
+ "events": [
+  {"type": "chord", "start": 0, "end": 4, "symbol": "C", "roman": "", "root": 0, "bass": 0, "quality": 0, "confidence": 0.9},
+  {"type": "note", "part": "S", "start": 0, "end": 2, "midi": 72, "name": "C5", "confidence": 0.8},
+  {"type": "note", "part": "A", "start": 0, "end": 2, "midi": 64, "name": "E4", "confidence": 0.8},
+  {"type": "note", "part": "T", "start": 0, "end": 2, "midi": 55, "name": "G3", "confidence": 0.8},
+  {"type": "note", "part": "B", "start": 0, "end": 6, "midi": 48, "name": "C3", "confidence": 0.8}]}
+""");
+var choirTake = Take.Load(choirJson);
+File.Delete(choirJson);
+var cs = Score.Build(choirTake, 4);
+var cx = new XmlDocument { XmlResolver = null };
+cx.Load(new XmlTextReader(new StringReader(cs.MusicXml())) { DtdProcessing = DtdProcessing.Ignore });
+string Names(string xpath) => string.Join(",", cx.SelectNodes(xpath)!.Cast<XmlNode>().Select(n => n.InnerText));
+int bars1 = cx.SelectNodes("//part[@id='P1']/measure")!.Count, bars4 = cx.SelectNodes("//part[@id='P4']/measure")!.Count;
+Check(choirTake.IsChoir && Names("//score-part/part-name") == "Soprano,Alto,Tenor,Bass" && bars1 == bars4 && bars1 == 2
+      && Names("//part/measure[@number='1']/attributes/clef/sign") == "G,G,G,F" && cx.SelectSingleNode("//part[@id='P3']//clef-octave-change")?.InnerText == "-1"
+      && cx.SelectNodes("//part[@id='P1']//harmony")!.Count == 1 && cx.SelectNodes("//part[@id='P2']//harmony")!.Count == 0
+      && cx.SelectSingleNode("//part[@id='P3']//note/pitch/octave")?.InnerText == "3",
+      $"choir: SATB staves {Names("//score-part/part-name")}, {bars1}/{bars4} bars, clefs, tenor 8vb at sounding pitch, symbols on the soprano");
+byte[] cmid = cs.Midi();
+int ctracks = 0;
+for (int i = 0; i + 4 <= cmid.Length; i++) if (cmid[i] == 'M' && cmid[i + 1] == 'T' && cmid[i + 2] == 'r' && cmid[i + 3] == 'k') ctracks++;
+Check(ctracks == 6 && cs.Json().Contains("\"Tenor\""), $"choir midi: {ctracks} tracks (tempo, soprano, chords, A, T, B); JSON by part");
+
 // Every MusicXML we write validates against the MusicXML 4.0 XSD (downloaded once, cached next to the binary).
-var samples = new[] { s1, s2, s4, s5, s6, s7, B(t8), B(take), ls }.Select(x => x.MusicXml()).ToArray();
+var samples = new[] { s1, s2, s4, s5, s6, s7, B(t8), B(take), ls, cs }.Select(x => x.MusicXml()).ToArray();
 if (Schema() is { } schema)
     for (int i = 0; i < samples.Length; i++)
     {

@@ -1,7 +1,8 @@
 // Offline chord run over a WAV file (16-bit PCM or float32, any channel count, mixed to mono):
 // the same front end and tracker as the live engine, hop by hop, without a device. Prints the
 // confirmed chords and how often the live preview would change on screen.
-//   dz_wav file.wav [guitar|piano|general|voice] [low|balanced|high] [offline [bpm beatsPerBar]]
+//   dz_wav file.wav [guitar|piano|general|voice|choir] [low|balanced|high] [offline [bpm beatsPerBar]]
+// choir: the STUDIO choir by section (S9), one line per note: part start end midi confidence.
 // offline: the STUDIO whole-take decoder instead of the live tracker; with a bpm, the file is taken
 // to start on a downbeat of that metronome grid (a REC take).
 #include <cmath>
@@ -11,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#include "choir.hpp"
 #include "chords.hpp"
 #include "decode.hpp"
 #include "voice.hpp"
@@ -59,6 +61,11 @@ int main(int argc, char** argv) {
     uint32_t rate = 48000;
     if (!read_wav(argv[1], x, rate)) { std::fprintf(stderr, "cannot read %s\n", argv[1]); return 1; }
     const std::string mode = argc > 2 ? argv[2] : "guitar", q = argc > 3 ? argv[3] : "balanced";
+    if (mode == "choir") {
+        for (const ChoirNote& n : choir_notes(choir_frames(x.data(), x.size(), rate)))
+            std::printf("%s %.3f %.3f %d %.2f%s\n", kChoirPart[n.section], n.start, n.end, n.midi, n.confidence, n.ambiguous ? " ambiguous" : "");
+        return 0;
+    }
     SessionConfig s{};
     s.mode = mode == "piano" ? AnalysisMode::PianoChords : mode == "general" ? AnalysisMode::GeneralChords : mode == "voice" ? AnalysisMode::VoiceMono : AnalysisMode::GuitarChords;
     s.quality = q == "low" ? AudioQuality::LowLatency : q == "high" ? AudioQuality::HighPrecision : AudioQuality::Balanced;

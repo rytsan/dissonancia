@@ -30,7 +30,7 @@ struct ChoirFrame {
 
 // Multiple-f0 front end (Klapuri 2006, "A perceptually motivated multiple-F0 estimation method"):
 // whitened spectrum, harmonic salience, iterative estimation and cancellation with spectral
-// smoothness; voices down to a fifth of the strongest one's salience, at most `maxVoices` per frame.
+// smoothness; voices down to 30 % of the strongest one's salience, at most `maxVoices` per frame.
 std::vector<ChoirFrame> choir_frames(const float* x, size_t n, uint32_t rate, int maxVoices = 5,
                                      const std::function<bool(double)>& report = {});
 

@@ -24,6 +24,10 @@ public sealed class Take
     public List<TakeNote> Notes = [];
     public List<TakeChord> Chords = [];
     public List<TakeNote> BassNotes = [];   // STUDIO: the separated bass line
+    /// STUDIO S9: a choir by section — the soprano is Notes (with the chords above it), the alto,
+    /// tenor and bass lines are here, by part ("A", "T", "B"); sounding pitch.
+    public Dictionary<string, List<TakeNote>> Choir = [];
+    public bool IsChoir;
     public List<double> Beats = [];         // STUDIO: the drums' beats (event time) and tempo
     public List<double> BeatTimes = [];     // STUDIO, tempo from the drums: where each grid beat really was (MIDI tempo map)
     public double TempoBpm;
@@ -78,9 +82,18 @@ public sealed class Take
             {
                 case "note":
                     var written = ParseName(e.GetProperty("name").GetString() ?? "");
-                    if (e.TryGetProperty("part", out var part) && part.GetString() == "bass")
+                    string? partName = e.TryGetProperty("part", out var part) ? part.GetString() : null;
+                    var sounding = new TakeNote(e.GetProperty("start").GetDouble(), e.GetProperty("end").GetDouble(), e.GetProperty("midi").GetInt32(), written, e.GetProperty("confidence").GetSingle());
+                    if (partName == "bass")
                     {   // the bass line of a separated take (STUDIO): its own part, spelled as sounding
-                        t.BassNotes.Add(new TakeNote(e.GetProperty("start").GetDouble(), e.GetProperty("end").GetDouble(), e.GetProperty("midi").GetInt32(), written, e.GetProperty("confidence").GetSingle()));
+                        t.BassNotes.Add(sounding);
+                        break;
+                    }
+                    if (partName is "S" or "A" or "T" or "B")
+                    {   // S9 choir: spelled as sounding by the core; the soprano is the lead line
+                        t.IsChoir = true;
+                        if (partName == "S") t.Notes.Add(sounding);
+                        else (t.Choir.TryGetValue(partName, out var l) ? l : t.Choir[partName] = []).Add(sounding);
                         break;
                     }
                     t.Notes.Add(new TakeNote(e.GetProperty("start").GetDouble(), e.GetProperty("end").GetDouble(), e.GetProperty("midi").GetInt32(),
@@ -98,6 +111,18 @@ public sealed class Take
             }
         }
         return t;
+    }
+
+    /// S9: the alto, tenor and bass of a choir as parts of their own (no chords), in SATB order.
+    public IEnumerable<(string Name, Take Part)> ChoirParts()
+    {
+        foreach (var (key, name, clef) in new[] { ("A", "Alto", Clef.Treble), ("T", "Tenor", Clef.Treble8vb), ("B", "Bass", Clef.Bass) })
+        {
+            if (!Choir.TryGetValue(key, out var notes)) continue;
+            var p = (Take)MemberwiseClone();
+            (p.Notes, p.Chords, p.Cadences, p.BassNotes, p.Choir, p.IsChoir, p.Clef) = (notes, [], [], [], [], false, clef);
+            yield return (name, p);
+        }
     }
 
     /// Core ASCII name ("C#4", "Db4", "Fx5", "Cbb3") -> pitch.
@@ -151,14 +176,26 @@ public sealed class Score
     /// smallest: shortest notated value as a note-value denominator (4 = quarter, 8, 16); 0 = the
     /// meter's beat unit (quarter in 4/4, eighth in 6/8). triplets: eighth triplets where they fit.
     public Score? Bass;   // STUDIO: the bass line's staff, same bars
+    public List<(string Name, Score S)> Choir = [];   // S9: alto, tenor, bass staves under the soprano, same bars
 
     public static Score Build(Take t, int smallest = 0, bool triplets = false)
     {
+        if (t.IsChoir) t.Clef = Clef.Treble;   // the soprano's staff
         var s = Build(t, smallest, triplets, 0);
-        if (t.BassPart() is { } bt)
+        var bassPart = t.BassPart();
+        var choir = t.ChoirParts().ToList();
+        // Every staff has as many bars as the longest one.
+        int bars = s.Measures.Count;
+        for (int pass = 0; pass < 2; pass++)
         {
-            s.Bass = Build(bt, smallest, triplets, s.Measures.Count);
-            if (s.Bass.Measures.Count > s.Measures.Count) { var b = s.Bass; s = Build(t, smallest, triplets, b.Measures.Count); s.Bass = b; }
+            s.Bass = bassPart is null ? null : Build(bassPart, smallest, triplets, bars);
+            s.Choir = choir.Select(c => (c.Name, Build(c.Part, smallest, triplets, bars))).ToList();
+            int most = Math.Max(s.Bass?.Measures.Count ?? 0, s.Choir.Select(c => c.S.Measures.Count).DefaultIfEmpty(0).Max());
+            if (most <= bars) break;
+            bars = most;
+            var keep = (s.Bass, s.Choir);
+            s = Build(t, smallest, triplets, bars);
+            (s.Bass, s.Choir) = keep;
         }
         return s;
     }
@@ -347,8 +384,9 @@ public sealed class Score
             w.WriteEndElement();
             w.WriteEndElement();
             w.WriteStartElement("part-list");
-            var parts = new List<(string Id, string Name, Score S)> { ("P1", Take.Mode switch { 0 => "Voice", 1 => "Melody", 2 => "Guitar", 3 => "Piano", _ => "Chords" }, this) };
-            if (Bass is not null) parts.Add(("P2", "Bass", Bass));
+            var parts = new List<(string Id, string Name, Score S)> { ("P1", Take.IsChoir ? "Soprano" : Take.Mode switch { 0 => "Voice", 1 => "Melody", 2 => "Guitar", 3 => "Piano", _ => "Chords" }, this) };
+            foreach (var (name, c) in Choir) parts.Add(($"P{parts.Count + 1}", name, c));
+            if (Bass is not null) parts.Add(($"P{parts.Count + 1}", "Bass", Bass));
             foreach (var (id, name, _) in parts)
             {
                 w.WriteStartElement("score-part");
@@ -583,6 +621,17 @@ public sealed class Score
             foreach (int k in keys) chords.Add((b * tick, [0x81, (byte)k, 0]));
         }
         var tracks = new List<List<(int, byte[])>> { tempo, melody, chords };
+        for (int i = 0; i < Choir.Count; i++)
+        {   // S9: one track per section, GM choir aahs (the soprano is the melody track)
+            byte ch = (byte)(3 + i);
+            var part = new List<(int, byte[])> { (0, [(byte)(0xC0 | ch), 52]) };
+            foreach (var (a, b, n) in Choir[i].S.QuantizedNotes)
+            {
+                part.Add((a * tick, [(byte)(0x90 | ch), (byte)n.Midi, 85]));
+                part.Add((b * tick, [(byte)(0x80 | ch), (byte)n.Midi, 0]));
+            }
+            tracks.Add(part);
+        }
         if (Bass is not null)
         {
             var bass = new List<(int, byte[])> { (0, [0xC2, 33]) };   // GM electric bass (finger)
@@ -653,6 +702,7 @@ public sealed class Score
             symbol = q.Chord.Symbol, roman = q.Chord.Roman, root = q.Chord.Root, bass = q.Chord.Bass, confidence = q.Chord.Confidence,
         }),
         bass = Bass?.QuantizedNotes.Select(q => new { start = q.Start, end = q.End, observedStart = q.Note.Start, observedEnd = q.Note.End, midi = q.Note.Midi, name = q.Note.Sounding.Name, confidence = q.Note.Confidence }),
+        choir = Choir.Count == 0 ? null : Choir.ToDictionary(c => c.Name, c => c.S.QuantizedNotes.Select(q => new { start = q.Start, end = q.End, observedStart = q.Note.Start, observedEnd = q.Note.End, midi = q.Note.Midi, name = q.Note.Sounding.Name, confidence = q.Note.Confidence })),
         cadences = Take.Cadences.Select(c => new { time = c.Time, type = c.Type, from = c.From, to = c.To, confidence = c.Confidence, evidence = c.Evidence }),
         measures = Measures.Select(m => new
         {

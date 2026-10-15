@@ -128,7 +128,9 @@ public sealed class Review
         }
     }
 
-    public static string Kind(JsonObject e) => (string?)e["type"] == "chord" ? "chord" : (string?)e["part"] == "bass" ? "bass" : (string?)e["type"] == "note" ? "note" : "";
+    // A choir's notes are corrected per section ("note:S" .. "note:B"): two sections often start together.
+    public static string Kind(JsonObject e) => (string?)e["type"] == "chord" ? "chord" : (string?)e["part"] is "bass" ? "bass"
+        : (string?)e["part"] is "S" or "A" or "T" or "B" ? "note:" + (string?)e["part"] : (string?)e["type"] == "note" ? "note" : "";
 
     /// The drums' beats as the bar grid: every time moves so that beat k lands on k beats of the
     /// global tempo from the first beat (piecewise linear between beats, constant tempo outside).

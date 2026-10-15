@@ -220,8 +220,33 @@ this order because each stage needs the one before it, as in a studio.
 - Not done: tails past the take's end (cut), parameter automation over time, VST3 on the master
   bus, an instrument (only effects with audio in and out), the macOS editor window.
 
+### S9 — Choir by section, SATB (spec M9, §20.3, §21) — done 2026-10-15, EXPERIMENTAL
+- Core `choir.cpp`: multiple-f0 per 20 ms frame (Klapuri 2006: ~93 ms Hann window zero-padded,
+  whitening over critical bands, harmonic salience with weights (f0 + 27) / (m·f0 + 320),
+  iterative estimation and cancellation with spectral smoothness, voices down to 30 % of the
+  strongest); candidates merged within half a semitone, carried over ±2 frames when missed,
+  salience averaged over ±3 frames; a Viterbi over the assignments — each of S / A / T / B takes
+  one candidate or none, in pitch order, neighbours may share one (unison) — with the spec's range
+  priors (S C4–A5, A F3–D5, T C3–A4, B E2–E4), a cost per semitone moved (voice leading) and for
+  a strong candidate left unexplained; notes per section (3 frames to change, gaps and short
+  excursions between equal notes merged). Shared (unison) notes are flagged and get half the
+  confidence, never forced.
+- Offline job flag `ANA_POST_CHOIR`: notes with `"part": "S"/"A"/"T"/"B"`, spelled per section
+  as sounding. `dz_wav file.wav choir` prints them.
+- STUDIO: CORO after GERAL on the analyser's mode key (DA-K); with stems the vocals stem is the
+  choir, without the mix; the harmony is analysed beside it. The recorder lane draws the four
+  sections in their colours; corrections are per section (`note:S` .. `note:B`).
+- Score: soprano with the chord symbols, then alto (treble), tenor (treble 8vb), bass (F), same
+  bars (open score); MIDI one track per section (GM choir aahs); JSON by part.
+- Measured: synthetic chorales (harmonic voices, formants, vibrato; 3 × 8 chords) S 18, A 18,
+  T 21, B 19 of 24 notes right; `tools/loopback/choir.py` (source-filter singers, two per section,
+  vowels, breath, consonants, a short room; 16 chords) S 15, A 12, T 12, B 11 of 16 (78 %), 91 notes
+  written for 64 sung. Tuned on these synthetic sets only: a real choir is still to be measured.
+- Not done: closed score (SA / TB on two staves), chords derived from the four voices (the audio
+  chord decoder is weak on a choir), repeated notes on one pitch (a re-sung syllable stays one
+  note), score-informed separation from a MusicXML reference.
+
 ### Later
-- S9: choir by section, SATB (spec M9, §21) — experimental.
 
 ## How precision is measured
 

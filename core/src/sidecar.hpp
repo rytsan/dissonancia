@@ -9,9 +9,13 @@
 namespace dz {
 
 // t0: subtracted from every event time (the first downbeat of a REC take, 0 for a file).
-inline void write_events_json(FILE* f, const std::vector<AnalyzerEvent>& events, double t0) {
+// parts: one per event (STUDIO choir: "S", "A", "T", "B"), written as each note's "part".
+inline void write_events_json(FILE* f, const std::vector<AnalyzerEvent>& events, double t0, const std::vector<const char*>* parts = nullptr) {
     bool first = true;
+    size_t index = 0;
     for (const AnalyzerEvent& e : events) {
+        const char* part = parts && index < parts->size() ? (*parts)[index] : nullptr;
+        index++;
         const char* sep = first ? "" : ",";
         if (e.type == AnalyzerEventType::ChordEnded) {
             const ChordEvent& c = e.data.chord;
@@ -30,9 +34,10 @@ inline void write_events_json(FILE* f, const std::vector<AnalyzerEvent>& events,
             const MusicalNoteEvent& n = e.data.note;
             std::fprintf(f,
                          "%s\n    {\"type\": \"note\", \"seq\": %u, \"start\": %.4f, \"end\": %.4f, \"midi\": %d, \"name\": \"%s\","
-                         " \"avgHz\": %.2f, \"medianHz\": %.2f, \"avgCents\": %.1f, \"confidence\": %.3f, \"chromatic\": %s, \"vibrato\": %s}",
+                         " \"avgHz\": %.2f, \"medianHz\": %.2f, \"avgCents\": %.1f, \"confidence\": %.3f, \"chromatic\": %s, \"vibrato\": %s%s%s%s}",
                          sep, e.sequence, n.startTimeSeconds - t0, n.endTimeSeconds - t0, n.midi, n.writtenName, n.avgHz, n.medianHz,
-                         n.avgCents, n.confidence, n.chromatic ? "true" : "false", n.vibrato ? "true" : "false");
+                         n.avgCents, n.confidence, n.chromatic ? "true" : "false", n.vibrato ? "true" : "false",
+                         part ? ", \"part\": \"" : "", part ? part : "", part ? "\"" : "");
         } else {
             continue;
         }

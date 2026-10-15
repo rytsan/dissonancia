@@ -107,7 +107,7 @@ public sealed class FlowUnit : StudioUnit
             Ui.Text(ctx, "DIRETO", src.Right - 16, yDirect + 1, 7, Ui.Label, Ui.SansBold);
             double first = _channels[0].R.Center.X - 8;
             Line(ctx, new Point(first, ySum), new Point(right - 16, ySum), master);
-            Ui.Text(ctx, "BUS DE SOMA", first + 4, ySum + 3, 7, Ui.Label, Ui.SansBold);
+            Ui.Text(ctx, "BUS DE SOMA ▶", right - 22, ySum - 11, 7, Ui.Label, Ui.SansBold, Ui.Align.Right);
             Patch(ctx, new Point(_channels[0].R.Center.X + 10, ySend), new Point(right - 16, ySend), -120, 0, send: true);
             Ui.Text(ctx, "ENVIO DE ANÁLISE · pós-insertos, pré-fader", first + 4, ySend + 3, 7, Ui.Label, Ui.SansBold);
         }
@@ -132,8 +132,8 @@ public sealed class FlowUnit : StudioUnit
         var da = new Rect(right, ySend - 14, 224, 28);
         var used = Enumerable.Range(0, n).SelectMany(S.AnalysersOf).ToHashSet();
         Box(ctx, da, "DA", "ANÁLISE", S.Result is not null || S.Running);
-        string[] all = ["DA-N", "DA-C", "DA-B", "DA-T"];
-        string[] what = ["notas", "acordes", "baixo", "batidas"];
+        string[] all = S.Choir ? ["DA-K", "DA-C", "DA-B", "DA-T"] : ["DA-N", "DA-C", "DA-B", "DA-T"];
+        string[] what = [S.Choir ? "coro" : "notas", "acordes", "baixo", "batidas"];
         for (int i = 0; i < all.Length; i++)
         {
             double ax = da.X + 74 + i * 38;

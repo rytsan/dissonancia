@@ -5,9 +5,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <random>
+#include <string>
 #include <vector>
 
 #include "choir.hpp"
+#include "miniaudio.h"
+#include "post.hpp"
 
 using namespace dz;
 
@@ -108,8 +111,8 @@ TEST_CASE("choir: three synthetic chorales, each note on its section") {
                 std::printf("u %.2f j %.2f: %d %d %d %d (%d) sum %d\n", u, j, r[0], r[1], r[2], r[3], r[4], r[0] + r[1] + r[2] + r[3]);
             }
     auto r = run({}, true);
-    for (int k = 0; k < kSections; k++) CHECK(r[size_t(k)] >= 18);   // of 24; measured S 19, A 20, T 21, B 20
-    CHECK(r[4] <= 18);   // measured 15
+    for (int k = 0; k < kSections; k++) CHECK(r[size_t(k)] >= 17);   // of 24; measured S 18, A 18, T 21, B 19
+    CHECK(r[4] <= 16);   // measured 11
 }
 
 TEST_CASE("choir: silence gives no notes, one voice gives one section") {
@@ -125,4 +128,29 @@ TEST_CASE("choir: silence gives no notes, one voice gives one section") {
     for (auto& n : notes) (n.section == kBass && n.midi == 45 ? bass : other)++;
     CHECK(bass >= 1);
     CHECK(other == 0);
+}
+
+TEST_CASE("choir: the offline job writes the notes with their parts") {
+    auto y = sing(kChorales[0], 7);
+    ma_encoder enc;
+    ma_encoder_config c = ma_encoder_config_init(ma_encoding_format_wav, ma_format_f32, 1, kRate);
+    REQUIRE(ma_encoder_init_file("dz_choir.wav", &c, &enc) == MA_SUCCESS);
+    ma_encoder_write_pcm_frames(&enc, y.data(), y.size(), nullptr);
+    ma_encoder_uninit(&enc);
+    SessionConfig s{};
+    s.mode = AnalysisMode::VoiceMono;
+    s.referenceA4 = 440;
+    s.meter = {4, 4};
+    s.bpm = 60;
+    PostJob job;
+    REQUIRE(job.run(s, 0.0, "dz_choir.wav", "dz_choir.json", ANA_POST_CHOIR) == ANA_OK);
+    FILE* f = std::fopen("dz_choir.json", "r");
+    REQUIRE(f);
+    std::string text;
+    for (int ch; (ch = std::fgetc(f)) != EOF;) text += char(ch);
+    std::fclose(f);
+    for (const char* part : {"\"part\": \"S\"", "\"part\": \"A\"", "\"part\": \"T\"", "\"part\": \"B\""}) CHECK(text.find(part) != std::string::npos);
+    CHECK(text.find("\"name\": \"C5\"") != std::string::npos);   // the soprano's first note, as sounding
+    std::remove("dz_choir.wav");
+    std::remove("dz_choir.json");
 }
