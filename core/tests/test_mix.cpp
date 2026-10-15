@@ -148,3 +148,69 @@ TEST_CASE("mix: stems as tracks, mute / solo, tap before the fader, bounce") {
     CHECK(p.tracks() == 1);
     for (const char* f : {"dz_mix_take.wav", "dz_mix_stem.wav", "dz_mix_tap.wav", "dz_mix_bounce.wav"}) std::remove(f);
 }
+
+namespace {
+std::vector<float> tone(double amp, double sec) { return sine(1000, amp, sec); }
+MixMeters meters_after(Player& p) {
+    play(p);
+    MixMeters m{};
+    p.meters(m);   // play() stops at the end: integrated, range and true peak hold
+    return m;
+}
+}  // namespace
+
+TEST_CASE("meters: loudness as EBU Tech 3341 / 3342, true peak between samples") {
+    Player p;
+    // Tech 3341 case 1: 1 kHz at -23 dBFS in both channels reads -23 LUFS.
+    REQUIRE(p.load(wav("dz_lufs_a.wav", tone(std::pow(10, -23 / 20.0), 20)).c_str()) == ANA_OK);
+    auto m = meters_after(p);
+    CHECK(m.lufsIntegrated == Approx(-23).margin(0.1));
+    // Case 3-like: quiet parts 13 dB under are dropped by the relative gate.
+    auto x = tone(std::pow(10, -36 / 20.0), 10), loud = tone(std::pow(10, -23 / 20.0), 20);
+    x.insert(x.end(), loud.begin(), loud.end());
+    x.insert(x.end(), x.begin(), x.begin() + 480000);
+    REQUIRE(p.load(wav("dz_lufs_b.wav", x).c_str()) == ANA_OK);
+    m = meters_after(p);
+    CHECK(m.lufsIntegrated == Approx(-23).margin(0.2));
+    // Tech 3342 case 1: 20 s at -20 dBFS then 20 s at -30 dBFS: LRA 10 LU.
+    x = tone(std::pow(10, -20 / 20.0), 20);
+    auto soft = tone(std::pow(10, -30 / 20.0), 20);
+    x.insert(x.end(), soft.begin(), soft.end());
+    REQUIRE(p.load(wav("dz_lufs_c.wav", x).c_str()) == ANA_OK);
+    m = meters_after(p);
+    CHECK(m.loudnessRange == Approx(10).margin(1));
+    // fs / 4 at 45°: every sample at 0.707 of the crest; the true peak finds the crest.
+    std::vector<float> q(48000);
+    for (size_t i = 0; i < q.size(); i++) q[i] = float(0.5 * std::sin(kPi / 2 * double(i) + kPi / 4));
+    REQUIRE(p.load(wav("dz_tp.wav", q).c_str()) == ANA_OK);
+    m = meters_after(p);
+    CHECK(m.masterPeakDb[0] < -8.5f);   // sample peak -9.03
+    CHECK(m.truePeakDb[0] == Approx(-6.02).margin(0.6));
+    for (auto f : {"dz_lufs_a.wav", "dz_lufs_b.wav", "dz_lufs_c.wav", "dz_tp.wav"}) std::remove(f);
+}
+
+TEST_CASE("meters: levels between the units, the scope ring") {
+    Player p;
+    REQUIRE(p.load(wav("dz_stage.wav", sine(1000, 0.25, 0.5)).c_str()) == ANA_OK);
+    auto c = defaults();
+    c.trimDb = 6;
+    p.set_channel(0, c);
+    PlayerInfo info{};
+    p.info(info);
+    std::vector<float> out(size_t(info.frames) * 2);
+    p.seek(0);
+    p.play();
+    p.render(out.data(), 4800, 2);   // 100 ms, still playing
+    MixMeters m{};
+    p.meters(m);
+    CHECK(m.stagePeakDb[0][0] == Approx(-12.04).margin(0.1));   // in
+    CHECK(m.stagePeakDb[0][1] == Approx(-6.02).margin(0.1));    // after the trim
+    CHECK(m.stagePeakDb[0][5] == Approx(-6.02).margin(0.1));    // nothing else on
+    std::vector<float> sc(2 * 1024);
+    REQUIRE(p.scope(0, sc.data(), 1024) == 1024);
+    for (int i = 0; i < 1024; i++) CHECK(sc[size_t(2 * i)] == out[size_t(2 * (4800 - 1024 + i))]);
+    REQUIRE(p.scope(1, sc.data(), 16) == 16);   // the monitored track (0) at its tap: the same here
+    CHECK(sc[30] == Approx(out[2 * 4799]).margin(1e-6));
+    p.stop();
+    std::remove("dz_stage.wav");
+}

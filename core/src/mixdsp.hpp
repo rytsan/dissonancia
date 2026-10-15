@@ -139,13 +139,22 @@ struct Strip {
         const double a = (std::clamp(p.pan, -1.f, 1.f) + 1) * kPi / 4;   // constant power
         panL = float(std::cos(a)); panR = float(std::sin(a));
     }
-    // Up to the analysis tap: trim, filters, gate, EQ, compressor.
-    void tap(float& l, float& r) {
+    // Up to the analysis tap: trim, filters, gate, EQ, compressor. `stage` (kStages floats) holds
+    // the peak after each unit — the levels on the patch cables between them.
+    static constexpr int kStages = ANA_CHAIN_STAGES;   // in, trim, filter, gate, EQ, compressor
+    void tap(float& l, float& r, float* stage = nullptr) {
+        auto at = [&](int k) { if (stage) stage[k] = std::max(stage[k], std::max(std::fabs(l), std::fabs(r))); };
+        at(0);
         l *= trim; r *= trim;
+        at(1);
         l = lp.run(hp.run(l, 0), 0); r = lp.run(hp.run(r, 1), 1);
+        at(2);
         gate.run(l, r);
+        at(3);
         l = eq.run(l, 0); r = eq.run(r, 1);
+        at(4);
         comp.run(l, r);
+        at(5);
     }
     void out(float& l, float& r) const { l *= fader * panL * 1.4142f; r *= fader * panR * 1.4142f; }   // centre = unity
 };

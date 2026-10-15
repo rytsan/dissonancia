@@ -10,6 +10,7 @@
 
 #include "dissonancia.h"
 #include "miniaudio.h"
+#include "loudness.hpp"
 #include "mixdsp.hpp"
 
 namespace dz {
@@ -43,6 +44,10 @@ public:
     int render_tap(uint32_t mask, const char* path) const;
     int bounce(const char* path) const;
     int tracks() const { return 1 + int(stems_.size()); }
+    // Scopes and loudness (see ana_player_scope ...).
+    int scope(int source, float* out, int frames) const;
+    void set_monitor(int track) { monitor_.store(track, std::memory_order_relaxed); }
+    void reset_loudness() { resetLoudness_.store(true, std::memory_order_release); }
 
     // min/max of the mono mix in each of `columns` equal slices of [start, end).
     void peaks(uint64_t start, uint64_t end, uint32_t columns, float* mn, float* mx) const;
@@ -76,8 +81,16 @@ private:
     // Meters (audio thread writes per block).
     std::atomic<float> mPeak_[ANA_MAX_TRACKS], mRms_[ANA_MAX_TRACKS], mGr_[ANA_MAX_TRACKS], mMaster_[4], mMasterGr_{0}, mLimGr_{0};
     std::atomic<uint8_t> mGate_[ANA_MAX_TRACKS];
+    std::atomic<float> mStage_[ANA_MAX_TRACKS][ANA_CHAIN_STAGES], mLufs_[4], mTp_[2];
+    meter::Loudness loud_;
+    std::atomic<bool> resetLoudness_{false};
+    // Scope rings: the master and the monitored track's tap, stereo; ringW_ counts frames written.
+    std::atomic<float> ringMaster_[ANA_SCOPE_FRAMES * 2], ringTrack_[ANA_SCOPE_FRAMES * 2];
+    std::atomic<uint64_t> ringW_{0};
+    std::atomic<int> monitor_{0};
     void sample(int track, uint64_t frame, float& l, float& r) const;
     void silence_meters();
+    void restart_meters();
     void sync_params(double fs);
     void reopen_after(const std::function<void()>& change);
     std::atomic<uint64_t> pos_{0}, loopA_{0}, loopB_{0};

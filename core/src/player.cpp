@@ -127,6 +127,7 @@ int Player::load(const char* path) {
     channels_ = ch;
     pos_ = 0;
     loopA_ = loopB_ = 0;
+    restart_meters();
     build_mipmap();
     if (reopen && open_device(ctx) != ANA_OK) return ANA_ERR_DEVICE;
     return ANA_OK;
@@ -172,6 +173,7 @@ int Player::apply_edits(const EditSegment* segs, int count, uint64_t fadeIn, uin
     primed_ = false;
     pos_ = std::min<uint64_t>(pos_.load(), frames());
     loopA_ = loopB_ = 0;
+    restart_meters();
     build_mipmap();
     if (reopen && open_device(ctx) != ANA_OK) return ANA_ERR_DEVICE;
     if (playing) play();
@@ -252,8 +254,11 @@ void Player::render(float* out, uint32_t n, uint32_t outChannels) {
     const int nt = tracks();
     bool anySolo = false;
     for (int t = 0; t < nt; t++) anySolo |= strips_[t].p.solo != 0;
-    float pk[ANA_MAX_TRACKS]{}, sq[ANA_MAX_TRACKS]{}, mpk[2]{}, msq[2]{};
+    float pk[ANA_MAX_TRACKS]{}, sq[ANA_MAX_TRACKS]{}, mpk[2]{}, msq[2]{}, stage[ANA_MAX_TRACKS][ANA_CHAIN_STAGES]{};
     uint32_t done = 0;
+    if (resetLoudness_.exchange(false, std::memory_order_acq_rel)) loud_.reset();
+    const int mon = std::clamp(monitor_.load(std::memory_order_relaxed), 0, nt - 1);
+    uint64_t w = ringW_.load(std::memory_order_relaxed);
     for (uint32_t i = 0; i < n; i++) {
         if (b > 0 && pos >= b) pos = a;
         if (pos >= total) { playing_.store(false, std::memory_order_release); break; }
@@ -262,7 +267,12 @@ void Player::render(float* out, uint32_t n, uint32_t outChannels) {
             float l, r;
             sample(t, pos, l, r);
             mix::Strip& s = strips_[t];
-            s.tap(l, r);
+            s.tap(l, r, stage[t]);
+            if (t == mon) {
+                const size_t k = size_t(w % ANA_SCOPE_FRAMES) * 2;
+                ringTrack_[k].store(l, std::memory_order_relaxed);
+                ringTrack_[k + 1].store(r, std::memory_order_relaxed);
+            }
             s.out(l, r);
             if (s.p.mute || (anySolo && !s.p.solo)) l = r = 0;
             const float m = std::max(std::fabs(l), std::fabs(r));
@@ -271,6 +281,13 @@ void Player::render(float* out, uint32_t n, uint32_t outChannels) {
             L += l; R += r;
         }
         bus_.run(L, R);
+        loud_.run(L, R);
+        {
+            const size_t k = size_t(w % ANA_SCOPE_FRAMES) * 2;
+            ringMaster_[k].store(L, std::memory_order_relaxed);
+            ringMaster_[k + 1].store(R, std::memory_order_relaxed);
+            w++;
+        }
         mpk[0] = std::max(mpk[0], std::fabs(L)); mpk[1] = std::max(mpk[1], std::fabs(R));
         msq[0] += L * L; msq[1] += R * R;
         if (outChannels == 1) out[i] = 0.5f * (L + R);
@@ -279,8 +296,15 @@ void Player::render(float* out, uint32_t n, uint32_t outChannels) {
         done++;
     }
     pos_.store(pos, std::memory_order_release);
+    ringW_.store(w, std::memory_order_release);
     if (done == 0) return;
+    mLufs_[0].store(loud_.momentary, std::memory_order_relaxed);
+    mLufs_[1].store(loud_.shortTerm, std::memory_order_relaxed);
+    mLufs_[2].store(loud_.integrated(), std::memory_order_relaxed);
+    mLufs_[3].store(loud_.range(), std::memory_order_relaxed);
+    for (int c = 0; c < 2; c++) mTp_[c].store(loud_.true_peak_db(c), std::memory_order_relaxed);
     for (int t = 0; t < nt; t++) {
+        for (int k = 0; k < ANA_CHAIN_STAGES; k++) mStage_[t][k].store(mix::lin_to_db(stage[t][k]), std::memory_order_relaxed);
         mPeak_[t].store(mix::lin_to_db(pk[t]), std::memory_order_relaxed);
         mRms_[t].store(mix::lin_to_db(std::sqrt(sq[t] / float(done))), std::memory_order_relaxed);
         mGr_[t].store(strips_[t].comp.gr, std::memory_order_relaxed);
@@ -294,8 +318,22 @@ void Player::render(float* out, uint32_t n, uint32_t outChannels) {
     mLimGr_.store(bus_.lim.gr_db(), std::memory_order_relaxed);
 }
 
+// New audio (load, edits), device closed: loudness from zero, scopes empty.
+void Player::restart_meters() {
+    loud_.init(rate_);
+    resetLoudness_ = false;
+    for (int k = 0; k < 4; k++) mLufs_[k].store(k == 3 ? 0.f : meter::kSilent);
+    mTp_[0] = mTp_[1] = meter::kSilent;
+    ringW_ = 0;
+}
+
 void Player::silence_meters() {
-    for (int t = 0; t < ANA_MAX_TRACKS; t++) { mPeak_[t].store(-120.f, std::memory_order_relaxed); mRms_[t].store(-120.f, std::memory_order_relaxed); mGr_[t].store(0, std::memory_order_relaxed); }
+    for (int t = 0; t < ANA_MAX_TRACKS; t++) {
+        mPeak_[t].store(-120.f, std::memory_order_relaxed); mRms_[t].store(-120.f, std::memory_order_relaxed); mGr_[t].store(0, std::memory_order_relaxed);
+        for (auto& m : mStage_[t]) m.store(-120.f, std::memory_order_relaxed);
+    }
+    mLufs_[0].store(meter::kSilent, std::memory_order_relaxed);   // integrated and range hold
+    mLufs_[1].store(meter::kSilent, std::memory_order_relaxed);
     for (auto& m : mMaster_) m.store(-120.f, std::memory_order_relaxed);
     mMasterGr_.store(0, std::memory_order_relaxed);
     mLimGr_.store(0, std::memory_order_relaxed);
@@ -311,6 +349,14 @@ void Player::meters(MixMeters& out) const {
         out.gateOpen[t] = mGate_[t].load(std::memory_order_relaxed);
     }
     for (int c = 0; c < 2; c++) { out.masterPeakDb[c] = mMaster_[c].load(std::memory_order_relaxed); out.masterRmsDb[c] = mMaster_[2 + c].load(std::memory_order_relaxed); }
+    for (int t = 0; t < ANA_MAX_TRACKS; t++)
+        for (int k = 0; k < ANA_CHAIN_STAGES; k++) out.stagePeakDb[t][k] = t < out.tracks ? mStage_[t][k].load(std::memory_order_relaxed) : -120.f;
+    out.lufsMomentary = mLufs_[0].load(std::memory_order_relaxed);
+    out.lufsShortTerm = mLufs_[1].load(std::memory_order_relaxed);
+    out.lufsIntegrated = mLufs_[2].load(std::memory_order_relaxed);
+    out.loudnessRange = mLufs_[3].load(std::memory_order_relaxed);
+    out.truePeakDb[0] = mTp_[0].load(std::memory_order_relaxed);
+    out.truePeakDb[1] = mTp_[1].load(std::memory_order_relaxed);
     out.masterCompGrDb = mMasterGr_.load(std::memory_order_relaxed);
     out.limiterGrDb = mLimGr_.load(std::memory_order_relaxed);
 }
@@ -379,6 +425,18 @@ int Player::bounce(const char* path) const {
         y[2 * i] = L; y[2 * i + 1] = R;
     }
     return write_wav(path, y, 2, rate_);
+}
+
+int Player::scope(int source, float* out, int frames) const {
+    const uint64_t w = ringW_.load(std::memory_order_acquire);
+    const auto& ring = source == 0 ? ringMaster_ : ringTrack_;
+    const int n = int(std::min<uint64_t>({uint64_t(std::max(frames, 0)), w, uint64_t(ANA_SCOPE_FRAMES)}));
+    for (int i = 0; i < n; i++) {
+        const size_t k = size_t((w - uint64_t(n) + uint64_t(i)) % ANA_SCOPE_FRAMES) * 2;
+        out[2 * i] = ring[k].load(std::memory_order_relaxed);
+        out[2 * i + 1] = ring[k + 1].load(std::memory_order_relaxed);
+    }
+    return n;
 }
 
 void Player::info(PlayerInfo& out) const {

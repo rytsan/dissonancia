@@ -326,6 +326,8 @@ struct EditSegment {
 // compressor -> [analysis tap] -> fader -> pan. The master: EQ -> bus compressor -> limiter -> fader.
 
 constexpr int ANA_MAX_TRACKS = 8;       // track 0 = the edited take, 1.. = separated stems
+constexpr int ANA_CHAIN_STAGES = 6;     // signal-flow taps of a channel strip (see MixMeters)
+constexpr int ANA_SCOPE_FRAMES = 8192;  // stereo frames kept for the STUDIO scopes
 constexpr int ANA_EQ_BANDS = 4;
 
 enum class EqType : uint8_t { Peak, LowShelf, HighShelf };
@@ -367,6 +369,12 @@ struct MixMeters {
     float masterCompGrDb, limiterGrDb;
     int32_t tracks;
     uint8_t _pad0[4];
+    // Signal flow: the peak after each unit of the chain (in, trim, filter, gate, EQ, compressor).
+    float stagePeakDb[ANA_MAX_TRACKS][ANA_CHAIN_STAGES];
+    // Master loudness (BS.1770-4 / EBU R128) since the take was loaded or the meter reset; the
+    // momentary and short-term read silent while stopped, integrated and range hold.
+    float lufsMomentary, lufsShortTerm, lufsIntegrated, loudnessRange;
+    float truePeakDb[2];               // highest since the reset, 4x oversampled
 };
 
 // ---------------------------------------------------------------- STUDIO offline analysis (studio-plan S1)
@@ -440,6 +448,11 @@ ANA_API void ana_player_meters(PlayerHandle* p, MixMeters* out);
 ANA_API int32_t ana_player_render_tap(PlayerHandle* p, uint32_t trackMask, const char* pathUtf8);
 ANA_API int32_t ana_player_bounce(PlayerHandle* p, const char* pathUtf8);
 // min/max of the mono mix per column over [startFrame, endFrame), from a peak mipmap (any zoom).
+// The latest output for the scopes (stereo, interleaved, oldest first): source 0 = the master, 1 =
+// the monitored track at its analysis tap. Returns the frames written (<= frames, ANA_SCOPE_FRAMES).
+ANA_API int32_t ana_player_scope(PlayerHandle* p, int32_t source, float* stereoOut, int32_t frames);
+ANA_API void ana_player_set_monitor(PlayerHandle* p, int32_t track);
+ANA_API void ana_player_reset_loudness(PlayerHandle* p);
 ANA_API int32_t ana_player_peaks(PlayerHandle* p, uint64_t startFrame, uint64_t endFrame, int32_t columns, float* minOut, float* maxOut);
 
 // STUDIO offline analysis: the whole file through session->mode's pipeline at session->quality on a

@@ -237,6 +237,13 @@ int32_t ana_player_bounce(PlayerHandle* p, const char* path) {
     return r;
 }
 
+int32_t ana_player_scope(PlayerHandle* p, int32_t source, float* out, int32_t frames) {
+    if (!p || !out || frames < 0) return ANA_ERR_ARG;
+    return p->player.scope(source, out, frames);
+}
+void ana_player_set_monitor(PlayerHandle* p, int32_t track) { if (p) p->player.set_monitor(track); }
+void ana_player_reset_loudness(PlayerHandle* p) { if (p) p->player.reset_loudness(); }
+
 int32_t ana_player_peaks(PlayerHandle* p, uint64_t a, uint64_t b, int32_t columns, float* mn, float* mx) {
     if (!p || columns <= 0 || !mn || !mx) return ANA_ERR_ARG;
     p->player.peaks(a, b, uint32_t(columns), mn, mx);
