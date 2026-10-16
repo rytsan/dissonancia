@@ -294,7 +294,15 @@ int render(int argc, char** argv) {
         for (int32 c = 0; c < inCh; c++) {
             float* b = data.inputs[0].channelBuffers32[c];
             const uint32_t src = std::min<uint32_t>(uint32_t(c), fileCh - 1);
-            for (int32 i = 0; i < n; i++) b[i] = pos + size_t(i) < frames ? in[(pos + size_t(i)) * fileCh + src] : 0.f;
+            for (int32 i = 0; i < n; i++) {
+                const size_t at = pos + size_t(i);
+                if (at >= frames) { b[i] = 0.f; continue; }
+                if (inCh == 1 && fileCh > 1) {   // a mono plugin on a stereo channel hears both sides
+                    float sum = 0;
+                    for (uint32_t k = 0; k < fileCh; k++) sum += in[at * fileCh + k];
+                    b[i] = sum / float(fileCh);
+                } else b[i] = in[at * fileCh + src];
+            }
         }
         data.numSamples = n;
         context.projectTimeSamples = TSamples(pos);

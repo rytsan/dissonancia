@@ -7,6 +7,7 @@
 #include <poll.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <chrono>
 #include <vector>
@@ -67,8 +68,18 @@ struct Frame final : IPlugFrame {
 };
 }  // namespace
 
+// Xlib's default handler ends the process on any protocol error; a plugin's request that the
+// server refuses (an atom a bare server without a window manager lacks) is logged instead.
+int log_x_error(Display* d, XErrorEvent* e) {
+    char text[128];
+    XGetErrorText(d, e->error_code, text, sizeof text);
+    std::fprintf(stderr, "X error ignored: %s (request %d)\n", text, int(e->request_code));
+    return 0;
+}
+
 bool run_editor_window(IPlugView* view, const std::string& title, std::string& error) {
     if (view->isPlatformTypeSupported(kPlatformTypeX11EmbedWindowID) != kResultTrue) { error = "the editor does not support X11"; return false; }
+    XSetErrorHandler(log_x_error);
     Display* d = XOpenDisplay(nullptr);
     if (!d) { error = "no X display (DISPLAY)"; return false; }
     ViewRect r{0, 0, 640, 400};
