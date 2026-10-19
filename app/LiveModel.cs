@@ -3,7 +3,9 @@ namespace Dissonancia;
 /// Options fixed on the START tab for one session (spec §5 SessionConfig).
 public sealed class Session
 {
-    public AppMode Mode = AppMode.GuitarChords;
+    public LiveMode Live = LiveMode.Acoustic;      // LIVE (START); Mode = Live.Core() there
+    public AppMode Mode = AppMode.GuitarChords;    // core pipeline (STUDIO sets it per analysis)
+    public bool ShowsMelody => Live is LiveMode.Melody or LiveMode.AcousticVoice or LiveMode.FullSong;
     public Quality Quality = Quality.Balanced;
     // No key signature by default: chord names stay plain (no roman numerals, no cadences). A key
     // is chosen by hand on START by whoever knows the piece; it never changes by itself.

@@ -331,7 +331,7 @@ public sealed class LcdModule : RackModule
         var f = Frame!;
         Plasma.Panel(ctx, r, ref _grid, ref _gridSize);
         var inner = r.Deflate(16);
-        bool chords = Session.IsChordMode;
+        bool chords = Session.IsChordMode && Session.Live != LiveMode.Melody;   // Melodia: the whole display is the line
         double split = chords ? inner.Y + inner.Height * 0.54 : inner.Y;
 
         if (chords)
@@ -385,13 +385,18 @@ public sealed class LcdModule : RackModule
         double melX = infoX + 130;
         Plasma.Text(ctx, "MELODY", melX, y, 10, false, Ui.SansBold);
         Plasma.DotText(ctx, f.MelodyValid ? f.Melody.WithOctaveShift(Session.DisplayClef.OctaveShift()).Name : "", melX, y + 16, noteDot, cells: 4, dim: !f.MelodySettled);
+        // Acústico + voz: the staff carries the sung line; otherwise the bass.
+        bool voiceStaff = Session.Live == LiveMode.AcousticVoice;
         if (Session.GrandStaff) DrawGrandStaff(ctx, new Rect(inner.Right - 170, y + 2, 170, Math.Max(80, inner.Bottom - y - 4)), f.Bass, valid);
+        else if (voiceStaff) DrawStaff(ctx, new Rect(inner.Right - 160, y + 10, 160, 56), Session.DisplayClef, f.Melody.WithOctaveShift(Session.DisplayClef.OctaveShift()), f.MelodyValid);
         else DrawStaff(ctx, new Rect(inner.Right - 160, y + 10, 160, 56), Session.DisplayClef, written, valid);
     }
 
-    /// Mono modes: the whole display is the note — big spelled name, staff, full-width cents meter.
+    /// Mono modes and Melodia: the whole display is the note — big spelled name, staff, full-width cents
+    /// meter (mono pipeline only: the melody line is read to the semitone).
     void DrawNoteScreen(DrawingContext ctx, Rect inner, LiveFrame f)
     {
+        if (Session.IsChordMode) { DrawMelodyScreen(ctx, inner, f); return; }
         var written = f.Note.WithOctaveShift(Session.DisplayClef.OctaveShift());
         double staffW = Math.Min(230, inner.Width * 0.38);
         double dot = Math.Min((inner.Width - staffW - 24) / (4 * 6 * 1.3), (inner.Height * 0.5) / (7 * 1.3));
@@ -410,6 +415,22 @@ public sealed class LcdModule : RackModule
         Plasma.Text(ctx, f.NoteValid ? $"{f.Cents:+0;-0} ¢" : "— ¢", inner.X, ty, 20);
         Plasma.Text(ctx, f.NoteValid ? $"{f.Hz:0.0} Hz" : "— Hz", inner.X + inner.Width * 0.36, ty, 20);
         Plasma.Text(ctx, Ui.Ms(f.NoteLatencyMs), inner.Right, ty, 20, true, Ui.Mono, Ui.Align.Right);
+        if (Session.DisplayClef == Clef.Treble8vb) Plasma.Text(ctx, "written 8vb", inner.X + inner.Width * 0.36, inner.Y, 10, false);
+    }
+
+    void DrawMelodyScreen(DrawingContext ctx, Rect inner, LiveFrame f)
+    {
+        var written = f.Melody.WithOctaveShift(Session.DisplayClef.OctaveShift());
+        double staffW = Math.Min(230, inner.Width * 0.38);
+        double dot = Math.Min((inner.Width - staffW - 24) / (4 * 6 * 1.3), (inner.Height * 0.6) / (7 * 1.3));
+        double noteH = dot * 1.3 * 7;
+        Plasma.Text(ctx, "MELODY", inner.X, inner.Y, 10, false, Ui.SansBold);
+        Plasma.DotText(ctx, f.MelodyValid ? written.Name : "", inner.X, inner.Y + 16, dot, cells: 4, dim: !f.MelodySettled);
+        DrawStaff(ctx, new Rect(inner.Right - staffW, inner.Y + 10, staffW, noteH + 6), Session.DisplayClef, written, f.MelodyValid);
+        double ty = inner.Y + 16 + noteH + 22;
+        Plasma.Lamp(ctx, new Point(inner.X + 5, ty + 10), 4.5, f.MelodySettled);
+        Plasma.Text(ctx, f.MelodySettled ? "settled" : "—", inner.X + 18, ty, 20, f.MelodySettled, Ui.Mono);
+        Plasma.Text(ctx, f.MelodyValid ? $"{f.Melody.Hz():0.0} Hz" : "— Hz", inner.X + inner.Width * 0.36, ty, 20);
         if (Session.DisplayClef == Clef.Treble8vb) Plasma.Text(ctx, "written 8vb", inner.X + inner.Width * 0.36, inner.Y, 10, false);
     }
 

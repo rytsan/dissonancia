@@ -1,6 +1,17 @@
 namespace Dissonancia;
 
 public enum AppMode { VoiceMono, InstrumentMono, GuitarChords, PianoChords, GeneralChords }
+/// LIVE modes (START): what is playing. Each runs one core pipeline (Core); the analyzer shows what the mode is for.
+public enum LiveMode { FullSong, Melody, Acoustic, AcousticVoice, Piano }
+
+public static class LiveModes
+{
+    public static AppMode Core(this LiveMode m) => m switch
+    {
+        LiveMode.Acoustic or LiveMode.AcousticVoice => AppMode.GuitarChords, LiveMode.Piano => AppMode.PianoChords, _ => AppMode.GeneralChords,
+    };
+}
+
 public enum Quality { LowLatency, Balanced, HighPrecision }
 public enum Clef { Treble, Treble8vb, Bass, Alto, Tenor }
 

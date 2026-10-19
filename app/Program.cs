@@ -90,7 +90,7 @@ public sealed class MainWindow : Window
         foreach (var m in _modules) { m.Frame = _frame; m.Session = _session; }
         _rack = new RackView(catalog);
         _rack.CountIn.Frame = _frame; _rack.CountIn.Session = _session;
-        _rack.Load(_session.Mode);
+        _rack.Load(_session.Live);
 
         // One action table (spec §22.6): keys, transport buttons (and later MIDI) all bind to it.
         _actions = new()
@@ -215,20 +215,21 @@ public sealed class MainWindow : Window
     /// Preset follows the session mode; editing is locked while REC is armed or running.
     void SyncRack()
     {
-        if (_rack.Mode != _session.Mode) _rack.Load(_session.Mode);
+        if (_rack.Mode != _session.Live) _rack.Load(_session.Live);
         _rack.SetLocked(_frame.Recording || _frame.CountingIn);
         FollowClef();
     }
 
-    // Clef "Auto": the last 16 notes (or bass notes in chord modes) decide, with hysteresis.
+    // Clef "Auto": the last 16 notes (melody, else the bass in chord modes) decide, with hysteresis.
     readonly List<int> _recentNotes = [];
     int _lastNote = -1;
 
     void FollowClef()
     {
         if (!_session.AutoClef) return;
-        bool valid = _session.IsChordMode ? _frame.BassValid && _frame.BassSettled : _frame.NoteValid;
-        int midi = valid ? (_session.IsChordMode ? _frame.Bass : _frame.Note).Midi : -1;
+        bool melody = _session.ShowsMelody;
+        bool valid = melody ? _frame.MelodyValid && _frame.MelodySettled : _session.IsChordMode ? _frame.BassValid && _frame.BassSettled : _frame.NoteValid;
+        int midi = valid ? (melody ? _frame.Melody : _session.IsChordMode ? _frame.Bass : _frame.Note).Midi : -1;
         if (midi < 0 || midi == _lastNote) { if (midi < 0) _lastNote = -1; return; }
         _lastNote = midi;
         _recentNotes.Add(midi);
@@ -260,7 +261,7 @@ public sealed class MainWindow : Window
     }
     public void Action(string name) => _actions[name]();
     public void SelectTab(int index) => _tabs.SelectedIndex = index;
-    public void SetMode(AppMode mode, Clef? clef) { _session.Mode = mode; _session.AutoClef = clef is null; _session.Clef = clef ?? Clef.Treble; }
+    public void SetMode(LiveMode mode, Clef? clef) { (_session.Live, _session.Mode) = (mode, mode.Core()); _session.AutoClef = clef is null; _session.Clef = clef ?? Clef.Treble; }
     public void ToggleRec(double now) => _source.ToggleRec(now);
 
     protected override void OnKeyDown(KeyEventArgs e)
@@ -389,11 +390,11 @@ public sealed class MainWindow : Window
         // Mode buttons
         // Clef per mode: voice and melody follow their range (Auto); guitar sounds an octave below
         // what is written (treble 8vb); piano uses the grand staff.
-        var modes = new (AppMode Mode, string Label, Clef? Clef)[]
+        var modes = new (LiveMode Mode, string Label, Clef? Clef)[]
         {
-            (AppMode.VoiceMono, "🎤  Voice", null), (AppMode.InstrumentMono, "🎷  Instrument melody", null),
-            (AppMode.GuitarChords, "🎸  Guitar chords", Clef.Treble8vb), (AppMode.PianoChords, "🎹  Piano chords", Clef.Treble),
-            (AppMode.GeneralChords, "🎼  General chords", Clef.Treble),
+            (LiveMode.FullSong, "🎼  Música completa", Clef.Treble), (LiveMode.Melody, "🎤  Melodia", null),
+            (LiveMode.Acoustic, "🎸  Acústico", Clef.Treble8vb), (LiveMode.AcousticVoice, "🎸🎤  Acústico + voz", null),
+            (LiveMode.Piano, "🎹  Piano", Clef.Treble),
         };
         // Item 0 = Auto (by range), then the clefs in enum order.
         var clefBox = new ComboBox
@@ -408,10 +409,10 @@ public sealed class MainWindow : Window
         var modeButtons = new List<ToggleButton>();
         foreach (var (mode, label, clef) in modes)
         {
-            var b = new ToggleButton { Content = label, IsChecked = mode == _session.Mode, Width = 200, Height = 64, Margin = new Thickness(0, 0, 10, 10), FontSize = 15 };
+            var b = new ToggleButton { Content = label, IsChecked = mode == _session.Live, Width = 200, Height = 64, Margin = new Thickness(0, 0, 10, 10), FontSize = 15 };
             b.Click += (_, _) =>
             {
-                _session.Mode = mode;
+                (_session.Live, _session.Mode) = (mode, mode.Core());
                 foreach (var o in modeButtons) o.IsChecked = o == b;
                 clefBox.SelectedIndex = clef is { } c ? (int)c + 1 : 0;   // default clef per mode, user can change (not on piano)
                 ClefForMode();

@@ -22,10 +22,9 @@ public static class RackCatalog
     /// REC access and the ms readout must always be on screen.
     public static bool Pinned(ModuleKind k) => k is ModuleKind.Transport or ModuleKind.Status;
 
-    public static bool Applies(ModuleKind k, AppMode mode) => k switch
+    public static bool Applies(ModuleKind k, LiveMode mode) => k switch
     {
-        ModuleKind.Fretboard => mode == AppMode.GuitarChords,
-        ModuleKind.Timeline or ModuleKind.Waterfall => mode is AppMode.GuitarChords or AppMode.PianoChords or AppMode.GeneralChords,
+        ModuleKind.Fretboard => mode is LiveMode.Acoustic or LiveMode.AcousticVoice,
         _ => true,
     };
 
@@ -43,29 +42,29 @@ public static class RackCatalog
         ModuleKind.Transport => 96, ModuleKind.Status => 38, ModuleKind.Timeline => e.HeightU * 84, _ => e.HeightU * UnitPx,
     };
 
-    public static List<RackEntry> Default(AppMode mode)
+    public static List<RackEntry> Default(LiveMode mode)
     {
         // Piano: a taller analyzer for the grand staff.
-        bool piano = mode == AppMode.PianoChords;
+        bool piano = mode == LiveMode.Piano;
         List<RackEntry> top = [new(ModuleKind.Input, true, 2), new(ModuleKind.Analyzer, true, piano ? 5 : 4), new(ModuleKind.Scope, true, piano ? 3 : 2)];
         List<RackEntry> middle = mode switch
         {
-            AppMode.VoiceMono or AppMode.InstrumentMono => [new(ModuleKind.Tuner, false, 2)],
-            AppMode.GuitarChords => [new(ModuleKind.Fretboard, false, 2), new(ModuleKind.Timeline, false, 1)],
-            AppMode.PianoChords => [new(ModuleKind.Keyboard, false, 2), new(ModuleKind.Waterfall, false, 2), new(ModuleKind.Timeline, false, 1)],
+            LiveMode.Melody => [new(ModuleKind.Keyboard, false, 2), new(ModuleKind.Waterfall, false, 2)],
+            LiveMode.Acoustic or LiveMode.AcousticVoice => [new(ModuleKind.Fretboard, false, 2), new(ModuleKind.Timeline, false, 1)],
+            LiveMode.Piano => [new(ModuleKind.Keyboard, false, 2), new(ModuleKind.Waterfall, false, 2), new(ModuleKind.Timeline, false, 1)],
             _ => [new(ModuleKind.Waterfall, false, 2), new(ModuleKind.Timeline, false, 1)],
         };
         return [.. top, .. middle, new(ModuleKind.Transport, false, 1), new(ModuleKind.Status, false, 1)];
     }
 
-    static string PresetPath(AppMode mode) =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Dissonancia", $"rack-{mode}.json");
+    static string PresetPath(LiveMode mode) =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Dissonancia", $"rack-live-{mode}.json");
 
     sealed record Dto(string module, string width, int heightU);
 
     /// User preset for the mode, else the default. Unknown, duplicate or inapplicable entries are
     /// dropped; pinned modules are restored; heights are clamped to the module's range.
-    public static List<RackEntry> Load(AppMode mode)
+    public static List<RackEntry> Load(LiveMode mode)
     {
         try
         {
@@ -85,7 +84,7 @@ public static class RackCatalog
         return Default(mode);
     }
 
-    public static void Save(AppMode mode, IEnumerable<RackEntry> entries)
+    public static void Save(LiveMode mode, IEnumerable<RackEntry> entries)
     {
         try
         {
@@ -97,7 +96,7 @@ public static class RackCatalog
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }
 
-    public static void Reset(AppMode mode)
+    public static void Reset(LiveMode mode)
     {
         try { File.Delete(PresetPath(mode)); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }
