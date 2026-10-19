@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 
 namespace dz {
 
@@ -136,19 +137,59 @@ MelodyTracker::MelodyTracker(const SessionConfig& s, const Cqt& cqt, double hopS
     for (int h = 0; h < kHarmonics; h++) offset_[h] = int(std::lround(bpo * std::log2(h + 1.0)));
     decay_ = float(std::exp(-hopSeconds / 2.0));   // loudest salience heard, forgotten over ~2 s
     salience_.assign(cqt.bins(), 0.f);
+    residual_.assign(cqt.bins(), 0.f);
 }
 
-void MelodyTracker::process(const Cqt& cqt, const float* mag, BassEstimate& out) {
+float MelodyTracker::salience(const float* mag, int c, int bins, int bpo) const {
+    float s = 0, w = 1;
+    for (int h = 0; h < kHarmonics && c + offset_[h] < bins; h++, w *= 0.8f) s += w * mag[c + offset_[h]];
+    // ponytail: octave-below test only; a lead an octave over a loud bass note is halved too (Klapuri cancellation if it matters).
+    if (c >= bpo && mag[c - bpo] > mag[c]) s *= 0.5f;
+    return s * (1 + kSkyline * float(c - firstBin_) * 12 / bpo);   // the lead is usually the top voice
+}
+
+void MelodyTracker::find_voices(const Cqt& cqt, const float* mag, float mx, int8_t* voices) {
+    const int bins = cqt.bins(), bpo = cqt.bins_per_octave();
+    std::copy(mag, mag + bins, residual_.begin());
+    const float leak = cqt.neighbour_leakage();
+    int n = 0;
+    for (int v = 0; v < kMaxVoices; v++) {
+        float best = 0;
+        int c0 = -1;
+        for (int c = firstBin_; c <= lastBin_; c++) {
+            float s = salience(residual_.data(), c, bins, bpo);
+            if (s > best) { best = s; c0 = c; }
+        }
+        if (c0 < 0 || best < 0.3f * mx) break;   // weaker than 30 % of the main line: accompaniment residue
+        int midi = cqt.min_midi() + int(std::lround(c0 * 12.0 / bpo));
+        if (std::find(voices, voices + n, int8_t(midi)) == voices + n) voices[n++] = int8_t(midi);
+        // Cancel the found series: each partial loses at most the smooth envelope of its neighbours, so a
+        // partial shared with another voice keeps what that voice put there (spectral smoothness).
+        float part[kHarmonics];
+        for (int h = 0; h < kHarmonics; h++) part[h] = c0 + offset_[h] < bins ? residual_[size_t(c0 + offset_[h])] : 0;
+        for (int h = 0; h < kHarmonics && c0 + offset_[h] < bins; h++) {
+            float lo = part[std::max(0, h - 1)], hi = part[std::min(kHarmonics - 1, h + 1)];
+            float smooth = (lo + part[h] + hi) / 3;
+            const int k = c0 + offset_[h];
+            float& r = residual_[size_t(k)];
+            const float removed = std::min(r, h == 0 ? r : smooth);   // the fundamental's bin goes entirely
+            r -= removed;
+            // and its main-lobe leakage into the neighbour bins, or they come back as voices a semitone away
+            for (int j : {k - 1, k + 1})
+                if (j >= 0 && j < bins) residual_[size_t(j)] = std::max(0.f, residual_[size_t(j)] - leak * removed);
+        }
+    }
+    std::sort(voices, voices + n, std::greater<int8_t>());
+}
+
+void MelodyTracker::process(const Cqt& cqt, const float* mag, BassEstimate& out, int8_t* voices) {
     out = {};
+    std::fill(voices, voices + kMaxVoices, int8_t(-1));
     const int bins = cqt.bins(), bpo = cqt.bins_per_octave();
     float mx = 0;
     int best = -1;
     for (int c = firstBin_; c <= lastBin_; c++) {
-        float s = 0, w = 1;
-        for (int h = 0; h < kHarmonics && c + offset_[h] < bins; h++, w *= 0.8f) s += w * mag[c + offset_[h]];
-        // ponytail: octave-below test only; a lead an octave over a loud bass note is halved too (Klapuri cancellation if it matters).
-        if (c >= bpo && mag[c - bpo] > mag[c]) s *= 0.5f;
-        s *= 1 + kSkyline * float(c - firstBin_) * 12 / bpo;   // the lead is usually the top voice
+        float s = salience(mag, c, bins, bpo);
         salience_[size_t(c)] = s;
         if (s > mx) { mx = s; best = c; }
     }
@@ -163,6 +204,7 @@ void MelodyTracker::process(const Cqt& cqt, const float* mag, BassEstimate& out)
         if (salience_[size_t(near)] >= 0.7f * mx) best = near;
     }
     bin_ = best;
+    find_voices(cqt, mag, mx, voices);
 
     const int midi = cqt.min_midi() + int(std::lround(best * 12.0 / bpo));
     sameHops_ = midi == lastMidi_ ? sameHops_ + 1 : 0;

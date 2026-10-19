@@ -431,6 +431,11 @@ public sealed class LcdModule : RackModule
         Plasma.Lamp(ctx, new Point(inner.X + 5, ty + 10), 4.5, f.MelodySettled);
         Plasma.Text(ctx, f.MelodySettled ? "settled" : "—", inner.X + 18, ty, 20, f.MelodySettled, Ui.Mono);
         Plasma.Text(ctx, f.MelodyValid ? $"{f.Melody.Hz():0.0} Hz" : "— Hz", inner.X + inner.Width * 0.36, ty, 20);
+        // Polyphony: every line heard, highest first (the main line is the one above, chosen by continuity).
+        int fifths = Session.KeySet ? Session.Key.Fifths : 0;
+        var voices = string.Join("  ", f.Voices.Take(f.VoiceCount).Select(m => Review.NoteName(m, fifths)));
+        Plasma.Text(ctx, "VOICES", inner.X, ty + 34, 10, false, Ui.SansBold);
+        Plasma.Text(ctx, f.VoiceCount > 0 ? voices : "—", inner.X + 60, ty + 30, 18, f.VoiceCount > 1, Ui.Mono);
         if (Session.DisplayClef == Clef.Treble8vb) Plasma.Text(ctx, "written 8vb", inner.X + inner.Width * 0.36, inner.Y, 10, false);
     }
 

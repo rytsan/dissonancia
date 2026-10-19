@@ -75,6 +75,7 @@ public:
         TuningEstimate tuning;
         BassEstimate bass;
         BassEstimate melody;           // predominant melody (with the bass tracker only)
+        int8_t voices[8];              // every line heard, MIDI highest first, -1 = none (first 4 used)
         bool onset;
         double lastOnset;              // sample clock (hop start of the onset hop), < 0 = none
         float flux;

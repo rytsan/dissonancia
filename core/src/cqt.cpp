@@ -261,7 +261,8 @@ void ChromaFrontEnd::process(const float* x, uint32_t n, uint64_t endFrame, Outp
     c.timestampSeconds = double(endFrame) / nativeRate_ - cqt_.octave_delay_seconds(0) - (kMedianHops - 1) / 2 * double(n) / nativeRate_;
     if (!silent) update_tuning(out.magnitude, bins, out);
     out.bass = out.melody = {};
-    if (melody_ && !silent) melody_->process(cqt_, med, out.melody);
+    std::fill(out.voices, out.voices + 8, int8_t(-1));
+    if (melody_ && !silent) melody_->process(cqt_, med, out.melody, out.voices);
     if (bass_ && !silent) {
         bass_->process(cqt_, med, gated_.data(), now, lastOnset_, out.bass);   // median: a kick or snare is not a bass note
         if (out.bass.valid && out.bass.settled) c.bass[out.bass.pitchClass] = out.bass.confidence;   // bass chroma (§9)

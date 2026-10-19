@@ -152,6 +152,7 @@ unsafe struct LiveSnapshotNative
     byte _pad2a, _pad2b, _pad2c;
     public float ChordLatencyMs, ChordConfirmElapsedMs;
     public BassEstimateNative Bass, Melody;
+    public fixed sbyte Voices[8];
     public double LastOnsetSeconds;
     public ContextEstimateNative Context;
     public fixed float WaveMin[WaveColumns];
@@ -388,6 +389,8 @@ public sealed class NativeLiveSource : ILiveSource
         f.MelodyValid = m.Valid != 0;
         f.MelodySettled = m.Settled != 0;
         if (f.MelodyValid) f.Melody = new Pitch(m.Letter, m.Alter, m.WrittenOctave - _session.CoreClef.OctaveShift());
+        f.VoiceCount = 0;
+        for (int i = 0; i < LiveFrame.MaxVoices && _snap.Voices[i] >= 0; i++) f.Voices[f.VoiceCount++] = _snap.Voices[i];
         fixed (byte* cs = _snap.ConfirmedSymbol) f.DisplayChord = _confirmed.Get(cs, 16, Display);
         f.CandidateChord = !f.ChordConfirmed && f.ChordSymbol.Length > 0 && f.ChordConfirmElapsedMs >= 120 ? f.ChordSymbol : "";
         if (f.DisplayChord.Length == 0) f.DisplayChord = f.CandidateChord;   // nothing confirmed yet: the candidate, dimmed

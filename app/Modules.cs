@@ -61,10 +61,10 @@ public sealed class KeyboardModule : RackModule
         int whiteCount = octaves * 7;
         double ww = r.Width / whiteCount;
         int[] whiteSemis = [0, 2, 4, 5, 7, 9, 11];
-        bool melody = Session.Live == LiveMode.Melody;   // melody only: the line's note, no chord
+        bool melody = Session.Live == LiveMode.Melody;   // melody only: every voice heard, the main line in amber
         bool chords = Session.IsChordMode && !melody;
-        bool Lit(int midi) => melody ? f.MelodyValid && midi == f.Melody.Midi : chords ? f.ChordPitchClasses.Contains(midi % 12) : f.NoteValid && midi == f.Note.Midi;
-        IBrush Fill(int midi, IBrush off) => chords && f.BassValid && midi == f.Bass.Midi ? Ui.Amber : Lit(midi) ? Ui.Green : off;
+        bool Lit(int midi) => melody ? Array.IndexOf(f.Voices, midi, 0, f.VoiceCount) >= 0 : chords ? f.ChordPitchClasses.Contains(midi % 12) : f.NoteValid && midi == f.Note.Midi;
+        IBrush Fill(int midi, IBrush off) => chords && f.BassValid && midi == f.Bass.Midi || melody && f.MelodyValid && midi == f.Melody.Midi ? Ui.Amber : Lit(midi) ? Ui.Green : off;
         for (int i = 0; i < whiteCount; i++)
         {
             int midi = firstMidi + 12 * (i / 7) + whiteSemis[i % 7];

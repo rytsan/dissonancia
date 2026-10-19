@@ -279,3 +279,23 @@ TEST_CASE("noise gate: room noise above -50 dBFS goes silent once learned, a cho
     }
     CHECK(top_pcs(out.chroma.normalized, 3) == std::vector<int>{0, 4, 7});
 }
+
+TEST_CASE("melody: two lines in thirds and a triad of voices are all heard") {
+    struct Case { std::vector<double> midis; };
+    for (auto& [midis] : std::vector<Case>{{{76, 72}}, {{79, 76, 72}}, {{67, 64}}}) {
+        ChromaFrontEnd fe(chord_session(), 2, 48000, 82.4f, 4200, 12, 960, 70, 500, 0.2);
+        ChromaFrontEnd::Output out{};
+        std::vector<float> block(960);
+        for (uint64_t pos = 0; pos < 48000; pos += 960) {
+            tones(block, pos, 48000, midis, 0.08f);
+            RtScope rt;
+            fe.process(block.data(), 960, pos + 960, out);
+        }
+        std::vector<int> heard;
+        for (int8_t v : out.voices)
+            if (v >= 0) heard.push_back(v);
+        std::vector<int> want(midis.begin(), midis.end());
+        INFO("voices " << (heard.size() > 0 ? heard[0] : -1) << " " << (heard.size() > 1 ? heard[1] : -1) << " " << (heard.size() > 2 ? heard[2] : -1) << " " << (heard.size() > 3 ? heard[3] : -1));
+        CHECK(heard == want);
+    }
+}

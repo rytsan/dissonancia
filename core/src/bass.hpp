@@ -60,16 +60,21 @@ private:
 class MelodyTracker {
 public:
     MelodyTracker(const SessionConfig& s, const Cqt& cqt, double hopSeconds, int midiLo = 48, int midiHi = 84);
-    void process(const Cqt& cqt, const float* magnitude, BassEstimate& out);
+    // voices[kMaxVoices]: every line heard (multiple f0, Klapuri 2006 iterative estimation and
+    // cancellation with spectral smoothness), MIDI highest first, -1 = none.
+    static constexpr int kMaxVoices = 4;
+    void process(const Cqt& cqt, const float* magnitude, BassEstimate& out, int8_t* voices);
 
 private:
+    float salience(const float* mag, int c, int bins, int bpo) const;
+    void find_voices(const Cqt& cqt, const float* mag, float mx, int8_t* voices);
     static constexpr int kHarmonics = 5;
     static constexpr float kSkyline = 0.02f;   // salience gain per semitone up the range; calibration knob
     SessionConfig session_;
     Speller speller_;
     int firstBin_ = 0, lastBin_ = 0, octaveShift_ = 0, offset_[kHarmonics]{};
     float decay_ = 0.99f, peakHold_ = 0;
-    std::vector<float> salience_;
+    std::vector<float> salience_, residual_;
     int bin_ = -1, lastMidi_ = -1, sameHops_ = 0;
 };
 

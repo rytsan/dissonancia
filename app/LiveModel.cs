@@ -65,6 +65,9 @@ public sealed class LiveFrame
     public float BassSettleRemainingMs;
     public Pitch Melody;                   // predominant melody line (chord modes)
     public bool MelodySettled, MelodyValid;
+    public const int MaxVoices = 4;
+    public readonly int[] Voices = new int[MaxVoices];   // every line heard (MIDI, highest first)
+    public int VoiceCount;
     public int[] ChordPitchClasses = [];
     public int[] Frets = [];               // per string (low E first), -1 = muted
 
@@ -199,6 +202,7 @@ public sealed class FakeLiveSource(Session session) : ILiveSource
         f.NoteValid = noteAge > 0.035;
         f.Note = note;
         (f.Melody, f.MelodyValid, f.MelodySettled) = (note, true, f.NoteValid);
+        (f.Voices[0], f.VoiceCount) = (note.Midi, 1);
         f.Cents = (float)(14 * Math.Sin(2 * Math.PI * 5.5 * t) + 4);
         f.Hz = (float)(note.Hz() * Math.Pow(2, f.Cents / 1200.0));
         f.NoteLatencyMs = 38 + (float)(3 * Math.Sin(t * 2.3));

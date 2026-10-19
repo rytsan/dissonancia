@@ -289,6 +289,7 @@ struct LiveSnapshot {
     float chordConfirmElapsedMs;       // time since onset while provisional, 0 once confirmed
     BassEstimate bass;
     BassEstimate melody;               // predominant melody line (chord modes), same fields as the bass
+    int8_t voices[8];                  // every line heard (multiple f0), MIDI highest first, -1 = none
     double lastOnsetSeconds;           // sample clock, delay-compensated; < 0 = none yet
     ContextEstimate context;           // tempo heard so far (display only)
     float waveMin[ANA_WAVE_COLUMNS];
