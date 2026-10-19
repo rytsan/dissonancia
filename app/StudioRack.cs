@@ -427,7 +427,7 @@ public sealed class StudioState
         var plan = Plan();
         var done = plan.Select(p => StudioProject.Cached(Current, p.Options, p.Suffix)).ToList();
         if (done.Any(d => d is null)) return;
-        Result = done.Count == 1 ? done[0] : MergeLeadSheet(plan.Zip(done, (p, d) => (p.Suffix, d!)).ToDictionary());
+        Result = done.Count == 1 ? WithInstruments(done[0]) : MergeLeadSheet(plan.Zip(done, (p, d) => (p.Suffix, d!)).ToDictionary());
         Suggestion = null;
         if (Result is null) return;
         try
@@ -454,14 +454,7 @@ public sealed class StudioState
             var bass = results.TryGetValue(".bass", out var b) ? Read(b)["events"]!.AsArray() : null;
             var root = LeadSheet.Merge(Read(results[".harmony"]).AsObject(), Read(results.TryGetValue(".choir", out var ch) ? ch : results[".voice"])["events"]!.AsArray(), bass);
             if (results.TryGetValue(".beats", out var d)) LeadSheet.AddBeats(root, Read(d).AsObject(), FromTake && Edits.KeepsGrid ? Session.Bpm : 0);
-            int fifths = (int?)root["session"]?["keyFifths"] ?? 0;
-            foreach (var stem in PolyStems)
-                foreach (var n in PolyNotes(stem) ?? [])
-                    root["events"]!.AsArray().Add(new System.Text.Json.Nodes.JsonObject
-                    {
-                        ["type"] = "note", ["part"] = "inst:" + stem, ["start"] = Math.Round(n.Start, 4), ["end"] = Math.Round(n.End, 4),
-                        ["midi"] = n.Midi, ["name"] = Review.NoteName(n.Midi, fifths), ["confidence"] = Math.Round(n.Confidence, 3),
-                    });
+            AddInstruments(root);
             var path = StudioProject.LeadSheetPath(Current!);
             File.WriteAllText(path, root.ToJsonString());
             return path;
@@ -484,7 +477,7 @@ public sealed class StudioState
         if (Job is null || Player is null || Current is null || Running || Separating) return;
         if (RenderingVst) { Status = "espere os VST3 renderizarem: a análise lê o canal depois deles"; Changed?.Invoke(); return; }
         RefreshResult();
-        if (Result is not null && PolyMissing.Count == 0) { Status = "resultado em cache (mesmas opções e edições)"; Changed?.Invoke(); return; }
+        if (Result is not null && PolyMissing.Count == 0 && !Mt3Missing) { Status = "resultado em cache (mesmas opções e edições)"; Changed?.Invoke(); return; }
         StudioProject.EnsureDir();
         _queue.Clear();
         foreach (var p in Plan())
@@ -559,15 +552,96 @@ public sealed class StudioState
         Running = false;
         if (t.IsFaulted) { Status = "instrumentos falharam: " + t.Exception?.InnerException?.Message; Changed?.Invoke(); return; }
         if (_polyCancel?.IsCancellationRequested == true) { Status = "cancelado"; Changed?.Invoke(); return; }
+        if (StartMt3()) { Changed?.Invoke(); return; }
         RefreshResult();
         FinishStatus();
         Changed?.Invoke();
     }
 
+    // ---------------------------------------------------------------- instruments (YourMT3+, optional)
+    // The whole take (as edited) through YourMT3+: every note with its instrument, cached per edits.
+    YourMt3Job? _mt3;
+    string Mt3Input => StudioProject.TapPath(Current!, "mt3");   // the mix channel at its tap: any source format, as edited
+    string Mt3Path(string source) => StudioProject.ResultPath(source, ".mt3");
+    string Mt3Key => Edits.Key + ";tap=" + Channel(0).TapKey;   // edits and the mix channel's inserts
+
+    YourMt3.Result? Mt3Notes()
+    {
+        if (Current is null) return null;
+        string key = Mt3Path(Current) + ".key";
+        return File.Exists(key) && File.ReadAllText(key) == Mt3Key ? YourMt3Job.Load(Mt3Path(Current)) : null;
+    }
+
+    bool Mt3Missing => YourMt3Job.Installed && Current is not null && Mt3Notes() is null;
+
+    bool StartMt3()
+    {
+        if (!Mt3Missing) return false;
+        if (Player?.RenderTap(1, Mt3Input) != true) return false;
+        _mt3 = YourMt3Job.Start(Mt3Input, Mt3Path(Current!), out var err);
+        if (_mt3 is null) { Status = "YourMT3+ não iniciou: " + err; return false; }
+        _mt3Source = Current;
+        Running = true;
+        Status = "YourMT3+: carregando…";
+        return true;
+    }
+    string? _mt3Source;
+
+    void PollMt3()
+    {
+        if (_mt3 is null) return;
+        if (_mt3.Running)
+        {
+            Progress = _mt3.Progress;
+            Status = "YourMT3+: " + (_mt3.Stage.StartsWith("inference") ? $"transcrevendo ({_mt3.Stage[10..]})…" : "carregando o modelo…");
+            Changed?.Invoke();
+            return;
+        }
+        var job = _mt3;
+        _mt3 = null;
+        Running = false;
+        if (job.Succeeded && _mt3Source is not null) File.WriteAllText(Mt3Path(_mt3Source) + ".key", Mt3Key);
+        else { Status = "YourMT3+ falhou: " + job.Error; Changed?.Invoke(); return; }
+        RefreshResult();
+        FinishStatus();
+        Changed?.Invoke();
+    }
+
+    /// The instruments into a result's events: Basic Pitch per stem ("inst:<stem>") and YourMT3+
+    /// over the whole take ("mt3:<program>:<instrument>"; times made event time like the core's).
+    void AddInstruments(System.Text.Json.Nodes.JsonObject root)
+    {
+        int fifths = (int?)root["session"]?["keyFifths"] ?? 0;
+        var events = root["events"]!.AsArray();
+        void Add(string part, double start, double end, int midi, double confidence) => events.Add(new System.Text.Json.Nodes.JsonObject
+        {
+            ["type"] = "note", ["part"] = part, ["start"] = Math.Round(start, 4), ["end"] = Math.Round(end, 4),
+            ["midi"] = midi, ["name"] = Review.NoteName(midi, fifths), ["confidence"] = Math.Round(confidence, 3),
+        });
+        foreach (var stem in PolyStems)
+            foreach (var n in PolyNotes(stem) ?? []) Add("inst:" + stem, n.Start, n.End, n.Midi, n.Confidence);
+        foreach (var n in Mt3Notes()?.Notes ?? [])
+            Add($"mt3:{(n.Drum ? 128 : n.Program)}:{n.Instrument}", n.Start - Compensation, n.End - Compensation, n.Midi, n.Velocity / 127.0);
+    }
+
+    /// A single analysis result with the instruments added (a copy; the cached result stays as the core wrote it).
+    string? WithInstruments(string? path)
+    {
+        if (path is null || Current is null || Mt3Notes() is null) return path;
+        try
+        {
+            var root = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+            AddInstruments(root);
+            File.WriteAllText(StudioProject.LeadSheetPath(Current), root.ToJsonString());
+            return StudioProject.LeadSheetPath(Current);
+        }
+        catch (Exception e) when (e is IOException or JsonException or InvalidOperationException) { return path; }
+    }
+
     void Next()
     {
         if (Job is null || _passSource is null) return;
-        if (!_queue.TryDequeue(out var p)) { _pass = null; if (StartPoly()) return; Running = false; RefreshResult(); FinishStatus(); return; }
+        if (!_queue.TryDequeue(out var p)) { _pass = null; if (StartPoly() || StartMt3()) return; Running = false; RefreshResult(); FinishStatus(); return; }
         var err = Job.Start(p.Session, Compensation, p.Input, StudioProject.ResultPath(_passSource, p.Suffix), FromTake && Edits.KeepsGrid, p.Beats, p.Choir);
         if (err is not null) { Running = false; Status = "falhou: " + err; return; }
         (_pass, Running) = (p, true);
@@ -580,7 +654,7 @@ public sealed class StudioState
             + (t.Instruments.Count > 0 ? " · " + string.Join(", ", t.Instruments.Select(i => $"{i.Value.Count} {i.Key}")) : "")
             + (Stems.Count > 0 ? " · das faixas separadas" : "") : "pronto";
 
-    public void Cancel() { _queue.Clear(); _polyCancel?.Cancel(); Job?.Cancel(); _sep?.Cancel(); _install?.Cancel(); }
+    public void Cancel() { _queue.Clear(); _polyCancel?.Cancel(); _mt3?.Cancel(); Job?.Cancel(); _sep?.Cancel(); _install?.Cancel(); }
 
     // ---------------------------------------------------------------- S8 VST3 plugins
 
@@ -824,6 +898,7 @@ public sealed class StudioState
         PollRecording();
         PollSeparation();
         PollPoly();
+        PollMt3();
         if (!Running || Job is null || _pass is null) return;
         var (state, progress) = Job.Poll();
         Progress = progress;

@@ -659,8 +659,14 @@ public sealed class Score
         byte channel = 6;
         foreach (var (name, notes) in Take.Instruments)
         {
-            byte ch = channel++;
-            var part = new List<(int, byte[])> { (0, Meta(0x03, System.Text.Encoding.ASCII.GetBytes(name))), (0, [(byte)(0xC0 | ch), (byte)(name == "guitar" ? 25 : 0)]) };
+            // "mt3:<program>:<instrument>" (YourMT3+; 128 = drums, on channel 10), else a stem name.
+            var key = name.Split(':', 3);
+            int program = key.Length == 3 && int.TryParse(key[1], out var pr) ? pr : name == "guitar" ? 25 : 0;
+            byte ch = program == 128 ? (byte)9 : channel++;
+            if (channel == 9) channel++;
+            if (channel > 15) channel = 6;   // ponytail: past 9 pitched instruments the channels are shared
+            var part = new List<(int, byte[])> { (0, Meta(0x03, System.Text.Encoding.ASCII.GetBytes(key[^1]))) };
+            if (program < 128) part.Add((0, [(byte)(0xC0 | ch), (byte)program]));
             foreach (var n in notes)
             {
                 part.Add((Math.Max(0, TickAt(n.Start)), [(byte)(0x90 | ch), (byte)n.Midi, (byte)Math.Clamp(40 + n.Confidence * 80, 1, 127)]));

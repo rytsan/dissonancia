@@ -38,11 +38,11 @@ public sealed class BasicPitch : IDisposable
         return (Get(":1"), Get(":2"));
     }
 
-    /// Mono at any rate -> 22.05 kHz (2-tap average + linear interpolation).
+    /// Mono at any rate -> 22.05 kHz or `target` (2-tap average + linear interpolation).
     // ponytail: no proper anti-alias filter; the model reads pitches far below the folded band.
-    public static float[] Resample(float[] x, int rate)
+    public static float[] Resample(float[] x, int rate, int target = Rate)
     {
-        double step = rate / (double)Rate;
+        double step = rate / (double)target;
         var y = new float[(int)(x.Length / step)];
         float S(int i) => i <= 0 ? x[0] : 0.5f * (x[i] + x[i - 1]);
         for (int k = 0; k < y.Length; k++)

@@ -458,6 +458,19 @@ Console.WriteLine(failures == 0 ? "all checks passed" : $"{failures} FAILED");
     int ons = 0;
     for (int i = 0; i + 2 < midi.Length; i++) if (midi[i] == 0x96 && midi[i + 2] > 0) ons++;   // note-ons on channel 6
     Check(ons == 3, $"instruments: 3 note-ons on channel 7 ({ons})");
+    // YourMT3+ keys: the GM program from the key, drums on channel 10 without a program change.
+    t.Instruments.Clear();
+    t.Instruments["mt3:33:Bass"] = [new TakeNote(0.0, 1.0, 40, Take.ParseName("E2"), 0.8f)];
+    t.Instruments["mt3:128:Drums"] = [new TakeNote(0.0, 0.1, 36, Take.ParseName("C2"), 0.8f)];
+    var mt3Midi = Score.Build(t).Midi();
+    bool bassProgram = false, drumOn = false, drumProgram = false;
+    for (int i = 0; i + 2 < mt3Midi.Length; i++)
+    {
+        bassProgram |= mt3Midi[i] == 0xC6 && mt3Midi[i + 1] == 33;
+        drumOn |= mt3Midi[i] == 0x99 && mt3Midi[i + 1] == 36;
+        drumProgram |= mt3Midi[i] == 0xC9;
+    }
+    Check(bassProgram && drumOn && !drumProgram, "instruments: YourMT3+ program 33 on channel 7, drums on channel 10");
 }
 
 return failures == 0 ? 0 : 1;
