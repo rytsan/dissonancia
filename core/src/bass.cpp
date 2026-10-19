@@ -124,4 +124,61 @@ void BassTracker::process(const Cqt& cqt, const float* mag, const uint8_t* gated
     lastMidi_ = midi;
 }
 
+// ---------------------------------------------------------------- melody
+
+MelodyTracker::MelodyTracker(const SessionConfig& s, const Cqt& cqt, double hopSeconds, int midiLo, int midiHi)
+    : session_(s) {
+    speller_.configure(s.keyFifths, s.keyMode);
+    octaveShift_ = clef_octave_shift(s.clef);
+    const int bpo = cqt.bins_per_octave();
+    firstBin_ = std::clamp((midiLo - cqt.min_midi()) * bpo / 12, 0, cqt.bins() - 1);
+    lastBin_ = std::clamp((midiHi - cqt.min_midi()) * bpo / 12, 0, cqt.bins() - 1);
+    for (int h = 0; h < kHarmonics; h++) offset_[h] = int(std::lround(bpo * std::log2(h + 1.0)));
+    decay_ = float(std::exp(-hopSeconds / 2.0));   // loudest salience heard, forgotten over ~2 s
+    salience_.assign(cqt.bins(), 0.f);
+}
+
+void MelodyTracker::process(const Cqt& cqt, const float* mag, BassEstimate& out) {
+    out = {};
+    const int bins = cqt.bins(), bpo = cqt.bins_per_octave();
+    float mx = 0;
+    int best = -1;
+    for (int c = firstBin_; c <= lastBin_; c++) {
+        float s = 0, w = 1;
+        for (int h = 0; h < kHarmonics && c + offset_[h] < bins; h++, w *= 0.8f) s += w * mag[c + offset_[h]];
+        // ponytail: octave-below test only; a lead an octave over a loud bass note is halved too (Klapuri cancellation if it matters).
+        if (c >= bpo && mag[c - bpo] > mag[c]) s *= 0.5f;
+        s *= 1 + kSkyline * float(c - firstBin_) * 12 / bpo;   // the lead is usually the top voice
+        salience_[size_t(c)] = s;
+        if (s > mx) { mx = s; best = c; }
+    }
+    peakHold_ = std::max(mx, peakHold_ * decay_);
+    if (best < 0 || mx < 0.2f * peakHold_) { bin_ = lastMidi_ = -1; sameHops_ = 0; return; }   // unvoiced: accompaniment only
+
+    // Continuity: the strongest candidate within 2 semitones of the current line keeps it, if close enough.
+    if (bin_ >= 0) {
+        int a = std::max(firstBin_, bin_ - bpo / 6), b = std::min(lastBin_, bin_ + bpo / 6), near = a;
+        for (int k = a; k <= b; k++)
+            if (salience_[size_t(k)] > salience_[size_t(near)]) near = k;
+        if (salience_[size_t(near)] >= 0.7f * mx) best = near;
+    }
+    bin_ = best;
+
+    const int midi = cqt.min_midi() + int(std::lround(best * 12.0 / bpo));
+    sameHops_ = midi == lastMidi_ ? sameHops_ + 1 : 0;
+    out.valid = 1;
+    out.settled = sameHops_ >= 2;
+    out.midi = int8_t(midi);
+    out.pitchClass = int8_t(midi % 12);
+    out.frequencyHz = float(session_.referenceA4 * std::pow(2.0, (midi - 69) / 12.0 + cqt.tuning() / 1200));
+    out.confidence = std::min(1.f, salience_[size_t(best)] / peakHold_);
+    speller_.reset_phrase();
+    Spelled sp = speller_.spell(midi, lastMidi_);
+    out.letter = sp.letter;
+    out.alter = sp.alter;
+    out.writtenOctave = int8_t(sp.octave + octaveShift_);
+    Speller::name(sp, octaveShift_, out.writtenName);
+    lastMidi_ = midi;
+}
+
 }  // namespace dz

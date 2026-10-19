@@ -404,6 +404,7 @@ void Engine::process_hop(const float* x, uint32_t n) {
     s.chordLatencyMs = chout_.preview.best.symbol[0] ? chout_.latencyMs + s.latencyProcessingMs : 0.f;
     s.chordConfirmElapsedMs = chout_.confirmElapsedMs;
     s.bass = cout_.bass;
+    s.melody = cout_.melody;
     s.lastOnsetSeconds = chroma_ && cout_.lastOnset >= 0 ? cout_.lastOnset - compensationMs() / 1000.0 : -1;
     s.context = contextOut_;
     snapshots_.publish();

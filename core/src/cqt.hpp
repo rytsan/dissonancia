@@ -14,7 +14,7 @@
 #include "dissonancia.h"
 #include "halfband.hpp"
 
-namespace dz { class OnsetDetector; class BassTracker; }
+namespace dz { class OnsetDetector; class BassTracker; class MelodyTracker; }
 
 namespace dz {
 
@@ -73,6 +73,7 @@ public:
         ChromaVector chroma;
         TuningEstimate tuning;
         BassEstimate bass;
+        BassEstimate melody;           // predominant melody (with the bass tracker only)
         bool onset;
         double lastOnset;              // sample clock (hop start of the onset hop), < 0 = none
         float flux;
@@ -102,6 +103,7 @@ private:
     TuningEstimate tuning_{};
     std::unique_ptr<OnsetDetector> onsets_;   // forward-declared: keeps cqt.hpp free of bass.hpp
     std::unique_ptr<BassTracker> bass_;
+    std::unique_ptr<MelodyTracker> melody_;
     std::vector<uint8_t> gated_;
     // Harmonic magnitudes for the chroma: per-bin median over the last kMedianHops hops (drums and
     // attacks are short in time, chords are long), whitened across frequency, weighted by register.

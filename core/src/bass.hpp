@@ -52,4 +52,25 @@ private:
     int lastMidi_ = -1;
 };
 
+// Predominant melody (live, chord modes): the strongest harmonic series in the lead range, over the
+// time-median CQT. Salience = weighted sum of the first harmonics' magnitudes (Salamon & Gomez 2012,
+// simplified); a candidate whose octave below is louder is taken as a harmonic of a lower note (the
+// bass, a chord root) and halved; higher candidates get a mild gain (the lead is usually on top). Continuity: the current line holds while it keeps most of the
+// salience (vibrato, a louder strum). Same output as the bass; settled = same note for 3 hops.
+class MelodyTracker {
+public:
+    MelodyTracker(const SessionConfig& s, const Cqt& cqt, double hopSeconds, int midiLo = 48, int midiHi = 84);
+    void process(const Cqt& cqt, const float* magnitude, BassEstimate& out);
+
+private:
+    static constexpr int kHarmonics = 5;
+    static constexpr float kSkyline = 0.02f;   // salience gain per semitone up the range; calibration knob
+    SessionConfig session_;
+    Speller speller_;
+    int firstBin_ = 0, lastBin_ = 0, octaveShift_ = 0, offset_[kHarmonics]{};
+    float decay_ = 0.99f, peakHold_ = 0;
+    std::vector<float> salience_;
+    int bin_ = -1, lastMidi_ = -1, sameHops_ = 0;
+};
+
 }  // namespace dz

@@ -229,3 +229,32 @@ TEST_CASE("microbench: octave-decimated CQT vs full-rate direct CQT") {
                 us, us / 20000 * 100, refUs, refUs / us);
     CHECK(us < refUs);
 }
+
+TEST_CASE("melody: the lead line over a chord pad and a bass note, every note settled") {
+    // High lead (soprano register) and a quieter one inside the pad's own octaves (tenor register).
+    struct Case { std::vector<double> line; float amp; };
+    for (auto& [line, amp] : std::vector<Case>{{{72, 74, 76, 79, 77, 76}, 0.12f}, {{60, 62, 64, 67, 65, 64}, 0.08f}}) {
+        ChromaFrontEnd fe(chord_session(), 2, 48000, 82.4f, 4200, 12, 960, 70, 500, 0.2);
+        ChromaFrontEnd::Output out{};
+        std::vector<float> block(960), pad(960), lead(960);
+        int right = 0, settled = 0;
+        for (uint64_t pos = 0; pos < 48000 * 2.4; pos += 960) {   // 0.4 s per note
+            size_t i = size_t(pos / (48000 * 0.4));
+            tones(pad, pos, 48000, {43, 48, 52, 55}, 0.05f);   // G2 bass + C3 E3 G3
+            tones(lead, pos, 48000, {line[i]}, amp);
+            for (size_t j = 0; j < block.size(); j++) block[j] = pad[j] + lead[j];
+            {
+                RtScope rt;
+                fe.process(block.data(), 960, pos + 960, out);
+            }
+            if (pos % 19200 == 9600) {   // middle of each note
+                INFO("note " << line[i] << " melody " << int(out.melody.midi));
+                CHECK(out.melody.valid);
+                right += out.melody.midi == int(line[i]);
+                settled += out.melody.settled;
+            }
+        }
+        CHECK(right == int(line.size()));
+        CHECK(settled == int(line.size()));
+    }
+}

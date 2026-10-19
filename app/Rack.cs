@@ -380,6 +380,11 @@ public sealed class LcdModule : RackModule
             infoX + 18, y + 18, 13, f.BassSettled, Ui.Mono);
         Plasma.Text(ctx, valid ? $"{f.Bass.Hz():0.0} Hz" : "— Hz", infoX, y + 40, 13, false);
         if (Session.DisplayClef == Clef.Treble8vb) Plasma.Text(ctx, "written 8vb", inner.X, y + 22 + noteDot * 1.3 * 7, 10, false);
+
+        // Melody: the predominant line over the chords (the voice or lead instrument), same spelling.
+        double melX = infoX + 130;
+        Plasma.Text(ctx, "MELODY", melX, y, 10, false, Ui.SansBold);
+        Plasma.DotText(ctx, f.MelodyValid ? f.Melody.WithOctaveShift(Session.DisplayClef.OctaveShift()).Name : "", melX, y + 16, noteDot, cells: 4, dim: !f.MelodySettled);
         if (Session.GrandStaff) DrawGrandStaff(ctx, new Rect(inner.Right - 170, y + 2, 170, Math.Max(80, inner.Bottom - y - 4)), f.Bass, valid);
         else DrawStaff(ctx, new Rect(inner.Right - 160, y + 10, 160, 56), Session.DisplayClef, written, valid);
     }

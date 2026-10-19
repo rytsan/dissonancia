@@ -153,6 +153,7 @@ ChromaFrontEnd::ChromaFrontEnd(const SessionConfig& s, uint32_t decimation, doub
     if (bassMax > 0) {
         bass_ = std::make_unique<BassTracker>(s, cqt_, bassMin, bassMax, settleSeconds);
         cqt_.ensure_history(bass_->history_samples());
+        melody_ = std::make_unique<MelodyTracker>(s, cqt_, hopSeconds_);
     }
     gated_.assign(ANA_MAX_CQT_BINS, 0);
     history_.assign(size_t(ANA_MAX_CQT_BINS) * kMedianHops, 0.f);
@@ -258,7 +259,8 @@ void ChromaFrontEnd::process(const float* x, uint32_t n, uint64_t endFrame, Outp
     // Group delay: the top octave's CQT delay plus the time median's (half its span).
     c.timestampSeconds = double(endFrame) / nativeRate_ - cqt_.octave_delay_seconds(0) - (kMedianHops - 1) / 2 * double(n) / nativeRate_;
     if (!silent) update_tuning(out.magnitude, bins, out);
-    out.bass = {};
+    out.bass = out.melody = {};
+    if (melody_ && !silent) melody_->process(cqt_, med, out.melody);
     if (bass_ && !silent) {
         bass_->process(cqt_, med, gated_.data(), now, lastOnset_, out.bass);   // median: a kick or snare is not a bass note
         if (out.bass.valid && out.bass.settled) c.bass[out.bass.pitchClass] = out.bass.confidence;   // bass chroma (§9)
