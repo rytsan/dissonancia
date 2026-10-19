@@ -7,6 +7,7 @@
 
 #include "dissonancia.h"
 #include "live_config.hpp"
+#include "noise_gate.hpp"
 #include "theory.hpp"
 
 namespace dz {
@@ -93,7 +94,7 @@ private:
     int octaveShift_;
     std::vector<float> decOut_, window_, hzHistory_;
     uint32_t filled_ = 0, windowNative_ = 0, minCandidateHops_ = 2, releaseHops_ = 5;
-    float gate_ = 0.00316f;            // -50 dBFS hop RMS; calibration knob
+    NoiseGate gate_;                   // -50 dBFS hop RMS at least, adapts to the room
     bool wasSilent_ = true;
     uint64_t energyOnset_ = 0, lastVoicedEnd_ = 0;
 

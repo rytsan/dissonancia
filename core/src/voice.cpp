@@ -131,6 +131,7 @@ VoicePipeline::VoicePipeline(const SessionConfig& s, const LiveConfig& c, uint32
     octaveShift_ = clef_octave_shift(s.clef);
     decOut_.assign(maxHopFrames / c.decimation + 2, 0.f);
     window_.assign(window, 0.f);
+    gate_.init(c.hopSeconds, 0.00316f);
     hzHistory_.assign(256, 0.f);
     minCandidateHops_ = std::max<uint32_t>(2, uint32_t(std::ceil(kMinNoteSeconds / c.hopSeconds - 1e-6)));
     releaseHops_ = std::max<uint32_t>(2, uint32_t(std::ceil(kReleaseSeconds / c.hopSeconds - 1e-6)));
@@ -178,7 +179,7 @@ void VoicePipeline::process(const float* x, uint32_t n, uint64_t endFrame, Voice
     double sumSq = 0;
     for (uint32_t i = 0; i < n; i++) sumSq += double(x[i]) * x[i];
     const float rms = float(std::sqrt(sumSq / n));
-    const bool silent = rms < gate_;
+    const bool silent = gate_.silent(rms);
     if (!silent && wasSilent_) energyOnset_ = endFrame - n;
     wasSilent_ = silent;
 

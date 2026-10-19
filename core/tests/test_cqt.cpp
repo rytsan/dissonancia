@@ -258,3 +258,24 @@ TEST_CASE("melody: the lead line over a chord pad and a bass note, every note se
         CHECK(settled == int(line.size()));
     }
 }
+
+TEST_CASE("noise gate: room noise above -50 dBFS goes silent once learned, a chord over it still sounds") {
+    ChromaFrontEnd fe(chord_session(), 2, 48000, 82.4f, 4200, 12, 960, 70, 500, 0.2);
+    ChromaFrontEnd::Output out{};
+    std::mt19937 rng(5);
+    std::normal_distribution<float> noise(0, 0.01f);   // -40 dBFS hiss: over the fixed -50 dBFS gate
+    std::vector<float> block(960);
+    int voiced = 0;
+    for (uint64_t pos = 0; pos < 48000 * 8; pos += 960) {
+        for (auto& v : block) v = noise(rng);
+        fe.process(block.data(), 960, pos + 960, out);
+        if (pos >= 48000 * 6) voiced += out.melody.valid || out.chroma.confidence > 0;   // after ~5 s of learning
+    }
+    CHECK(voiced == 0);
+    for (uint64_t pos = 48000 * 8; pos < 48000 * 9; pos += 960) {
+        tones(block, pos, 48000, {48, 52, 55}, 0.08f);
+        for (auto& v : block) v += noise(rng);
+        fe.process(block.data(), 960, pos + 960, out);
+    }
+    CHECK(top_pcs(out.chroma.normalized, 3) == std::vector<int>{0, 4, 7});
+}

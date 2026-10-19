@@ -13,6 +13,7 @@
 
 #include "dissonancia.h"
 #include "halfband.hpp"
+#include "noise_gate.hpp"
 
 namespace dz { class OnsetDetector; class BassTracker; class MelodyTracker; }
 
@@ -97,7 +98,7 @@ private:
     Cqt cqt_;
     std::vector<float> live_;
     float smoothed_[12]{};
-    float gate_ = 0.003f;   // hop RMS gate (~ -50 dBFS); calibration knob
+    NoiseGate gate_;        // hop RMS gate: -50 dBFS at least, adapts to the room
     std::vector<float> deviations_, sorted_;
     uint32_t devCount_ = 0, hopsSinceTuning_ = 0;
     TuningEstimate tuning_{};

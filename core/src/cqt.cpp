@@ -148,6 +148,7 @@ ChromaFrontEnd::ChromaFrontEnd(const SessionConfig& s, uint32_t decimation, doub
     sorted_.assign(512, 0.f);
     tuning_.referenceA4 = s.referenceA4;
     hopSeconds_ = double(maxHop) / nativeRate;
+    gate_.init(hopSeconds_, 0.003f);
     onsets_ = std::make_unique<OnsetDetector>();
     onsets_->init(cqt_, hopSeconds_);
     if (bassMax > 0) {
@@ -173,7 +174,7 @@ ChromaFrontEnd::~ChromaFrontEnd() = default;
 void ChromaFrontEnd::process(const float* x, uint32_t n, uint64_t endFrame, Output& out) {
     double sumSq = 0;
     for (uint32_t i = 0; i < n; i++) sumSq += double(x[i]) * x[i];
-    const bool silent = std::sqrt(sumSq / n) < gate_;
+    const bool silent = gate_.silent(float(std::sqrt(sumSq / n)));
 
     uint32_t m = n;
     if (decimate_) m = toLive_.process(x, n, live_.data());
