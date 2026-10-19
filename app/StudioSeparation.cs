@@ -128,6 +128,11 @@ public sealed class StemTrack
     public long Frames;
     public int Rate = 44100;
     public const int Block = 256;
+    // Stereo position over the whole stem, energy-weighted (silence does not count): Pan -1 = all left,
+    // +1 = all right (level difference only; a time-delay stereo image reads as centre); Width 0 = the
+    // same signal in both channels, 1 = uncorrelated, beyond = out of phase (clamped).
+    public float Pan, Width;
+    public string PanLabel => Math.Abs(Pan) < 0.05f ? "C" : $"{(Pan < 0 ? "L" : "R")}{Math.Abs(Pan) * 100:0}";
 
     public static StemTrack? Load(string name, string path)
     {
@@ -151,18 +156,31 @@ public sealed class StemTrack
                     int blocks = (int)((frames + Block - 1) / Block);
                     t.Min = new float[blocks];
                     t.Max = new float[blocks];
+                    double ll = 0, rr = 0, lr = 0;
                     for (int b = 0; b < blocks; b++)
                     {
                         float lo = 1, hi = -1;
                         for (int i = 0; i < Block && b * (long)Block + i < frames; i++)
                         {
-                            float v = 0;
-                            for (int c = 0; c < ch; c++) v += r.ReadSingle();
+                            float v = 0, left = 0;
+                            for (int c = 0; c < ch; c++)
+                            {
+                                float s = r.ReadSingle();
+                                v += s;
+                                if (c == 0) left = s;
+                                else if (c == 1) { ll += left * left; rr += s * s; lr += left * s; }
+                            }
                             v /= ch;
                             lo = Math.Min(lo, v);
                             hi = Math.Max(hi, v);
                         }
                         (t.Min[b], t.Max[b]) = (lo, hi);
+                    }
+                    if (ll + rr > 0)
+                    {
+                        t.Pan = (float)((rr - ll) / (rr + ll));
+                        // One side silent: a hard-panned point source, no width (correlation undefined).
+                        t.Width = Math.Min(ll, rr) < 1e-6 * (ll + rr) ? 0 : (float)Math.Clamp(1 - lr / Math.Sqrt(ll * rr), 0, 1);
                     }
                     return t;
                 }

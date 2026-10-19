@@ -852,6 +852,19 @@ public abstract class StudioUnit : Control
     }
 
     /// Masking-tape scribble strip, as on a real desk.
+    /// Where the stem sits in the stereo image: a dot from L to R, its width as a bar around it.
+    protected static void PanMeter(DrawingContext ctx, double x, double y, double w, StemTrack t)
+    {
+        double cx = x + w / 2, px = cx + t.Pan * w / 2, half = Math.Max(2.5, t.Width * w / 2);
+        ctx.DrawLine(PhosphorLine, new Point(x, y), new Point(x + w, y));
+        ctx.DrawLine(PhosphorLine, new Point(cx, y - 4), new Point(cx, y + 4));
+        ctx.DrawRectangle(Ui.AmberOff, null, new Rect(Math.Max(x, px - half), y - 3, Math.Min(x + w, px + half) - Math.Max(x, px - half), 6), 2, 2);
+        ctx.DrawEllipse(Ui.Amber, null, new Point(px, y), 3, 3);
+        Ui.Text(ctx, "L", x - 8, y - 6, 8, Ui.Label, Ui.SansBold);
+        Ui.Text(ctx, "R", x + w + 3, y - 6, 8, Ui.Label, Ui.SansBold);
+        Ui.Text(ctx, t.PanLabel, cx, y + 5, 8, Phosphor, Ui.Mono, Ui.Align.Center);
+    }
+
     protected static void Tape(DrawingContext ctx, double x, double y, string text, double angle = -1.5)
     {
         using (ctx.PushTransform(Matrix.CreateTranslation(-x, -y) * Matrix.CreateRotation(angle * Math.PI / 180) * Matrix.CreateTranslation(x, y)))
@@ -1350,6 +1363,10 @@ public sealed class RecorderUnit : StudioUnit
                 double cyy = row.Center.Y, ah = row.Height * 0.45;
                 ctx.DrawRectangle(brush, null, new Rect(row.X + col, cyy - hi * ah * 1.6, 1.4, Math.Max(1, (hi - lo) * ah * 1.6)));
             }
+            // Stereo position, top right of the row (over the waveform, on its own backing).
+            var pan = new Rect(row.Right - 104, row.Y + 3, 100, 22);
+            ctx.DrawRectangle(PhosphorBg, null, pan, 2, 2);
+            PanMeter(ctx, pan.X + 14, pan.Y + 7, 72, st);
             // The stem's own transcription on its row: the bass line (pitch over E1..G3), the beats
             // of the drums (ticks; amber where they leave the metronome).
             if (S.ResultTake is not { } rt) continue;

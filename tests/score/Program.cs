@@ -426,6 +426,29 @@ Console.WriteLine(failures == 0 ? "all checks passed" : $"{failures} FAILED");
     Check(waltz.Meter().Beats == 3, $"live song: chords every 3 beats -> 3/4: {waltz.Meter()}");
 }
 
+// STUDIO: stereo position of a stem (energy pan, width from the channel correlation).
+{
+    string Stereo(string name, Func<double, (double L, double R)> at)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"dz-pan-{name}.wav");
+        using var w = new BinaryWriter(File.Create(path));
+        int frames = 44100;
+        w.Write("RIFF"u8); w.Write(36 + frames * 8); w.Write("WAVEfmt "u8); w.Write(16); w.Write((short)3); w.Write((short)2);
+        w.Write(44100); w.Write(44100 * 8); w.Write((short)8); w.Write((short)32); w.Write("data"u8); w.Write(frames * 8);
+        var rng = new Random(1);
+        for (int i = 0; i < frames; i++) { var (l, r) = at(rng.NextDouble() * 2 - 1); w.Write((float)l); w.Write((float)r); }
+        return path;
+    }
+    var centre = StemTrack.Load("c", Stereo("c", x => (x, x)))!;
+    var left = StemTrack.Load("l", Stereo("l", x => (x, 0.5 * x)))!;   // energy 1 : 0.25 -> pan -0.6
+    var hard = StemTrack.Load("h", Stereo("h", x => (0, x)))!;
+    var wide = StemTrack.Load("w", Stereo("w", x => (x, Math.Sin(x * 1e4))))!;   // unrelated channels
+    Check(centre.PanLabel == "C" && centre.Width < 0.01, $"pan: same signal both sides = centre, no width ({centre.PanLabel}, {centre.Width:0.00})");
+    Check(left.PanLabel == "L60" && left.Width < 0.01, $"pan: left louder by 6 dB = L60 ({left.PanLabel}, {left.Width:0.00})");
+    Check(hard.PanLabel == "R100" && hard.Width == 0, $"pan: right only = R100, a point ({hard.PanLabel}, {hard.Width:0.00})");
+    Check(wide.Width > 0.8, $"pan: uncorrelated channels are wide ({wide.Width:0.00})");
+}
+
 return failures == 0 ? 0 : 1;
 
 static XmlSchemaSet? Schema()
