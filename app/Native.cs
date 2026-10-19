@@ -1,3 +1,4 @@
+using Microsoft.ML.OnnxRuntime;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -193,6 +194,8 @@ static partial class Ana
     [LibraryImport(Lib, EntryPoint = "ana_start")] public static partial int Start(nint h, in SessionConfigNative s, in AudioDeviceConfigNative d);
     [LibraryImport(Lib, EntryPoint = "ana_stop")] public static partial int Stop(nint h);
     [LibraryImport(Lib, EntryPoint = "ana_read_snapshot")] public static partial void ReadSnapshot(nint h, ref LiveSnapshotNative s);
+    [LibraryImport(Lib, EntryPoint = "ana_read_audio")] private static unsafe partial int ReadAudio(nint h, float* audio, int cap);
+    public static unsafe int ReadAudio(nint h, float[] audio) { fixed (float* p = audio) return ReadAudio(h, p, audio.Length); }
     [LibraryImport(Lib, EntryPoint = "ana_drain_events")] public static unsafe partial int DrainEvents(nint h, AnalyzerEventNative* events, int cap);
     [LibraryImport(Lib, EntryPoint = "ana_rec_start", StringMarshalling = StringMarshalling.Utf8)] public static partial int RecStart(nint h, string wavPath);
     [LibraryImport(Lib, EntryPoint = "ana_rec_stop")] public static partial int RecStop(nint h);
@@ -231,7 +234,14 @@ public sealed class NativeCore : IDisposable
 {
     readonly nint _h;
 
-    NativeCore(nint h) => _h = h;
+    readonly LiveTranscriber? _transcriber;   // Melodia's neural notes; null without the model
+
+    NativeCore(nint h)
+    {
+        _h = h;
+        try { if (LiveTranscriber.Available) _transcriber = new LiveTranscriber(h); }
+        catch (Exception e) when (e is OnnxRuntimeException or DllNotFoundException or TypeInitializationException) { }   // no runtime: the CQT voices stay
+    }
 
     /// Null when the native library is missing or its layout does not match (the GUI then runs on simulated data).
     public static NativeCore? TryLoad(out string error)
@@ -273,7 +283,8 @@ public sealed class NativeCore : IDisposable
             ClickDuringTake = (byte)(s.ClickDuringTake ? 1 : 0),
         };
         if (Ana.Start(_h, cfg, dev) != 0) throw new InvalidOperationException(Ana.Error(_h));
-        return new NativeLiveSource(_h, s);
+        if (_transcriber is not null) _transcriber.Enabled = s.Live == LiveMode.Melody;
+        return new NativeLiveSource(_h, s, _transcriber);
     }
 
     /// The core's SessionConfig for a session (LIVE start, STUDIO offline analysis).
@@ -291,7 +302,11 @@ public sealed class NativeCore : IDisposable
         return cfg;
     }
 
-    public void Dispose() => Ana.Destroy(_h);
+    public void Dispose()
+    {
+        _transcriber?.Dispose();
+        Ana.Destroy(_h);
+    }
 }
 
 /// ILiveSource backed by the C++ core. Pulls one snapshot per rendered frame (spec §22); no managed allocation per read.
@@ -317,7 +332,9 @@ public sealed class NativeLiveSource : ILiveSource
     /// Events lost between core and GUI (sequence gaps), shown as incomplete event log.
     public int EventGaps { get; private set; }
 
-    internal NativeLiveSource(nint h, Session s) { _h = h; _session = s; }
+    readonly LiveTranscriber? _transcriber;
+
+    internal NativeLiveSource(nint h, Session s, LiveTranscriber? transcriber) { _h = h; _session = s; _transcriber = transcriber; }
 
     public string? LastError { get; private set; }
 
@@ -396,6 +413,14 @@ public sealed class NativeLiveSource : ILiveSource
         _lastRead = now;
         f.VoiceCount = 0;
         for (int i = 0; i < LiveFrame.MaxVoices && _snap.Voices[i] >= 0; i++) f.Voices[f.VoiceCount++] = _snap.Voices[i];
+        f.VoicesFromModel = _transcriber is { Enabled: true };
+        if (f.VoicesFromModel)
+        {
+            _transcriber!.Rate = _snap.SampleRate;
+            var notes = _transcriber.Notes;
+            f.VoiceCount = notes.Length;
+            notes.CopyTo(f.Voices, 0);
+        }
         fixed (byte* cs = _snap.ConfirmedSymbol) f.DisplayChord = _confirmed.Get(cs, 16, Display);
         f.CandidateChord = !f.ChordConfirmed && f.ChordSymbol.Length > 0 && f.ChordConfirmElapsedMs >= 120 ? f.ChordSymbol : "";
         if (f.DisplayChord.Length == 0) f.DisplayChord = f.CandidateChord;   // nothing confirmed yet: the candidate, dimmed

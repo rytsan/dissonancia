@@ -290,6 +290,7 @@ void Engine::analysis_loop() {
 }
 
 void Engine::process_hop(const float* x, uint32_t n) {
+    for (uint32_t i = 0; i < n && tap_.try_push(x[i]); i++) {}   // nobody reading: the tap fills and stops
     double sumSq = 0;
     float peak = 0;
     for (uint32_t i = 0; i < n; i++) {

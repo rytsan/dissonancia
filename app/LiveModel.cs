@@ -68,6 +68,7 @@ public sealed class LiveFrame
     public const int MaxVoices = 4;
     public readonly int[] Voices = new int[MaxVoices];   // every line heard (MIDI, highest first)
     public int VoiceCount;
+    public bool VoicesFromModel;                         // Voices come from the neural transcriber (else the CQT)
     // Música completa: what the song so far says (LiveSong), "" = not enough heard yet.
     public string SongKey = "", SongMeter = "", SongForm = "";
     public int[] ChordPitchClasses = [];

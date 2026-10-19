@@ -31,6 +31,7 @@ public:
 
     void read_snapshot(LiveSnapshot* out);
     size_t drain_events(AnalyzerEvent* out, size_t cap) { return events_.pop_many(out, cap); }
+    size_t read_audio(float* out, size_t cap) { return tap_.pop_many(out, cap); }
     bool push_event(AnalyzerEvent e);   // analysis thread only
 
     int rec_start(const char* wavPath);
@@ -138,6 +139,7 @@ private:
 
     TripleBuffer<LiveSnapshot> snapshots_;
     SpscQueue<AnalyzerEvent, ANA_EVENT_QUEUE_CAPACITY> events_;
+    SpscQueue<float, 1u << 18> tap_;   // analysed mono input for the GUI's note transcriber (~5 s at 48 kHz), lossy when full
 
     std::thread analysisThread_, recorderThread_;
 };

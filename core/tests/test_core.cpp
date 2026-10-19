@@ -243,3 +243,20 @@ TEST_CASE("chord mode: CQT and chroma reach the snapshot") {
     CHECK(s.chordConfirmed);
     e.stop();
 }
+
+TEST_CASE("audio tap: the analysed input reaches the GUI reader in order") {
+    Engine e;
+    REQUIRE(e.start(session(), headless(), nullptr, nullptr) == ANA_OK);
+    std::vector<float> in(480), out(480);
+    for (uint64_t pos = 0; pos < 48000; pos += 480) {
+        for (size_t i = 0; i < in.size(); i++) in[i] = float((pos + i) % 1000) / 1000.f;   // a ramp: order is visible
+        e.on_audio(in.data(), out.data(), 480);
+    }
+    std::vector<float> got(1 << 19);
+    size_t n = 0;
+    REQUIRE(wait_until([&] { n += e.read_audio(got.data() + n, got.size() - n); return n >= 40000; }));
+    bool ordered = true;
+    for (size_t i = 1; i < n; i++) ordered &= got[i] > got[i - 1] || got[i] == 0.f;
+    CHECK(ordered);
+    e.stop();
+}

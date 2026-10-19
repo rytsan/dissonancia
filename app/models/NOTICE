@@ -1,0 +1,9 @@
+basic-pitch-nmp.onnx — Basic Pitch note/onset/contour model (ICASSP 2022), from
+https://github.com/spotify/basic-pitch (basic_pitch/saved_models/icassp_2022/nmp.onnx).
+sha256 2c3c1d144bfa61ad236e92e169c13535c880469a12a047d4e73451f2c059a0ec
+
+Copyright 2022 Spotify AB. Licensed under the Apache License, Version 2.0:
+http://www.apache.org/licenses/LICENSE-2.0
+Unmodified. Paper: R. M. Bittner, J. J. Bosch, D. Rubinstein, G. Meseguer-Brocal, S. Ewert,
+"A Lightweight Instrument-Agnostic Model for Polyphonic Note Transcription and Multipitch
+Estimation", ICASSP 2022.

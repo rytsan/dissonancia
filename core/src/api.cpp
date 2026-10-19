@@ -134,6 +134,11 @@ int32_t ana_drain_events(AnalyzerHandle* h, AnalyzerEvent* out, int32_t cap) {
     return int32_t(h->engine.drain_events(out, size_t(cap)));
 }
 
+int32_t ana_read_audio(AnalyzerHandle* h, float* out, int32_t cap) {
+    if (!h || !out || cap <= 0) return 0;
+    return int32_t(h->engine.read_audio(out, size_t(cap)));
+}
+
 int32_t ana_rec_start(AnalyzerHandle* h, const char* wavPathUtf8) {
     return guarded(h, [&]() -> int32_t {
         if (!wavPathUtf8) return ANA_ERR_ARG;

@@ -445,8 +445,8 @@ public sealed class LcdModule : RackModule
         // Polyphony: every line heard, highest first (the main line is the one above, chosen by continuity).
         int fifths = Session.KeySet ? Session.Key.Fifths : 0;
         var voices = string.Join("  ", f.Voices.Take(f.VoiceCount).Select(m => Review.NoteName(m, fifths)));
-        Plasma.Text(ctx, "VOICES", inner.X, ty + 34, 10, false, Ui.SansBold);
-        Plasma.Text(ctx, f.VoiceCount > 0 ? voices : "—", inner.X + 60, ty + 30, 18, f.VoiceCount > 1, Ui.Mono);
+        Plasma.Text(ctx, f.VoicesFromModel ? "VOICES · NN" : "VOICES", inner.X, ty + 34, 10, false, Ui.SansBold);
+        Plasma.Text(ctx, f.VoiceCount > 0 ? voices : "—", inner.X + 90, ty + 30, 18, f.VoiceCount > 1, Ui.Mono);
         if (Session.DisplayClef == Clef.Treble8vb) Plasma.Text(ctx, "written 8vb", inner.X + inner.Width * 0.36, inner.Y, 10, false);
     }
 

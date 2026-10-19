@@ -412,6 +412,9 @@ ANA_API int32_t ana_stop(AnalyzerHandle* h);         // flushes REC and open eve
 
 ANA_API void ana_read_snapshot(AnalyzerHandle* h, LiveSnapshot* out);   // single reader (UI thread)
 ANA_API int32_t ana_drain_events(AnalyzerHandle* h, AnalyzerEvent* out, int32_t cap);
+// The analysed mono input (device rate, snapshot.sampleRate) since the last call, oldest first;
+// samples are dropped while nobody reads. Single reader (the GUI's note transcriber).
+ANA_API int32_t ana_read_audio(AnalyzerHandle* h, float* out, int32_t cap);
 
 ANA_API int32_t ana_rec_start(AnalyzerHandle* h, const char* wavPathUtf8);  // arms at next bar + count-in
 ANA_API int32_t ana_rec_stop(AnalyzerHandle* h);     // finalizes WAV + JSON sidecar
