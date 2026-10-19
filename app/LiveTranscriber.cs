@@ -1,26 +1,20 @@
-using Microsoft.ML.OnnxRuntime;
-using Microsoft.ML.OnnxRuntime.Tensors;
-
 namespace Dissonancia;
 
-/// LIVE Melodia, polyphonic notes by a neural transcriber: Basic Pitch (Spotify, Apache-2.0, ICASSP
-/// 2022; models/basic-pitch-nmp.onnx, 230 KB) over the core's audio tap. Every 0.25 s the last 2 s
+/// LIVE Melodia, polyphonic notes by a neural transcriber (BasicPitch) over the core's audio tap. Every 0.25 s the last 2 s
 /// are resampled to 22.05 kHz and run on the CPU (~25 ms, a GPU would spend more on the copy than on
 /// the model); the notes are read a few frames before the window's end, where the model has context
 /// on both sides — about 0.35 s behind the input. Optional: without the model the CQT voices stay.
 public sealed class LiveTranscriber : IDisposable
 {
-    const int ModelRate = 22050, Window = 43844, Frames = 172, Pitches = 88, LowestMidi = 21;
+    const int ModelRate = BasicPitch.Rate, Window = BasicPitch.Window, Frames = BasicPitch.Frames, Pitches = BasicPitch.Pitches, LowestMidi = BasicPitch.LowestMidi;
     const int HopSamples = ModelRate / 4;
     const int ReadFrom = Frames - 20, ReadTo = Frames - 8;   // frames averaged for "now" (~0.1-0.23 s before the end)
     const float Threshold = 0.4f;                           // note posterior; calibration knob (Basic Pitch's default frame threshold is 0.3)
 
-    static string ModelPath => Path.Combine(AppContext.BaseDirectory, "models", "basic-pitch-nmp.onnx");
-    public static bool Available => File.Exists(ModelPath);
+    public static bool Available => BasicPitch.Available;
 
     readonly nint _core;
-    readonly InferenceSession _model;
-    readonly string _input;
+    readonly BasicPitch _model = new();
     readonly Thread _thread;
     readonly float[] _window = new float[Window];   // newest sample last
     volatile bool _enabled, _stop;
@@ -34,8 +28,6 @@ public sealed class LiveTranscriber : IDisposable
     public LiveTranscriber(nint core)
     {
         _core = core;
-        _model = new InferenceSession(ModelPath);
-        _input = _model.InputMetadata.Keys.First();
         _thread = new Thread(Run) { IsBackground = true, Name = "dz-transcriber", Priority = ThreadPriority.BelowNormal };
         _thread.Start();
     }
@@ -50,7 +42,6 @@ public sealed class LiveTranscriber : IDisposable
     {
         var raw = new float[16384];
         var resampled = new List<float>(HopSamples * 2);
-        var tensor = new DenseTensor<float>(new[] { 1, Window, 1 });
         double pos = 0;   // resampler phase, in input samples (-1 = the last sample of the previous read)
         float prev = 0, prevS = 0;
         int n = 0;
@@ -79,22 +70,19 @@ public sealed class LiveTranscriber : IDisposable
             Array.Copy(_window, add, _window, 0, Window - add);
             resampled.CopyTo(resampled.Count - add, _window, Window - add, add);
             resampled.Clear();
-            var heard = Transcribe(_window, tensor);
+            var heard = Transcribe(_window);
             if (_enabled) _notes = heard;
         }
     }
 
     /// The notes sounding near the end of a 2 s window at 22.05 kHz (MIDI, highest first, at most MaxVoices).
-    public int[] Transcribe(float[] window, DenseTensor<float>? tensor = null)
+    public int[] Transcribe(float[] window)
     {
-        tensor ??= new DenseTensor<float>(new[] { 1, Window, 1 });
-        window.AsSpan(0, Window).CopyTo(tensor.Buffer.Span);
-        using var outputs = _model.Run([NamedOnnxValue.CreateFromTensor(_input, tensor)]);
-        var note = outputs.First(o => o.Name.EndsWith(":1")).AsTensor<float>();   // :1 note, :2 onset, :0 contour
+        var (note, _) = _model.Run(window);
         var level = new float[Pitches];
         for (int p = 0; p < Pitches; p++)
         {
-            for (int f = ReadFrom; f < ReadTo; f++) level[p] += note[0, f, p];
+            for (int f = ReadFrom; f < ReadTo; f++) level[p] += note[f, p];
             level[p] /= ReadTo - ReadFrom;
         }
         // A weak note an octave over a stronger one is its 2nd harmonic, not a voice; the strongest

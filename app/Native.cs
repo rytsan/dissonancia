@@ -1,4 +1,3 @@
-using Microsoft.ML.OnnxRuntime;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -240,7 +239,7 @@ public sealed class NativeCore : IDisposable
     {
         _h = h;
         try { if (LiveTranscriber.Available) _transcriber = new LiveTranscriber(h); }
-        catch (Exception e) when (e is OnnxRuntimeException or DllNotFoundException or TypeInitializationException) { }   // no runtime: the CQT voices stay
+        catch (Exception e) when (e is Microsoft.ML.OnnxRuntime.OnnxRuntimeException or DllNotFoundException or TypeInitializationException) { }   // no runtime: the CQT voices stay
     }
 
     /// Null when the native library is missing or its layout does not match (the GUI then runs on simulated data).

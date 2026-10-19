@@ -134,6 +134,35 @@ public sealed class StemTrack
     public float Pan, Width;
     public string PanLabel => Math.Abs(Pan) < 0.05f ? "C" : $"{(Pan < 0 ? "L" : "R")}{Math.Abs(Pan) * 100:0}";
 
+    /// A stem's samples, channels averaged (32-bit float WAV, as the separator writes them).
+    public static float[] ReadMono(string path, out int rate)
+    {
+        using var f = File.OpenRead(path);
+        using var r = new BinaryReader(f);
+        f.Seek(12, SeekOrigin.Begin);
+        int ch = 2;
+        rate = 44100;
+        while (f.Position < f.Length)
+        {
+            string id = new(r.ReadChars(4));
+            int size = r.ReadInt32();
+            if (id == "fmt ") { r.ReadInt16(); ch = r.ReadInt16(); rate = r.ReadInt32(); f.Seek(size - 8, SeekOrigin.Current); }
+            else if (id == "data")
+            {
+                var x = new float[size / 4 / ch];
+                for (int i = 0; i < x.Length; i++)
+                {
+                    float v = 0;
+                    for (int c = 0; c < ch; c++) v += r.ReadSingle();
+                    x[i] = v / ch;
+                }
+                return x;
+            }
+            else f.Seek(size + (size & 1), SeekOrigin.Current);
+        }
+        return [];
+    }
+
     public static StemTrack? Load(string name, string path)
     {
         try

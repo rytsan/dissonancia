@@ -449,6 +449,17 @@ Console.WriteLine(failures == 0 ? "all checks passed" : $"{failures} FAILED");
     Check(wide.Width > 0.8, $"pan: uncorrelated channels are wide ({wide.Width:0.00})");
 }
 
+// STUDIO instruments (Basic Pitch per stem): one more MIDI track each, notes on the event-time grid.
+{
+    var t = T((0.0, 1.0, "G4"));
+    t.Instruments["other"] = [new TakeNote(0.0, 1.0, 43, Take.ParseName("G2"), 0.7f), new TakeNote(0.0, 1.0, 47, Take.ParseName("B2"), 0.7f), new TakeNote(1.0, 2.0, 50, Take.ParseName("D3"), 0.6f)];
+    var midi = Score.Build(t).Midi();
+    Check(midi[11] == 4, $"instruments: tempo, melody, chords + 1 instrument track = 4 tracks ({midi[11]})");
+    int ons = 0;
+    for (int i = 0; i + 2 < midi.Length; i++) if (midi[i] == 0x96 && midi[i + 2] > 0) ons++;   // note-ons on channel 6
+    Check(ons == 3, $"instruments: 3 note-ons on channel 7 ({ons})");
+}
+
 return failures == 0 ? 0 : 1;
 
 static XmlSchemaSet? Schema()

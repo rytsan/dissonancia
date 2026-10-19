@@ -454,6 +454,14 @@ public sealed class StudioState
             var bass = results.TryGetValue(".bass", out var b) ? Read(b)["events"]!.AsArray() : null;
             var root = LeadSheet.Merge(Read(results[".harmony"]).AsObject(), Read(results.TryGetValue(".choir", out var ch) ? ch : results[".voice"])["events"]!.AsArray(), bass);
             if (results.TryGetValue(".beats", out var d)) LeadSheet.AddBeats(root, Read(d).AsObject(), FromTake && Edits.KeepsGrid ? Session.Bpm : 0);
+            int fifths = (int?)root["session"]?["keyFifths"] ?? 0;
+            foreach (var stem in PolyStems)
+                foreach (var n in PolyNotes(stem) ?? [])
+                    root["events"]!.AsArray().Add(new System.Text.Json.Nodes.JsonObject
+                    {
+                        ["type"] = "note", ["part"] = "inst:" + stem, ["start"] = Math.Round(n.Start, 4), ["end"] = Math.Round(n.End, 4),
+                        ["midi"] = n.Midi, ["name"] = Review.NoteName(n.Midi, fifths), ["confidence"] = Math.Round(n.Confidence, 3),
+                    });
             var path = StudioProject.LeadSheetPath(Current!);
             File.WriteAllText(path, root.ToJsonString());
             return path;
@@ -476,7 +484,7 @@ public sealed class StudioState
         if (Job is null || Player is null || Current is null || Running || Separating) return;
         if (RenderingVst) { Status = "espere os VST3 renderizarem: a análise lê o canal depois deles"; Changed?.Invoke(); return; }
         RefreshResult();
-        if (Result is not null) { Status = "resultado em cache (mesmas opções e edições)"; Changed?.Invoke(); return; }
+        if (Result is not null && PolyMissing.Count == 0) { Status = "resultado em cache (mesmas opções e edições)"; Changed?.Invoke(); return; }
         StudioProject.EnsureDir();
         _queue.Clear();
         foreach (var p in Plan())
@@ -491,10 +499,75 @@ public sealed class StudioState
         Next();
     }
 
+    // ---------------------------------------------------------------- instruments (Basic Pitch per stem)
+    // The pitched stems besides the voice and the bass get polyphonic notes from the neural
+    // transcriber, read from the stem as separated (before the channel's inserts), cached per stems key.
+    static readonly string[] PolyStems = ["other", "guitar", "piano"];
+    Task? _poly;
+    CancellationTokenSource? _polyCancel;
+    volatile float _polyProgress;
+
+    sealed record PolyResult(string StemsKey, List<BasicPitch.Note> Notes);
+    string PolyPath(string source, string stem) => StudioProject.ResultPath(source, ".poly-" + stem);
+
+    List<BasicPitch.Note>? PolyNotes(string stem)
+    {
+        try
+        {
+            var r = JsonSerializer.Deserialize<PolyResult>(File.ReadAllText(PolyPath(Current!, stem)));
+            return r?.StemsKey == StemsKey ? r.Notes : null;
+        }
+        catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException) { return null; }
+    }
+
+    List<StemTrack> PolyMissing => BasicPitch.Available && Current is not null ? Stems.Where(t => PolyStems.Contains(t.Name) && PolyNotes(t.Name) is null).ToList() : [];
+
+    bool StartPoly()
+    {
+        var todo = PolyMissing;
+        if (todo.Count == 0) return false;
+        string source = Current!, key = StemsKey;
+        double comp = Compensation;
+        var cancel = _polyCancel = new CancellationTokenSource();
+        _polyProgress = 0;
+        _poly = Task.Run(() =>
+        {
+            using var bp = new BasicPitch();
+            for (int i = 0; i < todo.Count; i++)
+            {
+                var mono = StemTrack.ReadMono(todo[i].Path, out int rate);
+                int k = i;
+                var notes = bp.Notes(BasicPitch.Resample(mono, rate), p => { _polyProgress = (float)((k + p) / todo.Count); return !cancel.IsCancellationRequested; });
+                if (cancel.IsCancellationRequested) return;
+                // Event time, as the core's results: the file time minus the input compensation.
+                notes = notes.Select(n => n with { Start = n.Start - comp, End = n.End - comp }).ToList();
+                File.WriteAllText(PolyPath(source, todo[i].Name), JsonSerializer.Serialize(new PolyResult(key, notes)));
+            }
+        });
+        Running = true;
+        Status = "transcrevendo os instrumentos (Basic Pitch)…";
+        return true;
+    }
+
+    void PollPoly()
+    {
+        if (_poly is null) return;
+        Progress = _polyProgress;
+        if (!_poly.IsCompleted) return;
+        var t = _poly;
+        _poly = null;
+        Running = false;
+        if (t.IsFaulted) { Status = "instrumentos falharam: " + t.Exception?.InnerException?.Message; Changed?.Invoke(); return; }
+        if (_polyCancel?.IsCancellationRequested == true) { Status = "cancelado"; Changed?.Invoke(); return; }
+        RefreshResult();
+        FinishStatus();
+        Changed?.Invoke();
+    }
+
     void Next()
     {
         if (Job is null || _passSource is null) return;
-        if (!_queue.TryDequeue(out var p)) { Running = false; _pass = null; RefreshResult(); FinishStatus(); return; }
+        if (!_queue.TryDequeue(out var p)) { _pass = null; if (StartPoly()) return; Running = false; RefreshResult(); FinishStatus(); return; }
         var err = Job.Start(p.Session, Compensation, p.Input, StudioProject.ResultPath(_passSource, p.Suffix), FromTake && Edits.KeepsGrid, p.Beats, p.Choir);
         if (err is not null) { Running = false; Status = "falhou: " + err; return; }
         (_pass, Running) = (p, true);
@@ -504,9 +577,10 @@ public sealed class StudioState
     void FinishStatus() =>
         Status = ResultTake is { } t ? $"pronto · {t.Notes.Count} notas · {t.Chords.Count} acordes" + (t.BassNotes.Count > 0 ? $" · {t.BassNotes.Count} do baixo" : "")
             + (t.Beats.Count > 0 ? $" · bateria {t.TempoBpm:0.0} BPM" + (t.MaxDriftMs is double dr ? $", deriva máx {dr:0} ms" + (dr > LeadSheet.DriftFlagMs ? " (fora do metrônomo)" : "") : "") : "")
+            + (t.Instruments.Count > 0 ? " · " + string.Join(", ", t.Instruments.Select(i => $"{i.Value.Count} {i.Key}")) : "")
             + (Stems.Count > 0 ? " · das faixas separadas" : "") : "pronto";
 
-    public void Cancel() { _queue.Clear(); Job?.Cancel(); _sep?.Cancel(); _install?.Cancel(); }
+    public void Cancel() { _queue.Clear(); _polyCancel?.Cancel(); Job?.Cancel(); _sep?.Cancel(); _install?.Cancel(); }
 
     // ---------------------------------------------------------------- S8 VST3 plugins
 
@@ -749,6 +823,7 @@ public sealed class StudioState
     {
         PollRecording();
         PollSeparation();
+        PollPoly();
         if (!Running || Job is null || _pass is null) return;
         var (state, progress) = Job.Poll();
         Progress = progress;
@@ -1394,6 +1469,22 @@ public sealed class RecorderUnit : StudioUnit
                 }
             }
         }
+
+        // Instruments (Basic Pitch): every note on its stem's row, pitch over the notes' own range.
+        if (S.ResultTake is { } it)
+            for (int i = 0; i < S.Stems.Count; i++)
+            {
+                if (!it.Instruments.TryGetValue(S.Stems[i].Name, out var notes) || notes.Count == 0) continue;
+                var row = new Rect(_screen.X, _screen.Bottom + i * stemH, _screen.Width, stemH);
+                int lo = notes.Min(n => n.Midi), hi = Math.Max(lo + 12, notes.Max(n => n.Midi));
+                foreach (var n in notes)
+                {
+                    double a = XAt((n.Start + S.Compensation) * S.Rate), b = XAt((n.End + S.Compensation) * S.Rate);
+                    if (b < row.X || a > row.Right) continue;
+                    double ny = row.Bottom - 3 - (row.Height - 6) * (n.Midi - lo) / (double)(hi - lo);
+                    ctx.DrawRectangle(Ui.Amber, null, new Rect(Math.Max(a, row.X), ny - 1, Math.Max(2, Math.Min(b, row.Right) - Math.Max(a, row.X) - 1), 2));
+                }
+            }
 
         // Transcription lane: the offline result of these edits.
         ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0x55000000)), null, _lane);

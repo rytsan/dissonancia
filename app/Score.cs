@@ -28,6 +28,8 @@ public sealed class Take
     /// tenor and bass lines are here, by part ("A", "T", "B"); sounding pitch.
     public Dictionary<string, List<TakeNote>> Choir = [];
     public bool IsChoir;
+    /// STUDIO: polyphonic notes of each separated instrument stem ("other", "guitar", "piano"), sounding pitch.
+    public Dictionary<string, List<TakeNote>> Instruments = [];
     public List<double> Beats = [];         // STUDIO: the drums' beats (event time) and tempo
     public List<double> BeatTimes = [];     // STUDIO, tempo from the drums: where each grid beat really was (MIDI tempo map)
     public double TempoBpm;
@@ -84,6 +86,11 @@ public sealed class Take
                     var written = ParseName(e.GetProperty("name").GetString() ?? "");
                     string? partName = e.TryGetProperty("part", out var part) ? part.GetString() : null;
                     var sounding = new TakeNote(e.GetProperty("start").GetDouble(), e.GetProperty("end").GetDouble(), e.GetProperty("midi").GetInt32(), written, e.GetProperty("confidence").GetSingle());
+                    if (partName?.StartsWith("inst:") == true)
+                    {
+                        (t.Instruments.TryGetValue(partName[5..], out var il) ? il : t.Instruments[partName[5..]] = []).Add(sounding);
+                        break;
+                    }
                     if (partName == "bass")
                     {   // the bass line of a separated take (STUDIO): its own part, spelled as sounding
                         t.BassNotes.Add(sounding);
@@ -642,6 +649,25 @@ public sealed class Score
             }
             tracks.Add(bass);
         }
+        // STUDIO instruments: polyphonic, unquantized (event time on the tempo track), one track each.
+        int TickAt(double seconds)
+        {
+            if (bt.Count < 2) return (int)Math.Round(seconds / SecondsPerQuarter * ppq);
+            int k = Math.Clamp(bt.BinarySearch(seconds) is var i && i >= 0 ? i : ~i - 1, 0, bt.Count - 2);
+            return (int)Math.Round((k + (seconds - bt[k]) / (bt[k + 1] - bt[k])) * ppq * 4 / Take.BeatUnit);
+        }
+        byte channel = 6;
+        foreach (var (name, notes) in Take.Instruments)
+        {
+            byte ch = channel++;
+            var part = new List<(int, byte[])> { (0, Meta(0x03, System.Text.Encoding.ASCII.GetBytes(name))), (0, [(byte)(0xC0 | ch), (byte)(name == "guitar" ? 25 : 0)]) };
+            foreach (var n in notes)
+            {
+                part.Add((Math.Max(0, TickAt(n.Start)), [(byte)(0x90 | ch), (byte)n.Midi, (byte)Math.Clamp(40 + n.Confidence * 80, 1, 127)]));
+                part.Add((Math.Max(0, TickAt(n.End)), [(byte)(0x80 | ch), (byte)n.Midi, 0]));
+            }
+            tracks.Add(part);
+        }
         using var ms = new MemoryStream();
         ms.Write("MThd"u8);
         ms.Write([0, 0, 0, 6, 0, 1, 0, (byte)tracks.Count, (byte)(ppq >> 8), (byte)(ppq & 0xFF)]);
@@ -703,6 +729,7 @@ public sealed class Score
         }),
         bass = Bass?.QuantizedNotes.Select(q => new { start = q.Start, end = q.End, observedStart = q.Note.Start, observedEnd = q.Note.End, midi = q.Note.Midi, name = q.Note.Sounding.Name, confidence = q.Note.Confidence }),
         choir = Choir.Count == 0 ? null : Choir.ToDictionary(c => c.Name, c => c.S.QuantizedNotes.Select(q => new { start = q.Start, end = q.End, observedStart = q.Note.Start, observedEnd = q.Note.End, midi = q.Note.Midi, name = q.Note.Sounding.Name, confidence = q.Note.Confidence })),
+        instruments = Take.Instruments.Count == 0 ? null : Take.Instruments.ToDictionary(i => i.Key, i => i.Value.Select(n => new { observedStart = n.Start, observedEnd = n.End, midi = n.Midi, name = n.Sounding.Name, confidence = n.Confidence })),
         cadences = Take.Cadences.Select(c => new { time = c.Time, type = c.Type, from = c.From, to = c.To, confidence = c.Confidence, evidence = c.Evidence }),
         measures = Measures.Select(m => new
         {
