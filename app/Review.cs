@@ -39,7 +39,13 @@ public sealed class Review
         foreach (var c in t.Chords)
             if (c.Quality >= 0 && c.Quality < LeadSheet.Intervals.Length)
                 foreach (var i in LeadSheet.Intervals[c.Quality]) h[(c.Root + i) % 12] += 0.5 * (c.End - c.Start);
-        if (h.Sum() < 2) return null;   // under ~2 s of material: no suggestion
+        return KeyOf(h);
+    }
+
+    /// The key of a pitch-class histogram (seconds per pitch class); null under ~2 s of material.
+    public static (KeyOption Key, double Correlation, double Margin)? KeyOf(double[] h)
+    {
+        if (h.Sum() < 2) return null;
         var scores = new List<(int Tonic, bool Minor, double R)>();
         for (int tonic = 0; tonic < 12; tonic++)
             foreach (bool minor in new[] { false, true })

@@ -3,15 +3,15 @@ using Avalonia.Headless;
 using Avalonia.Themes.Fluent;
 using Dissonancia;
 
-// out.png  tab (0 START, 1 LIVE, 3 SCORE)  mode (AppMode)  time in seconds  [actions from the action table, e.g. EditRack]
+// out.png  tab (0 START, 1 LIVE, 3 SCORE)  mode (LiveMode)  time in seconds  [actions from the action table, e.g. EditRack]
 if (args.Length < 4) { Console.WriteLine("usage: out.png <tab> <mode> <seconds> [action...]"); return 1; }
 AppBuilder.Configure<ShotApp>().UseSkia().UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false }).SetupWithoutStarting();
 var w = new MainWindow();
 if (Environment.GetEnvironmentVariable("SHOT_H") is { Length: > 0 } sh) w.Height = int.Parse(sh);   // a taller window: the whole STUDIO rack
 double t = double.Parse(args[3], System.Globalization.CultureInfo.InvariantCulture);
 w.Clock = () => t;
-var mode = Enum.Parse<AppMode>(args[2]);
-w.SetMode(mode, mode == AppMode.GuitarChords ? Clef.Treble8vb : mode is AppMode.VoiceMono or AppMode.InstrumentMono ? null : Clef.Treble);   // voice / melody: Auto
+var mode = Enum.Parse<LiveMode>(args[2]);
+w.SetMode(mode, mode == LiveMode.Acoustic ? Clef.Treble8vb : mode is LiveMode.Melody or LiveMode.AcousticVoice ? null : Clef.Treble);   // melody lines: Auto
 w.Show();
 w.SelectTab(int.Parse(args[1]));
 for (int i = 0; i < 40; i++)   // 2 s of frames so meters, scope and waterfall fill

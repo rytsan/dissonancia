@@ -311,6 +311,8 @@ public sealed class NativeLiveSource : ILiveSource
     bool _metronome = true;
     int _shapeKey = -1;
     int[] _frets = [];
+    readonly LiveSong _song = new();
+    double _lastRead = double.NaN;
 
     /// Events lost between core and GUI (sequence gaps), shown as incomplete event log.
     public int EventGaps { get; private set; }
@@ -346,6 +348,7 @@ public sealed class NativeLiveSource : ILiveSource
         f.TempoConfidence = _snap.Context.TempoConfidence;
         f.LastBeatSeconds = _snap.Context.LastBeatSeconds;
         f.AnalyzedSeconds = _snap.SampleRate > 0 ? (double)_snap.AnalyzedFrames / _snap.SampleRate : 0;
+        _song.Beat(f.LastBeatSeconds, f.DetectedBpm);
 
         f.CaptureMs = _snap.LatencyCaptureMs;
         f.ProcessingMs = _snap.LatencyProcessingMs;
@@ -389,6 +392,8 @@ public sealed class NativeLiveSource : ILiveSource
         f.MelodyValid = m.Valid != 0;
         f.MelodySettled = m.Settled != 0;
         if (f.MelodyValid) f.Melody = new Pitch(m.Letter, m.Alter, m.WrittenOctave - _session.CoreClef.OctaveShift());
+        if (f.MelodySettled && !double.IsNaN(_lastRead)) _song.AddMelody(f.Melody.Midi, Math.Min(0.1, now - _lastRead));
+        _lastRead = now;
         f.VoiceCount = 0;
         for (int i = 0; i < LiveFrame.MaxVoices && _snap.Voices[i] >= 0; i++) f.Voices[f.VoiceCount++] = _snap.Voices[i];
         fixed (byte* cs = _snap.ConfirmedSymbol) f.DisplayChord = _confirmed.Get(cs, 16, Display);
@@ -443,6 +448,8 @@ public sealed class NativeLiveSource : ILiveSource
                             // A bass that settled after the confirmation adds the inversion: the final symbol wins.
                             f.TimelineBars[^1] = _event.Get(d + 24, 16, Display);
                             f.TimelineRomans[^1] = _event.Get(d + 62, 12, DisplayRoman);
+                            _song.AddChord(*(double*)d, *(double*)(d + 8), (sbyte)d[40], d[42], f.TimelineBars[^1]);
+                            SongReadout(f);
                             break;
                         case AnalyzerEventType.Cadence:
                             string from = _event.Get(d + 16, 16, DisplayRoman), to = _event.Get(d + 32, 16, DisplayRoman);
@@ -453,6 +460,15 @@ public sealed class NativeLiveSource : ILiveSource
                     }
                 }
         }
+    }
+
+    /// Key, meter and form of the song so far; recomputed when a chord ends (not every frame).
+    void SongReadout(LiveFrame f)
+    {
+        f.SongKey = _song.Key is { } k ? $"{k.Key}" : "";
+        var (beats, _) = _song.Meter();
+        f.SongMeter = beats > 0 ? $"{beats}/4" : "";
+        f.SongForm = string.Join(" ", _song.Form());
     }
 
     public void ToggleRec(double now)

@@ -229,16 +229,16 @@ Console.WriteLine($"[measure] LikelyShape (4-note chord): {watch.Elapsed.TotalMi
 string config = Path.Combine(Path.GetTempPath(), "dz-rack-check");
 Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", config);
 Directory.CreateDirectory(Path.Combine(config, "Dissonancia"));
-File.WriteAllText(Path.Combine(config, "Dissonancia", "rack-VoiceMono.json"), """
+File.WriteAllText(Path.Combine(config, "Dissonancia", "rack-live-Melody.json"), """
 [{"module": "Scope", "width": "half", "heightU": 9}, {"module": "Scope", "width": "full", "heightU": 2},
  {"module": "Fretboard", "width": "full", "heightU": 2}, {"module": "Bogus", "width": "full", "heightU": 1},
  {"module": "Status", "width": "half", "heightU": 1}]
 """);
-var rack = RackCatalog.Load(AppMode.VoiceMono);
+var rack = RackCatalog.Load(LiveMode.Melody);
 Check(string.Join(",", rack.Select(e => $"{e.Module}{(e.Half ? "/2" : "")}:{e.HeightU}")) == "Scope/2:4,Status:1,Transport:1", "rack preset cleaned: " + string.Join(",", rack.Select(e => $"{e.Module}{(e.Half ? "/2" : "")}:{e.HeightU}")));
-RackCatalog.Save(AppMode.VoiceMono, RackCatalog.Default(AppMode.VoiceMono));
-Check(RackCatalog.Load(AppMode.VoiceMono).SequenceEqual(RackCatalog.Default(AppMode.VoiceMono)), "rack preset round trip");
-Check(RackCatalog.Default(AppMode.GuitarChords).Any(e => e.Module == ModuleKind.Fretboard) && !RackCatalog.Default(AppMode.VoiceMono).Any(e => e.Module == ModuleKind.Timeline), "per-mode defaults");
+RackCatalog.Save(LiveMode.Melody, RackCatalog.Default(LiveMode.Melody));
+Check(RackCatalog.Load(LiveMode.Melody).SequenceEqual(RackCatalog.Default(LiveMode.Melody)), "rack preset round trip");
+Check(RackCatalog.Default(LiveMode.Acoustic).Any(e => e.Module == ModuleKind.Fretboard) && !RackCatalog.Default(LiveMode.Melody).Any(e => e.Module == ModuleKind.Timeline), "per-mode defaults");
 Directory.Delete(config, true);
 
 // STUDIO S7: a lead sheet with a bass line -> voice staff with symbols + bass staff, same bars;
@@ -397,6 +397,35 @@ static float[] ReadWav(string path)   // float32 data chunk, any channel count, 
 }
 
 Console.WriteLine(failures == 0 ? "all checks passed" : $"{failures} FAILED");
+// LIVE Música completa: key, meter and 4-bar form from confirmed chords on the beat count.
+{
+    LiveSong Play(int beatsPerBar, (int Root, int Q, string Sym)[][] phrases, int pickupBeats)
+    {
+        var song = new LiveSong();
+        var chords = phrases.SelectMany(p => p).ToList();
+        double period = 0.5, t = 0;
+        int beat = 0, total = pickupBeats + chords.Count * beatsPerBar + beatsPerBar;
+        for (; beat < total; beat++, t += period)
+        {
+            song.Beat(t, 120);
+            int k = beat - pickupBeats;
+            if (k >= 0 && k % beatsPerBar == 0 && k / beatsPerBar < chords.Count && k > 0)
+            {
+                var c = chords[k / beatsPerBar - 1];   // the previous bar's chord ends now
+                song.AddChord(t - beatsPerBar * period, t, c.Root, c.Q, c.Sym);
+            }
+        }
+        return song;
+    }
+    (int, int, string)[] a = [(7, 0, "G"), (2, 0, "D"), (4, 1, "Em"), (0, 0, "C")], b = [(9, 1, "Am"), (0, 0, "C"), (2, 0, "D"), (2, 0, "D")];
+    var aaba = Play(4, [a, a, b, a], 1);
+    Check(aaba.Meter() == (4, 1), $"live song: 4/4 with the downbeat after one pickup beat: {aaba.Meter()}");
+    Check(string.Concat(aaba.Form()) == "AABA", $"live song: form AABA: {string.Concat(aaba.Form())}");
+    Check(aaba.Key is { } k && k.Key.Fifths == 1 && !k.Key.Minor, "live song: key G major");
+    var waltz = Play(3, [a, b, a], 0);
+    Check(waltz.Meter().Beats == 3, $"live song: chords every 3 beats -> 3/4: {waltz.Meter()}");
+}
+
 return failures == 0 ? 0 : 1;
 
 static XmlSchemaSet? Schema()

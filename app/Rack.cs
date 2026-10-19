@@ -385,6 +385,17 @@ public sealed class LcdModule : RackModule
         double melX = infoX + 130;
         Plasma.Text(ctx, "MELODY", melX, y, 10, false, Ui.SansBold);
         Plasma.DotText(ctx, f.MelodyValid ? f.Melody.WithOctaveShift(Session.DisplayClef.OctaveShift()).Name : "", melX, y + 16, noteDot, cells: 4, dim: !f.MelodySettled);
+        // Música completa: the song so far — key, meter, tempo heard and the form in 4-bar phrases.
+        if (Session.Live == LiveMode.FullSong)
+        {
+            double sy = inner.Bottom - 18;
+            string bpm = f.DetectedBpm > 0 ? $"{f.DetectedBpm:0} bpm" : "— bpm";
+            Plasma.Text(ctx, "SONG", inner.X, sy + 3, 10, false, Ui.SansBold);
+            Plasma.Text(ctx, $"{(f.SongKey.Length > 0 ? f.SongKey : "key —")}  ·  {(f.SongMeter.Length > 0 ? f.SongMeter : "—/—")}  ·  {bpm}",
+                inner.X + 44, sy, 13, f.SongKey.Length > 0, Ui.Mono);
+            Plasma.Text(ctx, f.SongForm.Length > 0 ? $"FORM  {f.SongForm}" : "FORM  —", inner.Right - 175, sy, 13, f.SongForm.Length > 0, Ui.Mono, Ui.Align.Right);   // left of the staff
+        }
+
         // Acústico + voz: the staff carries the sung line; otherwise the bass.
         bool voiceStaff = Session.Live == LiveMode.AcousticVoice;
         if (Session.GrandStaff) DrawGrandStaff(ctx, new Rect(inner.Right - 170, y + 2, 170, Math.Max(80, inner.Bottom - y - 4)), f.Bass, valid);
