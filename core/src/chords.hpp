@@ -24,6 +24,30 @@ struct ChordHistory {
     ChordQuality beforeQuality = ChordQuality::Unknown;
 };
 
+// The song's key so far: pitch-class amplitude of every sounding hop (each hop weighs the same,
+// whatever its loudness) summed with a slow decay, correlated with Temperley's key profiles (as
+// the app's Review.KeyOf). The key changes only when another one fits better for several seconds
+// (a modulation), never for one bar.
+class KeyTracker {
+public:
+    explicit KeyTracker(double hopSeconds);
+    void process(const float* chromaEnergy);   // ChromaVector.raw; all zero = silence (skipped)
+    const KeyEstimate& estimate() const { return est_; }
+
+    static constexpr double kTimeConstant = 45;   // seconds: the sum follows a modulation in ~1 min
+    static constexpr double kMinSeconds = 8;      // sound before any estimate
+    static constexpr double kSwitchSeconds = 4;   // another key must lead this long to replace it
+    static constexpr float kMinMargin = 0.02f;    // valid only this far above the next key
+
+private:
+    double hop_, decay_;
+    double sum_[12]{};
+    double seconds_ = 0;
+    int current_ = -1, challenger_ = -1;   // key index: tonic + 12 * minor
+    double challengerSeconds_ = 0;
+    KeyEstimate est_{};
+};
+
 class ChordMatcher {
 public:
     explicit ChordMatcher(const SessionConfig& s);
@@ -47,6 +71,10 @@ public:
     // Returns false when no cadence applies.
     bool cadence(const ChordCandidate& previous, const ChordCandidate& last, bool phraseEnd, CadenceEvent& out) const;
 
+    // The estimated song key as tonal context when the session has none (invalid: no context).
+    // Roman numerals and cadences stay with the session key only.
+    void hint(const KeyEstimate& k);
+
     static constexpr int kQualities = 15;
     static constexpr int kTemplates = kQualities * 12;   // index = quality * 12 + root
     static constexpr float kRuledOut = -1.f;
@@ -66,6 +94,10 @@ private:
     int8_t fifths_ = 0;
     bool minor_ = false;
     int tonic_ = 0;   // pitch class of the tonic of the session key (relative minor in minor mode)
+    // The key context() uses: the session key, else the hinted estimate.
+    bool ctxOn_;
+    bool ctxMinor_;
+    int ctxTonic_;
 };
 
 class ChordTracker {
@@ -77,6 +109,7 @@ public:
         float latencyMs, confirmElapsedMs;
         uint32_t eventCount;
         AnalyzerEvent events[4];
+        KeyEstimate key;             // the song's key so far
     };
 
     // hopSeconds: analysis hop; latencyCompensation subtracted from event times (§13).
@@ -109,6 +142,7 @@ private:
     float candLatencyMs_ = 0, curLatencyMs_ = 0;
     ChordHistory history_;
     ChordCandidate previous_{};      // confirmed chord before cur_ (symbol "" = none): cadence context
+    KeyTracker key_;
     float acc_[12]{};                // arpeggio accumulator (decaying max-hold of chroma energy)
     // Chroma of the last kSegFrames hops (5 s at 20 ms): a candidate is confirmed on its segment
     // since the attack, and a chord is relabelled on its whole duration when it ends.

@@ -1,11 +1,10 @@
 namespace Dissonancia;
 
-/// LIVE "Música completa": what the song so far says about itself — key, meter and form — from the
-/// confirmed chords (ChordEnded events), the settled melody and the core's beat marks. Display only:
-/// nothing here changes the analysis or the session's own key and meter.
+/// LIVE "Música completa": what the song so far says about its meter and form, from the confirmed
+/// chords (ChordEnded events) and the core's beat marks. Display only: nothing here changes the
+/// analysis or the session's own meter. (The key is the core's: KeyEstimate, from the whole spectrum.)
 public sealed class LiveSong
 {
-    readonly double[] _pcs = new double[12];               // pitch-class weight in seconds (Review.KeyOf)
     readonly List<(long Beat, string Symbol)> _chords = [];   // chord starts on the beat count
     long _beats;                                           // beat marks seen so far
     double _lastBeat = double.NaN, _period;
@@ -22,16 +21,10 @@ public sealed class LiveSong
 
     public long BeatOf(double seconds) => _beats - (long)Math.Round((_lastBeat - seconds) / _period);
 
-    public void AddChord(double start, double end, int root, int quality, string symbol)
+    public void AddChord(double start, string symbol)
     {
-        if (quality >= 0 && quality < LeadSheet.Intervals.Length)
-            foreach (var i in LeadSheet.Intervals[quality]) _pcs[(root + i) % 12] += 0.5 * (end - start);
         if (_period > 0 && symbol.Length > 0) _chords.Add((BeatOf(start), symbol));
     }
-
-    public void AddMelody(int midi, double seconds) { if (midi >= 0) _pcs[midi % 12] += seconds; }
-
-    public (KeyOption Key, double Correlation, double Margin)? Key => Review.KeyOf(_pcs);
 
     /// Beats per bar and the downbeat's phase on the beat count: chords change on downbeats more than
     /// anywhere else; 3 or 4 by how far that preference stands above chance. 0 = not enough chords yet.

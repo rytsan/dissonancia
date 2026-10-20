@@ -409,6 +409,7 @@ void Engine::process_hop(const float* x, uint32_t n) {
     std::memcpy(s.voices, cout_.voices, sizeof s.voices);
     s.lastOnsetSeconds = chroma_ && cout_.lastOnset >= 0 ? cout_.lastOnset - compensationMs() / 1000.0 : -1;
     s.context = contextOut_;
+    s.songKey = chout_.key;
     snapshots_.publish();
 }
 

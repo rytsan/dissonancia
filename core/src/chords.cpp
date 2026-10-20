@@ -56,11 +56,71 @@ bool contains(const int8_t* a, int n, int v) {
 
 }  // namespace
 
+// ---------------------------------------------------------------- song key
+
+namespace {
+constexpr float kMajorProfile[12] = {5, 2, 3.5f, 2, 4.5f, 4, 2, 4.5f, 2, 3.5f, 1.5f, 4};   // Temperley
+constexpr float kMinorProfile[12] = {5, 2, 3.5f, 4.5f, 2, 4, 2, 4.5f, 3.5f, 2, 1.5f, 4};
+}  // namespace
+
+KeyTracker::KeyTracker(double hopSeconds) : hop_(hopSeconds), decay_(std::exp(-hopSeconds / kTimeConstant)) {}
+
+void KeyTracker::process(const float* energy) {
+    double amp[12], total = 0;
+    for (int i = 0; i < 12; i++) total += amp[i] = std::sqrt(std::max(0.f, energy[i]));
+    if (total <= 0) return;   // silence neither adds nor fades the key
+    for (int i = 0; i < 12; i++) sum_[i] = sum_[i] * decay_ + hop_ * amp[i] / total;
+    seconds_ = seconds_ * decay_ + hop_;
+    if (seconds_ < kMinSeconds) return;
+
+    double r[24], mean = 0;
+    for (double v : sum_) mean += v / 12;
+    for (int k = 0; k < 24; k++) {
+        const float* p = k < 12 ? kMajorProfile : kMinorProfile;
+        int tonic = k % 12;
+        double pm = 0, num = 0, dh = 0, dp = 0;
+        for (int i = 0; i < 12; i++) pm += p[i] / 12.0;
+        for (int i = 0; i < 12; i++) {
+            double a = sum_[(tonic + i) % 12] - mean, b = p[i] - pm;
+            num += a * b; dh += a * a; dp += b * b;
+        }
+        r[k] = dh > 0 ? num / std::sqrt(dh * dp) : 0;
+    }
+    auto relative = [](int k) { return k < 12 ? 12 + (k + 9) % 12 : (k - 12 + 3) % 12; };
+    auto margin = [&](int k) {
+        double next = -2;
+        for (int j = 0; j < 24; j++)
+            if (j != k && j != relative(k)) next = std::max(next, r[j]);
+        return float(r[k] - next);
+    };
+    int best = 0;
+    for (int k = 1; k < 24; k++)
+        if (r[k] > r[best]) best = k;
+
+    if (current_ < 0) current_ = best;
+    else if (best != current_) {
+        challengerSeconds_ = best == challenger_ ? challengerSeconds_ + hop_ : hop_;
+        challenger_ = best;
+        if (challengerSeconds_ >= kSwitchSeconds) current_ = best, challenger_ = -1, challengerSeconds_ = 0;
+    } else challenger_ = -1, challengerSeconds_ = 0;
+
+    bool minor = current_ >= 12;
+    int tonic = current_ % 12, majorPc = minor ? (tonic + 3) % 12 : tonic, fifths = majorPc * 7 % 12;
+    est_.minor = minor;
+    est_.tonic = int8_t(tonic);
+    est_.fifths = int8_t(fifths > 6 ? fifths - 12 : fifths);
+    est_.correlation = float(r[current_]);
+    est_.margin = margin(current_);
+    est_.seconds = float(seconds_);
+    est_.valid = est_.margin >= kMinMargin;
+}
+
 // ---------------------------------------------------------------- matcher
 
 ChordMatcher::ChordMatcher(const SessionConfig& s)
     : keySet_(s.keySet != 0), fifths_(s.keyFifths), minor_(s.keyMode != KeyMode::Major),
-      tonic_((7 * (s.keyFifths + 12) + (s.keyMode != KeyMode::Major ? 9 : 0)) % 12) {
+      tonic_((7 * (s.keyFifths + 12) + (s.keyMode != KeyMode::Major ? 9 : 0)) % 12),
+      ctxOn_(keySet_), ctxMinor_(minor_), ctxTonic_(tonic_) {
     speller_.configure(s.keyFifths, s.keyMode);
     for (int qi = 0; qi < kQualities; qi++)
         for (int root = 0; root < 12; root++) {
@@ -135,13 +195,22 @@ constexpr DegreeRule kMinorRules[] = {
 
 }  // namespace
 
+void ChordMatcher::hint(const KeyEstimate& k) {
+    if (keySet_) return;
+    ctxOn_ = k.valid != 0;
+    ctxMinor_ = k.minor != 0;
+    ctxTonic_ = k.tonic;
+}
+
 float ChordMatcher::context(int root, ChordQuality q, int prevRoot, ChordQuality prevQ, const char** why) const {
-    if (!keySet_) return 0;
+    if (!ctxOn_) return 0;
+    const int tonic = ctxTonic_;
+    const bool minor = ctxMinor_;
     auto degree = [&](int r, ChordQuality cq, const char** roman) {
-        int semis = (r - tonic_ + 12) % 12;
+        int semis = (r - tonic + 12) % 12;
         float best = 0.15f;   // anything else: possible, just not expected
-        const DegreeRule* rules = minor_ ? kMinorRules : kMajorRules;
-        size_t n = minor_ ? std::size(kMinorRules) : std::size(kMajorRules);
+        const DegreeRule* rules = minor ? kMinorRules : kMajorRules;
+        size_t n = minor ? std::size(kMinorRules) : std::size(kMajorRules);
         for (size_t i = 0; i < n; i++)
             if (rules[i].semis == semis && fits(rules[i].family, cq) && rules[i].weight > best) {
                 best = rules[i].weight;
@@ -154,13 +223,13 @@ float ChordMatcher::context(int root, ChordQuality q, int prevRoot, ChordQuality
     if (why) *why = roman;
 
     if (prevRoot >= 0) {
-        int from = (prevRoot - tonic_ + 12) % 12, to = (root - tonic_ + 12) % 12;
+        int from = (prevRoot - tonic + 12) % 12, to = (root - tonic + 12) % 12;
         Family pf = family(prevQ);
         bool prevDominant = from == 7 && (pf == Family::Dominant || pf == Family::Major);
-        bool tonicChord = to == 0 && family(q) == (minor_ ? Family::Minor : Family::Major);
-        if (prevDominant && tonicChord) { prior += 0.5f; if (why) *why = minor_ ? "V-i cadence" : "V-I cadence"; }
+        bool tonicChord = to == 0 && family(q) == (minor ? Family::Minor : Family::Major);
+        if (prevDominant && tonicChord) { prior += 0.5f; if (why) *why = minor ? "V-i cadence" : "V-I cadence"; }
         else if (from == 5 && tonicChord) { prior += 0.3f; if (why) *why = "plagal cadence"; }
-        else if (prevDominant && to == (minor_ ? 8 : 9)) { prior += 0.25f; if (why) *why = "deceptive cadence"; }
+        else if (prevDominant && to == (minor ? 8 : 9)) { prior += 0.25f; if (why) *why = "deceptive cadence"; }
         else if ((prevRoot - root + 12) % 12 == 7) prior += 0.15f;   // root falls a fifth
     }
     return std::min(prior, 1.f);
@@ -427,13 +496,18 @@ void ChordMatcher::match(const float* energy, const ChordHistory& h, int bassPc,
         c.tonalScore = ctx(root, d.q, nullptr);
         c.chromaScore = s.score - kContextWeight * c.tonalScore;   // acoustic part only
         c.incomplete = c.missingCount > 0;
-        if (bassPc >= 0) {
+        // In a key (set or estimated), a settled bass outside both the chord and the key is a passing
+        // note under the chord, not its bass (C over a chromatic Ab walking down is still C).
+        const bool passing = bassPc >= 0 && ctxOn_ && !(masks_[s.t] >> bassPc & 1)
+                             && !in_scale(bassPc, ctxTonic_, ctxMinor_ ? kMinorScale : kMajorScale, ctxMinor_);
+        const int chordBass = passing ? -1 : bassPc;
+        if (chordBass >= 0) {
             c.hasBass = 1;
-            c.bassPitchClass = int8_t(bassPc);
-            c.bassScore = root == bassPc ? 1.f : (masks_[s.t] >> bassPc & 1) ? 0.5f : 0.f;
-            if (bassPc != root) slash(root, d.q, bassPc, c.symbol);   // inversion only with a settled bass
+            c.bassPitchClass = int8_t(chordBass);
+            c.bassScore = root == chordBass ? 1.f : (masks_[s.t] >> chordBass & 1) ? 0.5f : 0.f;
+            if (chordBass != root) slash(root, d.q, chordBass, c.symbol);   // inversion only with a settled bass
         }
-        roman(root, d.q, bassPc, c.roman, c.diatonicStatus);
+        roman(root, d.q, chordBass, c.roman, c.diatonicStatus);
     };
 
     fill(top[0], out.best);
@@ -482,7 +556,7 @@ void ChordMatcher::match(const float* energy, const ChordHistory& h, int bassPc,
 
 ChordTracker::ChordTracker(const SessionConfig& s, double hopSeconds, double latencyCompensation)
     : matcher_(s), hop_(hopSeconds), latencyComp_(latencyCompensation),
-      confirmSeconds_(s.quality == AudioQuality::HighPrecision ? 0.6 : 0.4), releaseSeconds_(0.15) {}
+      confirmSeconds_(s.quality == AudioQuality::HighPrecision ? 0.6 : 0.4), releaseSeconds_(0.15), key_(hopSeconds) {}
 
 // Persistence-weighted mean chroma over [from, to]: each pitch class weighs by the share of frames
 // in which it is strong (>= 0.3 of the frame maximum in amplitude). Chord tones ring through the
@@ -591,6 +665,9 @@ void ChordTracker::process(const ChromaVector& chroma, double t, double frameEnd
         mxAcc = std::max(mxAcc, acc_[i]);
     }
     if (silentFrame) std::fill(acc_, acc_ + 12, 0.f);
+    key_.process(chroma.raw);
+    matcher_.hint(key_.estimate());
+    out.key = key_.estimate();
     std::memcpy(seg_[segPos_], chroma.raw, sizeof seg_[0]);
     segTime_[segPos_] = t;
     segPos_ = (segPos_ + 1) % kSegFrames;

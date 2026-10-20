@@ -332,3 +332,58 @@ TEST_CASE("guitar voicings: one third among six strings is still a triad, not a 
     // A real power chord (no third at all) stays a "5".
     CHECK(std::string(run({{{40, 47, 52}, 1.0}}).ended[0].symbol) == "E5");
 }
+
+TEST_CASE("song key from the summed chroma: major, minor, a modulation, not one bar") {
+    const double hop = 0.01;
+    auto play = [&](KeyTracker& k, std::vector<std::vector<int>> chords, double secondsEach, int repeats) {
+        for (int r = 0; r < repeats; r++)
+            for (const auto& c : chords)
+                for (double t = 0; t < secondsEach; t += hop) {
+                    float e[12] = {};
+                    for (int pc : c) e[pc % 12] += 1;
+                    k.process(e);
+                }
+    };
+    const std::vector<int> C = {0, 4, 7}, F = {5, 9, 0}, G = {7, 11, 2}, Am = {9, 0, 4}, Dm = {2, 5, 9}, E = {4, 8, 11}, D = {2, 6, 9}, Em = {4, 7, 11};
+
+    KeyTracker major(hop);
+    play(major, {C, F, G, Am}, 1, 1);
+    CHECK(!major.estimate().valid);   // 4 s: not enough heard
+    play(major, {C, F, G, Am}, 1, 4);
+    CHECK(major.estimate().valid);
+    CHECK(major.estimate().tonic == 0);
+    CHECK(!major.estimate().minor);
+    CHECK(major.estimate().fifths == 0);
+
+    KeyTracker minor(hop);
+    play(minor, {Am, Dm, E, Am}, 1, 5);
+    INFO("minor: tonic " << int(minor.estimate().tonic) << " minor " << int(minor.estimate().minor) << " margin " << minor.estimate().margin);
+    CHECK(minor.estimate().valid);
+    CHECK(minor.estimate().tonic == 9);
+    CHECK(minor.estimate().minor);
+
+    KeyTracker song(hop);
+    play(song, {C, F, G, C}, 1, 8);    // 32 s in C
+    play(song, {D}, 2, 1);             // one bar of D (V/V): still C
+    CHECK(song.estimate().tonic == 0);
+    double t = 0;
+    while (song.estimate().tonic != 7 && t < 120) { play(song, {G, C, D, Em}, 1, 1); t += 4; }
+    INFO("modulation to G heard after " << t << " s");
+    CHECK(song.estimate().tonic == 7);
+    CHECK(song.estimate().fifths == 1);
+    CHECK(t <= 60);
+}
+
+TEST_CASE("the estimated key is the tonal context when the session has none") {
+    ChordMatcher m(session(0, false, false));
+    CHECK(m.context(7, ChordQuality::Dom7, -1, ChordQuality::Unknown, nullptr) == 0);
+    KeyEstimate c{};
+    c.valid = 1;
+    c.tonic = 0;
+    m.hint(c);
+    CHECK(m.context(7, ChordQuality::Dom7, -1, ChordQuality::Unknown, nullptr) > m.context(6, ChordQuality::Dom7, -1, ChordQuality::Unknown, nullptr));
+    ChordMatcher keyed(session(-3, false));   // a session key is never replaced by the estimate
+    float before = keyed.context(3, ChordQuality::Major, -1, ChordQuality::Unknown, nullptr);
+    keyed.hint(c);
+    CHECK(keyed.context(3, ChordQuality::Major, -1, ChordQuality::Unknown, nullptr) == before);
+}

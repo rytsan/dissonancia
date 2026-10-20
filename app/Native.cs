@@ -155,9 +155,18 @@ unsafe struct LiveSnapshotNative
     public fixed sbyte Voices[8];
     public double LastOnsetSeconds;
     public ContextEstimateNative Context;
+    public KeyEstimateNative SongKey;
     public fixed float WaveMin[WaveColumns];
     public fixed float WaveMax[WaveColumns];
     public fixed float Scope[ScopeSamples];
+}
+
+[StructLayout(LayoutKind.Sequential)]
+struct KeyEstimateNative
+{
+    public byte Valid, Minor;
+    public sbyte Fifths, Tonic;
+    public float Correlation, Margin, Seconds;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -326,7 +335,8 @@ public sealed class NativeLiveSource : ILiveSource
     int _shapeKey = -1;
     int[] _frets = [];
     readonly LiveSong _song = new();
-    double _lastRead = double.NaN;
+    KeyOption? _songKey;
+    string _songKeyText = "";
 
     /// Events lost between core and GUI (sequence gaps), shown as incomplete event log.
     public int EventGaps { get; private set; }
@@ -408,8 +418,11 @@ public sealed class NativeLiveSource : ILiveSource
         f.MelodyValid = m.Valid != 0;
         f.MelodySettled = m.Settled != 0;
         if (f.MelodyValid) f.Melody = new Pitch(m.Letter, m.Alter, m.WrittenOctave - _session.CoreClef.OctaveShift());
-        if (f.MelodySettled && !double.IsNaN(_lastRead)) _song.AddMelody(f.Melody.Midi, Math.Min(0.1, now - _lastRead));
-        _lastRead = now;
+        // The song's key: the core's sum of the whole spectrum so far (also the chords' tonal context).
+        ref readonly var sk = ref _snap.SongKey;
+        var songKey = sk.Valid != 0 ? new KeyOption(sk.Fifths, sk.Minor != 0) : null;
+        if (songKey != _songKey) (_songKey, _songKeyText) = (songKey, songKey?.ToString() ?? "");
+        f.SongKey = _songKeyText;
         f.VoiceCount = 0;
         for (int i = 0; i < LiveFrame.MaxVoices && _snap.Voices[i] >= 0; i++) f.Voices[f.VoiceCount++] = _snap.Voices[i];
         f.VoicesFromModel = _transcriber is { Enabled: true };
@@ -472,7 +485,7 @@ public sealed class NativeLiveSource : ILiveSource
                             // A bass that settled after the confirmation adds the inversion: the final symbol wins.
                             f.TimelineBars[^1] = _event.Get(d + 24, 16, Display);
                             f.TimelineRomans[^1] = _event.Get(d + 62, 12, DisplayRoman);
-                            _song.AddChord(*(double*)d, *(double*)(d + 8), (sbyte)d[40], d[42], f.TimelineBars[^1]);
+                            _song.AddChord(*(double*)d, f.TimelineBars[^1]);
                             SongReadout(f);
                             break;
                         case AnalyzerEventType.Cadence:
@@ -489,7 +502,6 @@ public sealed class NativeLiveSource : ILiveSource
     /// Key, meter and form of the song so far; recomputed when a chord ends (not every frame).
     void SongReadout(LiveFrame f)
     {
-        f.SongKey = _song.Key is { } k ? $"{k.Key}" : "";
         var (beats, _) = _song.Meter();
         f.SongMeter = beats > 0 ? $"{beats}/4" : "";
         f.SongForm = string.Join(" ", _song.Form());

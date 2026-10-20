@@ -428,7 +428,7 @@ Console.WriteLine(failures == 0 ? "all checks passed" : $"{failures} FAILED");
             if (k >= 0 && k % beatsPerBar == 0 && k / beatsPerBar < chords.Count && k > 0)
             {
                 var c = chords[k / beatsPerBar - 1];   // the previous bar's chord ends now
-                song.AddChord(t - beatsPerBar * period, t, c.Root, c.Q, c.Sym);
+                song.AddChord(t - beatsPerBar * period, c.Sym);
             }
         }
         return song;
@@ -437,7 +437,6 @@ Console.WriteLine(failures == 0 ? "all checks passed" : $"{failures} FAILED");
     var aaba = Play(4, [a, a, b, a], 1);
     Check(aaba.Meter() == (4, 1), $"live song: 4/4 with the downbeat after one pickup beat: {aaba.Meter()}");
     Check(string.Concat(aaba.Form()) == "AABA", $"live song: form AABA: {string.Concat(aaba.Form())}");
-    Check(aaba.Key is { } k && k.Key.Fifths == 1 && !k.Key.Minor, "live song: key G major");
     var waltz = Play(3, [a, b, a], 0);
     Check(waltz.Meter().Beats == 3, $"live song: chords every 3 beats -> 3/4: {waltz.Meter()}");
 }

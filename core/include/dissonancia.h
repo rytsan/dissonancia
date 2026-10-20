@@ -246,6 +246,20 @@ struct ContextEstimate {
     double lastBeatSeconds;            // sample clock (analyzedFrames / sampleRate) of the latest beat mark
 };
 
+// The song's key heard so far (chord modes): every hop's pitch-class energy summed with a slow
+// decay (the whole spectrum, not only the recognised chords), matched to key profiles. When the
+// session has no key, a valid estimate is the chord recognizer's tonal context: it decides only
+// what the audio leaves open, never overrides a clear chord.
+struct KeyEstimate {
+    uint8_t valid;                     // bool: enough sound heard and a clear margin
+    uint8_t minor;                     // bool
+    int8_t fifths;                     // like SessionConfig.keyFifths (a minor key: its relative major's)
+    int8_t tonic;                      // pitch class, C = 0
+    float correlation;                 // with the key's profile, -1..1
+    float margin;                      // over the best other key that is not its relative
+    float seconds;                     // sound in the sum (effective seconds, after the decay)
+};
+
 // ---------------------------------------------------------------- snapshot (§22)
 // Meters, scope, transport, latency, pitch (M1). Chord blocks are added by M3+
 // (the layout test keeps C# in sync).
@@ -292,6 +306,7 @@ struct LiveSnapshot {
     int8_t voices[8];                  // every line heard (multiple f0), MIDI highest first, -1 = none
     double lastOnsetSeconds;           // sample clock, delay-compensated; < 0 = none yet
     ContextEstimate context;           // tempo heard so far (display only)
+    KeyEstimate songKey;               // key heard so far (chord modes)
     float waveMin[ANA_WAVE_COLUMNS];
     float waveMax[ANA_WAVE_COLUMNS];
     float scope[ANA_SCOPE_SAMPLES];    // last samples, oldest first

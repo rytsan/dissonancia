@@ -113,6 +113,7 @@ int main(int argc, char** argv) {
     ChromaFrontEnd::Output o{};
     ChordTracker::Output t{};
     std::string shownPreview, shownConfirmed;
+    int shownKey = -1;   // tonic + 12 * minor, -1 = no valid estimate
     int previewChanges = 0, confirmedChanges = 0;
     auto events = [&] {
         for (uint32_t i = 0; i < t.eventCount; i++)
@@ -125,6 +126,13 @@ int main(int argc, char** argv) {
         fe.process(x.data() + p, hop, p + hop, o);
         tracker.process(o.chroma, o.chroma.timestampSeconds, double(p + hop) / rate, o.bass, o.lastOnset, t);
         events();
+        int key = t.key.valid ? t.key.tonic + 12 * t.key.minor : -1;
+        if (key != shownKey) {   // the song's key as the live display would show it
+            static const char* names[12] = {"C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"};
+            if (key < 0) std::printf("key %8.3f -\n", double(p + hop) / rate);
+            else std::printf("key %8.3f %s %s r %.2f margin %.2f\n", double(p + hop) / rate, names[t.key.tonic], t.key.minor ? "minor" : "major", t.key.correlation, t.key.margin);
+            shownKey = key;
+        }
         if (std::getenv("DZ_PREVIEW")) std::printf("preview %8.3f %s\n", double(p + hop) / rate, t.preview.best.symbol[0] ? t.preview.best.symbol : "-");
         if (t.preview.best.symbol != shownPreview) { shownPreview = t.preview.best.symbol; previewChanges++; }
         if (t.confirmedSymbol != shownConfirmed) { shownConfirmed = t.confirmedSymbol; confirmedChanges++; }
