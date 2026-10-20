@@ -37,6 +37,7 @@ public sealed class YourMt3 : IDisposable
     readonly Meta _m;
     readonly (string Type, int Value)[] _events;
     readonly InferenceSession _enc, _first, _next;
+    readonly RunOptions _run = new();
     public string Device { get; }
 
     public YourMt3()
@@ -127,42 +128,49 @@ public sealed class YourMt3 : IDisposable
     {
         const int eos = 1, pad = 0;
         int k = _m.channels;
-        var specT = new DenseTensor<float>(spec, [1, frames, bins]);
-        using var encOut = _enc.Run([NamedOnnxValue.CreateFromTensor("spec", specT)]);
-        var enc = encOut[0].AsTensor<float>().ToDenseTensor();
-        var ids = new DenseTensor<long>([1, k, 1]);
-        using var first = _first.Run([NamedOnnxValue.CreateFromTensor("ids", ids), NamedOnnxValue.CreateFromTensor("enc", enc)]);
-        var selfKv = first.First(o => o.Name == "self_kv").AsTensor<float>().ToDenseTensor();
-        var crossKv = first.First(o => o.Name == "cross_kv").AsTensor<float>().ToDenseTensor();
+        // OrtValues straight from one run to the next: the cross-attention cache alone is ~35 MB,
+        // and copying it through managed tensors every step made each step ~7x slower.
+        using var specV = OrtValue.CreateTensorValueFromMemory(spec, [1, frames, bins]);
+        using var encOut = _enc.Run(_run, ["spec"], [specV], ["enc"]);
+        var idsBuf = new long[k];
+        using var ids = OrtValue.CreateTensorValueFromMemory(idsBuf, [1, k, 1]);
+        using var first = _first.Run(_run, ["ids", "enc"], [ids, encOut[0]], ["logits", "self_kv", "cross_kv"]);
         var tokens = Enumerable.Range(0, k).Select(_ => new List<int>()).ToArray();
         var alive = Enumerable.Repeat(true, k).ToArray();
-        var next = Argmax(first.First(o => o.Name == "logits").AsTensor<float>(), k);
-        for (int step = 0; ; step++)
+        var next = Argmax(first[0], k);
+        IDisposableReadOnlyCollection<OrtValue>? step = null;
+        try
         {
-            for (int c = 0; c < k; c++)
+            for (int n = 0; ; n++)
             {
-                tokens[c].Add(alive[c] ? next[c] : pad);
-                if (next[c] == eos) alive[c] = false;
+                for (int c = 0; c < k; c++)
+                {
+                    tokens[c].Add(alive[c] ? next[c] : pad);
+                    if (next[c] == eos) alive[c] = false;
+                }
+                if (!alive.Any(a => a) || n + 1 >= _m.max_tokens) break;
+                for (int c = 0; c < k; c++) idsBuf[c] = next[c];
+                var o = _next.Run(_run, ["ids", "enc", "self_kv", "cross_kv"], [ids, encOut[0], step?[1] ?? first[1], first[2]], ["logits", "self_kv_out"]);
+                step?.Dispose();
+                step = o;
+                next = Argmax(o[0], k);
             }
-            if (!alive.Any(a => a) || step + 1 >= _m.max_tokens) break;
-            for (int c = 0; c < k; c++) ids[0, c, 0] = next[c];
-            using var o = _next.Run([NamedOnnxValue.CreateFromTensor("ids", ids), NamedOnnxValue.CreateFromTensor("enc", enc),
-                                     NamedOnnxValue.CreateFromTensor("self_kv", selfKv), NamedOnnxValue.CreateFromTensor("cross_kv", crossKv)]);
-            selfKv = o.First(x => x.Name == "self_kv_out").AsTensor<float>().ToDenseTensor();
-            next = Argmax(o.First(x => x.Name == "logits").AsTensor<float>(), k);
         }
+        finally { step?.Dispose(); }
         return [.. tokens.Select(t => t.ToArray())];
     }
 
-    static int[] Argmax(Tensor<float> logits, int k)   // (1, K, 1, V)
+    static int[] Argmax(OrtValue logits, int k)   // (1, K, 1, V)
     {
-        int v = logits.Dimensions[^1];
+        var l = logits.GetTensorDataAsSpan<float>();
+        int v = l.Length / k;
         var r = new int[k];
         for (int c = 0; c < k; c++)
         {
+            var row = l.Slice(c * v, v);
             float best = float.MinValue;
             for (int i = 0; i < v; i++)
-                if (logits[0, c, 0, i] > best) { best = logits[0, c, 0, i]; r[c] = i; }
+                if (row[i] > best) { best = row[i]; r[c] = i; }
         }
         return r;
     }
@@ -347,7 +355,7 @@ public sealed class YourMt3 : IDisposable
         return [.. kept.OrderBy(n => n.Onset).ThenBy(n => n.Drum).ThenBy(n => n.Program).ThenBy(n => n.Velocity).ThenBy(n => n.Pitch)];
     }
 
-    public void Dispose() { _enc.Dispose(); _first.Dispose(); _next.Dispose(); }
+    public void Dispose() { _enc.Dispose(); _first.Dispose(); _next.Dispose(); _run.Dispose(); }
 }
 
 /// The STUDIO job around YourMt3: the whole take on a worker thread, the result as JSON.
