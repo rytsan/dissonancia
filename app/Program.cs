@@ -18,6 +18,7 @@ public static class Program
     {
         if (args is ["--accel-check", var backend]) return Accel.CheckMain(backend);   // child of Accel.Install
         Accel.Init();
+        Setup.StartAuto();   // whatever this machine should have and lacks, in the background
         return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }
 
@@ -527,11 +528,12 @@ public sealed class MainWindow : Window
         var accel = new TextBlock { TextWrapping = TextWrapping.Wrap };
         var parts = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = Ui.Label };
         var install = new Button { Height = 36 };
-        var bar = new ProgressBar { Width = 320, Height = 8, Minimum = 0, Maximum = 1, IsVisible = false, VerticalAlignment = VerticalAlignment.Center };
+        var auto = new CheckBox { Content = "Install automatically at start", IsChecked = Setup.Skipped is not "turned off" };
+        var bar = new ProgressBar { Width = 320, Height = 8, Minimum = 0, Maximum = 1, VerticalAlignment = VerticalAlignment.Center };
         var status = new TextBlock { Foreground = Ui.Label, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap, MaxWidth = 600 };
         var action = Row(install, bar, status);
-        CancellationTokenSource? cts = null;
         static string Mb(long bytes) => bytes >= 1L << 30 ? $"{bytes / (double)(1L << 30):0.0} GB" : $"{bytes >> 20} MB";
+        bool wasRunning = false;
         void Show()
         {
             var p = Accel.Machine;
@@ -543,29 +545,27 @@ public sealed class MainWindow : Window
                        : check is not null ? $"Acceleration: {device} {(Accel.ActiveDevice == device ? "active" : "ready on the next start")} — checked against the CPU (max difference {check.MaxDiff:g2}; Basic Pitch {check.CpuMs:0} ms on the CPU, {check.GpuMs:0.0} ms on the GPU)"
                        : p.Missing.Length > 0 ? $"Acceleration: {device} available — needs {string.Join(", ", p.Missing.Select(m => m.Name))}"
                        : $"Acceleration: {device} installed, not checked yet";
-            install.IsVisible = p.Backend is not "cpu" && check is null;
-            action.IsVisible = install.IsVisible || status.Text is { Length: > 0 };
-            install.Content = cts is not null ? "CANCEL" : p.Missing.Length > 0 ? $"INSTALL GPU  ({Mb(p.DownloadBytes)})" : "CHECK GPU";
             parts.Text = string.Join("   ·   ",
                 $"Basic Pitch {(BasicPitch.Available ? "present" : "missing")}",
-                $"Demucs separation {(!DemucsModel.HelperPresent ? "not in this build" : DemucsModel.Installed(DemucsModel.FourStems) || DemucsModel.Installed(DemucsModel.SixStems) ? "present" : "weights download on first use")}",
+                $"Demucs separation {(!DemucsModel.HelperPresent ? "not in this build" : DemucsModel.Installed(DemucsModel.FourStems) && DemucsModel.Installed(DemucsModel.SixStems) ? "present" : "weights missing")}",
                 $"YourMT3+ {(YourMt3.Installed ? "present" : "weights not installed")}");
+            var (needed, bytes) = Setup.Pending();
+            install.IsVisible = Setup.Running || needed;
+            install.Content = Setup.Running ? "CANCEL" : $"INSTALL  ({Mb(bytes)})";
+            bar.IsVisible = Setup.Running;
+            bar.Value = Setup.Progress;
+            status.Text = Setup.Running ? Setup.Stage : Setup.Error ?? (needed && Setup.Skipped is { } why ? "not installed automatically: " + why : "");
+            action.IsVisible = install.IsVisible || status.Text is { Length: > 0 };
         }
-        install.Click += async (_, _) =>
-        {
-            if (cts is not null) { cts.Cancel(); return; }
-            cts = new CancellationTokenSource();
-            bar.IsVisible = true;
-            Show();
-            var err = await Accel.Install(Accel.Machine, (stage, f) => Avalonia.Threading.Dispatcher.UIThread.Post(() => { bar.Value = f; status.Text = stage; }), cts.Token);
-            cts = null;
-            bar.IsVisible = false;
-            status.Text = err ?? "";
-            Show();
-        };
+        install.Click += (_, _) => { if (Setup.Running) Setup.Cancel(); else Setup.Start(); Show(); };
+        auto.IsCheckedChanged += (_, _) => { Setup.SetAuto(auto.IsChecked == true); if (auto.IsChecked == true) Setup.StartAuto(); Show(); };
+        // The setup runs in the background (started at launch); follow it while it runs.
+        var timer = new Avalonia.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+        timer.Tick += (_, _) => { if (Setup.Running || wasRunning) Show(); wasRunning = Setup.Running; };
+        timer.Start();
         Show();
-        return Section("SYSTEM  (what this machine has; the GPU build is downloaded once, checksum-pinned, and used only after it agrees with the CPU)",
-            new StackPanel { Spacing = 8, Children = { machine, accel, action, parts } });
+        return Section("SYSTEM  (what this machine has and what it should have: the GPU build for it and the separation weights, downloaded once, checksum-pinned; the GPU is used only after it agrees with the CPU)",
+            new StackPanel { Spacing = 8, Children = { machine, accel, action, parts, auto } });
     }
 
     static string NoteValueName(int denominator) => denominator switch { 4 => "quarter ♩", 8 => "eighth ♪", _ => "sixteenth" };

@@ -47,7 +47,8 @@ public sealed class YourMt3 : IDisposable
         _events = [.. _m.events.Select(e => (e[0].GetString()!, e[1].GetInt32()))];
         var (opt, device) = Accel.Options();   // the GPU when its build is installed and checked
         Device = device;
-        Batch = device == "cpu" ? 1 : 8;
+        // ~90 MB of GPU memory per segment in flight (caches + activations): 8 on 4 GB or more.
+        Batch = device == "cpu" ? 1 : Accel.Machine.VramMb is > 0 and < 4096 ? 2 : 8;
         _mem = device switch
         {
             "cuda" => new OrtMemoryInfo(OrtMemoryInfo.allocatorCUDA, OrtAllocatorType.DeviceAllocator, 0, OrtMemType.Default),

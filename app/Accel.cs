@@ -314,3 +314,69 @@ public static class Accel
         return o;
     }
 }
+
+/// Automatic setup: at every start, in the background, whatever this machine should have and lacks —
+/// the GPU build for its backend and the Demucs weights (when the separation helper is in this
+/// build). A failure or a cancel is remembered, so it is not retried at every start: the SYSTEM
+/// section shows why and installs on request; the automatic run can also be turned off there.
+public static class Setup
+{
+    public static volatile string Stage = "";
+    public static volatile float Progress;
+    public static volatile string? Error;
+    public static volatile bool Running;
+    static CancellationTokenSource? _cts;
+
+    static string SkipFile => Path.Combine(Accel.Root, "auto-skip");   // holds why (failure, cancel, off)
+    public static string? Skipped => File.Exists(SkipFile) ? File.ReadAllText(SkipFile) : null;
+
+    /// Turns the automatic run on or off (off: nothing downloads until asked).
+    public static void SetAuto(bool on)
+    {
+        if (on) File.Delete(SkipFile);
+        else { Directory.CreateDirectory(Accel.Root); File.WriteAllText(SkipFile, "turned off"); }
+    }
+
+    static IEnumerable<DemucsModel.Variant> MissingDemucs() =>
+        DemucsModel.HelperPresent ? new[] { DemucsModel.FourStems, DemucsModel.SixStems }.Where(v => !DemucsModel.Installed(v)) : [];
+
+    static bool GpuPending(Accel.Profile p) => p.Backend is not "cpu" && Accel.Passed(p.Backend) is null;
+
+    /// What still needs installing on this machine, and its download size.
+    public static (bool Needed, long Bytes) Pending()
+    {
+        var p = Accel.Machine;
+        long bytes = (GpuPending(p) ? p.DownloadBytes : 0) + MissingDemucs().Sum(v => v.Size);
+        return (GpuPending(p) || MissingDemucs().Any(), bytes);
+    }
+
+    /// At startup: runs unless turned off or a previous run failed or was cancelled.
+    public static void StartAuto() { if (Skipped is null && Pending().Needed) Start(); }
+
+    /// On request (clears a remembered failure).
+    public static void Start()
+    {
+        if (Running) return;
+        File.Delete(SkipFile);
+        (Running, Error, Progress, Stage) = (true, null, 0, "");
+        _cts = new CancellationTokenSource();
+        var ct = _cts.Token;
+        Task.Run(async () =>
+        {
+            var errors = new List<string>();
+            var p = Accel.Machine;
+            if (GpuPending(p) && await Accel.Install(p, (s, f) => (Stage, Progress) = (s, f), ct) is { } e) errors.Add(e);
+            foreach (var v in MissingDemucs().ToList())
+            {
+                if (ct.IsCancellationRequested) break;
+                Stage = $"Demucs {v.Stems}-stem weights";
+                if (await DemucsModel.InstallAsync(v, f => Progress = f, ct) is { } d) errors.Add($"Demucs {v.Stems} stems: {d}");
+            }
+            Error = ct.IsCancellationRequested ? "cancelled" : errors.Count > 0 ? string.Join("; ", errors) : null;
+            if (Error is not null) { Directory.CreateDirectory(Accel.Root); File.WriteAllText(SkipFile, Error); }
+            Running = false;
+        });
+    }
+
+    public static void Cancel() => _cts?.Cancel();
+}
