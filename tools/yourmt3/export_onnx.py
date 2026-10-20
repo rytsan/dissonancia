@@ -85,23 +85,28 @@ with torch.no_grad():
     spec = model.spectrogram(wav)
     tokens = model.inference(wav)[0].tolist()   # the reference, from the original sparse MoE
 
-    # Export-friendly MoE: every expert on every token, weighted by the top-k routing (zero for the
-    # others) — the same sums as the authors' block-sparse loop, whose per-expert token counts
-    # depend on the audio and would be frozen into the graph by tracing.
+    # Export-friendly MoE: each expert on the tokens routed to it (NonZero + gather + index_add, all
+    # dynamic in the graph), weighted by the renormalized top-k routing — the same sums as the
+    # authors' block-sparse loop, whose per-expert token counts depend on the audio and would be
+    # frozen into the graph by tracing. A dense version (every expert on every token) also works
+    # but spends half the encoder's time on experts whose weight is zero.
     import torch.nn.functional as F
     from model.ff_layer import MixtralSparseMoeBlock
 
-    def dense_moe(self, h):
+    def sparse_moe(self, h):
         b, s, d = h.shape
         x = h.reshape(-1, d)
         router_logits = self.gate(x)
         w = F.softmax(router_logits, dim=1, dtype=torch.float)
         top_w, sel = torch.topk(w, self.top_k, dim=-1)
         weights = torch.zeros_like(w).scatter(1, sel, top_w / top_w.sum(-1, keepdim=True)).to(x.dtype)
-        y = (torch.stack([e(x) for e in self.experts], 1) * weights[..., None]).sum(1)
+        y = torch.zeros_like(x)
+        for e, expert in enumerate(self.experts):
+            idx = torch.nonzero(weights[:, e] > 0).squeeze(1)
+            y = y.index_add(0, idx, expert(x.index_select(0, idx)) * weights.index_select(0, idx)[:, e:e + 1])
         return y.reshape(b, s, d), router_logits
 
-    MixtralSparseMoeBlock.forward = dense_moe
+    MixtralSparseMoeBlock.forward = sparse_moe
     enc_m, first_m, next_m = Encoder(model), DecoderFirst(model), DecoderNext(model)
     enc = enc_m(spec)
     ids = torch.zeros(1, K, 1, dtype=torch.long)
