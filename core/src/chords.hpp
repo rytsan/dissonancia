@@ -10,6 +10,7 @@
 #include <cstdint>
 
 #include "dissonancia.h"
+#include "notes.hpp"
 #include "theory.hpp"
 
 namespace dz {
@@ -71,6 +72,12 @@ public:
     // Returns false when no cadence applies.
     bool cadence(const ChordCandidate& previous, const ChordCandidate& last, bool phraseEnd, CadenceEvent& out) const;
 
+    // A chord named for display and events: symbol (with the inversion when the bass is one of its
+    // tones), its tones, Roman numeral and function in the session key.
+    void describe(int root, ChordQuality q, int bassPc, ChordCandidate& out) const;
+    // The key the context uses (the session's, else the hinted estimate); false = none.
+    bool context_key(int& tonic, bool& minor) const { tonic = ctxTonic_; minor = ctxMinor_; return ctxOn_; }
+
     // The estimated song key as tonal context when the session has none (invalid: no context).
     // Roman numerals and cadences stay with the session key only.
     void hint(const KeyEstimate& k);
@@ -119,6 +126,10 @@ public:
     // bass: bass estimate of this hop; lastOnset: sample-clock onset time (< 0 = none) used to
     // backdate a new candidate to its attack.
     void process(const ChromaVector& chroma, double timestamp, double frameEnd, const BassEstimate& bass, double lastOnset, Output& out);
+    // The same events from perceived notes (NoteFrontEnd) through the chord HMM: a chord is
+    // confirmed lag seconds after it began (ChordHmm), starting at its decided onset; silence over
+    // 0.6 s ends it. chroma feeds the song key only.
+    void process_notes(const NoteFrame& notes, const ChromaVector& chroma, double timestamp, double frameEnd, Output& out);
     void flush(Output& out);
 
 private:
@@ -143,6 +154,10 @@ private:
     ChordHistory history_;
     ChordCandidate previous_{};      // confirmed chord before cur_ (symbol "" = none): cadence context
     KeyTracker key_;
+    ChordHmm hmm_;
+    int curState_ = -1;              // HMM state of cur_ (notes path)
+    double lastAudible_ = -1;
+    int bassCount_[12]{};            // lowest note per hop while the current chord sounds (notes path)
     double quietSince_ = -1;         // silence start (< 0: sounding), for the accumulator's gaps
     bool lastSparse_ = false;        // the last sounding frame had <= 2 notes (a picked note)
     float acc_[12]{};                // arpeggio accumulator (decaying max-hold of chroma energy)

@@ -195,6 +195,24 @@ constexpr DegreeRule kMinorRules[] = {
 
 }  // namespace
 
+void ChordMatcher::describe(int root, ChordQuality q, int bassPc, ChordCandidate& c) const {
+    c = {};
+    const QualityDef& d = def(q);
+    c.rootPitchClass = int8_t(root);
+    c.quality = q;
+    c.bassPitchClass = -1;
+    symbol(root, q, c.symbol);
+    c.expectedCount = uint8_t(d.n);
+    for (int i = 0; i < d.n; i++) c.expected[i] = int8_t((root + d.iv[i]) % 12);
+    if (bassPc >= 0 && contains(c.expected, d.n, bassPc)) {
+        c.hasBass = 1;
+        c.bassPitchClass = int8_t(bassPc);
+        if (bassPc != root) slash(root, q, bassPc, c.symbol);
+    }
+    roman(root, q, c.hasBass ? bassPc : -1, c.roman, c.diatonicStatus);
+    c.confidence = 1;
+}
+
 void ChordMatcher::hint(const KeyEstimate& k) {
     if (keySet_) return;
     ctxOn_ = k.valid != 0;
@@ -556,7 +574,7 @@ void ChordMatcher::match(const float* energy, const ChordHistory& h, int bassPc,
 
 ChordTracker::ChordTracker(const SessionConfig& s, double hopSeconds, double latencyCompensation)
     : matcher_(s), hop_(hopSeconds), latencyComp_(latencyCompensation),
-      confirmSeconds_(s.quality == AudioQuality::HighPrecision ? 0.6 : 0.4), releaseSeconds_(0.15), key_(hopSeconds) {}
+      confirmSeconds_(s.quality == AudioQuality::HighPrecision ? 0.6 : 0.4), releaseSeconds_(0.15), key_(hopSeconds), hmm_(hopSeconds) {}
 
 // Persistence-weighted mean chroma over [from, to]: each pitch class weighs by the share of frames
 // in which it is strong (>= 0.3 of the frame maximum in amplitude). Chord tones ring through the
@@ -773,6 +791,83 @@ void ChordTracker::process(const ChromaVector& chroma, double t, double frameEnd
     out.confirmed = active_ && same_chord(best, cur_.c);
     out.latencyMs = candidateOn_ ? candLatencyMs_ : curLatencyMs_;
     out.confirmElapsedMs = candidateOn_ ? float(candTime_ * 1000) : 0.f;
+}
+
+void ChordTracker::process_notes(const NoteFrame& notes, const ChromaVector& chroma, double t, double frameEnd, Output& out) {
+    out.eventCount = 0;
+    key_.process(chroma.raw);
+    matcher_.hint(key_.estimate());
+    out.key = key_.estimate();
+    int tonic = 0;
+    bool minor = false;
+    const bool keyOn = matcher_.context_key(tonic, minor);
+    hmm_.step(notes, keyOn, tonic, minor);
+    if (notes.audible) lastAudible_ = t;
+    const bool sounding = lastAudible_ >= 0 && t - lastAudible_ < 0.6;
+    const double lagSeconds = hmm_.lag_hops() * hop_;
+
+    out.preview = {};
+    if (sounding && hmm_.current() >= 0) {
+        const int s = hmm_.current();
+        matcher_.describe(ChordHmm::root(s), ChordHmm::quality(s), notes.count ? notes.midi[0] % 12 : -1, out.preview.best);
+        static const char* names[12] = {"C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"};
+        char* w = out.preview.explanation;
+        int len = std::snprintf(w, sizeof out.preview.explanation, "heard");
+        for (int i = 0; i < notes.count && len < int(sizeof out.preview.explanation) - 4; i++)
+            len += std::snprintf(w + len, sizeof out.preview.explanation - size_t(len), " %s", names[notes.midi[i] % 12]);
+    }
+    if (active_ && !sounding) {   // silence ends the chord at the last sound
+        int best = cur_.c.rootPitchClass, total = 0;
+        for (int p = 0; p < 12; p++) { total += bassCount_[p]; if (bassCount_[p] > bassCount_[best]) best = p; }
+        if (!(total > 0 && bassCount_[best] > 0.6 * total)) best = cur_.c.rootPitchClass;
+        matcher_.describe(cur_.c.rootPitchClass, cur_.c.quality, best, cur_.c);
+        emit(out, AnalyzerEventType::ChordEnded, cur_, lastAudible_);
+        emit_cadence(out, previous_, cur_, true);
+        active_ = false;
+        previous_ = {};
+        curState_ = -1;
+        hmm_.reset();
+    }
+    // The chord's bass: the lowest note heard most often while it sounds; an inversion only when that
+    // is not the root most of the time (an alternating thumb is still root position).
+    auto chordBass = [&](int root) {
+        int best = -1, total = 0;
+        for (int p = 0; p < 12; p++) {
+            total += bassCount_[p];
+            if (best < 0 || bassCount_[p] > bassCount_[best]) best = p;
+        }
+        return total > 0 && best != root && bassCount_[best] > 0.6 * total ? best : root;
+    };
+    if (active_ && notes.count) bassCount_[notes.midi[0] % 12]++;
+    const int d = hmm_.decided();
+    if (sounding && d >= 0 && active_ && d != curState_ && ChordHmm::root(d) == cur_.c.rootPitchClass) {
+        // Same root, another quality: the same chord heard better (a seventh or sus at its start was
+        // the previous chord still ringing). Renamed in place; no change, no new chord.
+        matcher_.describe(ChordHmm::root(d), ChordHmm::quality(d), chordBass(ChordHmm::root(d)), cur_.c);
+        curState_ = d;
+    } else if (sounding && d >= 0 && (!active_ || d != curState_)) {
+        const double start = std::max(t - lagSeconds, active_ ? cur_.start + hop_ : 0.0);
+        if (active_) {
+            matcher_.describe(cur_.c.rootPitchClass, cur_.c.quality, chordBass(cur_.c.rootPitchClass), cur_.c);
+            emit(out, AnalyzerEventType::ChordEnded, cur_, start);
+        }
+        ChordCandidate c;
+        matcher_.describe(ChordHmm::root(d), ChordHmm::quality(d), -1, c);
+        std::fill(bassCount_, bassCount_ + 12, 0);
+        previous_ = active_ ? cur_.c : ChordCandidate{};
+        cur_ = {c, start, 1, 1};
+        curState_ = d;
+        history_ = {c.rootPitchClass, c.quality, history_.currentRoot, history_.currentQuality};
+        active_ = true;
+        curLatencyMs_ = float((frameEnd - start) * 1000);
+        emit(out, AnalyzerEventType::ChordConfirmed, cur_, start);
+        emit_cadence(out, previous_, cur_, false);
+    }
+    if (active_) std::memcpy(out.confirmedSymbol, cur_.c.symbol, sizeof out.confirmedSymbol);
+    else std::memset(out.confirmedSymbol, 0, sizeof out.confirmedSymbol);
+    out.confirmed = active_ && out.preview.best.symbol[0] && std::strcmp(out.preview.best.symbol, cur_.c.symbol) == 0;
+    out.latencyMs = float(lagSeconds * 1000);
+    out.confirmElapsedMs = 0;
 }
 
 void ChordTracker::flush(Output& out) {

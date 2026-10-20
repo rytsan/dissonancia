@@ -45,7 +45,8 @@ struct Result {
 // Harmonic tones (4 partials, 1/h), per-note phase continuous; a new segment re-attacks.
 // withBass = false: no bass tracker (the pre-M4 behaviour, nothing can resolve identical sets).
 // decaySeconds > 0: each segment's notes decay (plucked); notes of a segment may be staggered.
-Result run(const std::vector<Segment>& segs, const SessionConfig& s = session(), bool withBass = true, double decaySeconds = 0) {
+// notes = true: the perceived-notes path (ChordTracker::process_notes), the live engine's.
+Result run(const std::vector<Segment>& segs, const SessionConfig& s = session(), bool withBass = true, double decaySeconds = 0, bool notes = false) {
     ChromaFrontEnd fe(s, 2, kRate, 82.4f, 4200, 12, kHop, withBass ? 70.f : 0.f, withBass ? 500.f : 0.f, 0.210);
     ChordTracker tr(s, 0.02, 0.0);
     ChromaFrontEnd::Output co{};
@@ -68,7 +69,8 @@ Result run(const std::vector<Segment>& segs, const SessionConfig& s = session(),
             {
                 RtScope rt;   // allocation trap armed
                 fe.process(block.data(), kHop, pos + kHop, co);
-                tr.process(co.chroma, co.chroma.timestampSeconds, double(pos + kHop) / kRate, co.bass, co.lastOnset, r.last);
+                if (notes) tr.process_notes(co.notes, co.chroma, co.chroma.timestampSeconds, double(pos + kHop) / kRate, r.last);
+                else tr.process(co.chroma, co.chroma.timestampSeconds, double(pos + kHop) / kRate, co.bass, co.lastOnset, r.last);
             }
             double now = double(pos + kHop) / kRate;
             if (co.onset) r.onsets.push_back(co.lastOnset);
@@ -405,4 +407,61 @@ TEST_CASE("damped fingerpicking: one short note at a time, gaps between them, st
     CHECK(std::string(r.ended[0].symbol).rfind("C", 0) == 0);
     CHECK(std::string(r.ended.back().symbol).rfind("Am", 0) == 0);
     CHECK(r.ended.size() <= 4);
+}
+
+// ---------------------------------------------------------------- chords from perceived notes
+
+namespace {
+std::string labels(const Result& r) {
+    std::string s;
+    for (const auto& e : r.ended) s += std::string(e.symbol) + " ";
+    return s;
+}
+// One bar of picking: each string added to the ones still ringing, 0.375 s apart.
+void picked(std::vector<Segment>& segs, std::vector<int> strings, int bars = 2) {
+    for (int b = 0; b < bars; b++)
+        for (size_t k = 1; k <= strings.size(); k++) segs.push_back({std::vector<int>(strings.begin(), strings.begin() + long(k)), 0.375});
+}
+}  // namespace
+
+TEST_CASE("notes path: picked arpeggios, ringing, name their chords (not the first two strings)") {
+    std::vector<Segment> segs;
+    picked(segs, {48, 55, 60, 64});   // C: C3 G3 C4 E4
+    picked(segs, {45, 52, 57, 60});   // Am: A2 E3 A3 C4
+    picked(segs, {41, 48, 53, 57});   // F: F2 C3 F3 A3
+    Result r = run(segs, session(), true, 1.5, true);
+    INFO("ended: " << labels(r));
+    REQUIRE(r.ended.size() == 3);
+    CHECK(std::string(r.ended[0].symbol) == "C");
+    CHECK(std::string(r.ended[1].symbol) == "Am");
+    CHECK(std::string(r.ended[2].symbol) == "F");
+    CHECK(r.ended[1].startTimeSeconds == Approx(3.0).margin(0.3));
+    CHECK(r.ended[2].startTimeSeconds == Approx(6.0).margin(0.3));
+}
+
+TEST_CASE("notes path: an alternating thumb (travis) is root position, not an inversion") {
+    std::vector<Segment> segs;
+    for (int b = 0; b < 4; b++)   // G: thumb G2 / D3 alternating on the beats, treble between
+        for (int beat = 0; beat < 4; beat++) {
+            segs.push_back({{beat % 2 ? 50 : 43}, 0.2});
+            segs.push_back({{beat % 2 ? 50 : 43, beat % 2 ? 59 : 67}, 0.175});
+        }
+    Result r = run(segs, session(), true, 0.6, true);
+    INFO("ended: " << labels(r));
+    REQUIRE(r.ended.size() == 1);
+    CHECK(std::string(r.ended[0].symbol) == "G");
+}
+
+TEST_CASE("notes path: strummed change confirmed within a second, silence ends the chord") {
+    Result r = run({{{48, 52, 55, 60, 64}, 2.0}, {{43, 47, 50, 55, 59, 67}, 2.0}, {{}, 1.0}}, session(), true, 0, true);
+    INFO("ended: " << labels(r));
+    REQUIRE(r.ended.size() == 2);
+    CHECK(std::string(r.ended[0].symbol) == "C");
+    CHECK(std::string(r.ended[1].symbol) == "G");
+    CHECK(r.ended[1].startTimeSeconds == Approx(2.0).margin(0.2));
+    CHECK(r.ended[1].endTimeSeconds == Approx(4.0).margin(0.25));
+    REQUIRE(r.confirmed.size() == 2);
+    const double delay = r.confirmedAt[1] - r.confirmed[1].startTimeSeconds;
+    std::printf("[measure] notes path: confirmation %.0f ms after the change\n", delay * 1000);
+    CHECK(delay <= 1.0);
 }

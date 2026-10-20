@@ -341,7 +341,9 @@ void Engine::process_hop(const float* x, uint32_t n) {
             e.data.onset.type = OnsetType::ChordAttack;
             publish_event(e);
         }
-        chords_->process(cout_.chroma, cout_.chroma.timestampSeconds, double(anFrames_) / rate_, cout_.bass, cout_.lastOnset, chout_);
+        // Chords from perceived notes (NoteFrontEnd + ChordHmm): measured against the chroma tracker
+        // on fingerpicking, band mixes and GuitarSet (tools/loopback/guitarset.py: 34 % -> 69 % majmin).
+        chords_->process_notes(cout_.notes, cout_.chroma, cout_.chroma.timestampSeconds, double(anFrames_) / rate_, chout_);
         for (uint32_t i = 0; i < chout_.eventCount; i++) publish_event(chout_.events[i]);
         onsetStrength = cout_.flux;
     }

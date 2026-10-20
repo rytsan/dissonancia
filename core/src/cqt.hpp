@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "dissonancia.h"
+#include "notes.hpp"
 #include "halfband.hpp"
 #include "noise_gate.hpp"
 
@@ -80,6 +81,7 @@ public:
         double lastOnset;              // sample clock (hop start of the onset hop), < 0 = none
         float flux;
         uint16_t gatedBins;            // low bins still holding pre-onset signal (excluded)
+        NoteFrame notes;               // perceived notes (chord modes)
     };
 
     // bassMin/Max = 0: no bass tracker. settleSeconds: computed T_low (§4).
@@ -106,6 +108,7 @@ private:
     std::unique_ptr<OnsetDetector> onsets_;   // forward-declared: keeps cqt.hpp free of bass.hpp
     std::unique_ptr<BassTracker> bass_;
     std::unique_ptr<MelodyTracker> melody_;
+    std::unique_ptr<NoteFrontEnd> notes_;   // with the bass tracker (chord modes)
     std::vector<uint8_t> gated_;
     // Harmonic magnitudes for the chroma: per-bin median over the last kMedianHops hops (drums and
     // attacks are short in time, chords are long), whitened across frequency, weighted by register.

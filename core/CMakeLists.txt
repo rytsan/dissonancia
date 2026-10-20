@@ -22,7 +22,7 @@ if(UNIX AND NOT APPLE)
   target_link_libraries(miniaudio PUBLIC m)
 endif()
 
-add_library(dz_core STATIC src/engine.cpp src/rt.cpp src/voice.cpp src/cqt.cpp src/chords.cpp src/bass.cpp src/tempo.cpp src/player.cpp src/post.cpp src/decode.cpp src/beats.cpp src/choir.cpp)
+add_library(dz_core STATIC src/engine.cpp src/rt.cpp src/voice.cpp src/cqt.cpp src/chords.cpp src/notes.cpp src/bass.cpp src/tempo.cpp src/player.cpp src/post.cpp src/decode.cpp src/beats.cpp src/choir.cpp)
 target_include_directories(dz_core PUBLIC include src)
 target_link_libraries(dz_core PUBLIC miniaudio)
 if(WIN32)

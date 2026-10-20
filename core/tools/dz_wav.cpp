@@ -110,6 +110,7 @@ int main(int argc, char** argv) {
     const uint32_t hop = uint32_t(std::lround(c.hopSeconds * rate));
     ChromaFrontEnd fe(s, c.decimation, rate, c.fMin, c.fMax, c.binsPerOctave, hop, c.bassMin, c.bassMax, c.windowSeconds);
     ChordTracker tracker(s, c.hopSeconds, 0.0);
+    const bool noteChords = std::getenv("DZ_NOTES") != nullptr;   // DEV: chords from perceived notes (ChordHmm)
     ChromaFrontEnd::Output o{};
     ChordTracker::Output t{};
     std::string shownPreview, shownConfirmed;
@@ -141,7 +142,8 @@ int main(int argc, char** argv) {
             while (inPos + 1 < chromaIn.size() && chromaIn[inPos + 1].first <= o.chroma.timestampSeconds) inPos++;
             for (int k = 0; k < 12; k++) o.chroma.raw[k] = chromaIn[inPos].second[k];
         }
-        tracker.process(o.chroma, o.chroma.timestampSeconds, double(p + hop) / rate, o.bass, o.lastOnset, t);
+        if (noteChords) tracker.process_notes(o.notes, o.chroma, o.chroma.timestampSeconds, double(p + hop) / rate, t);
+        else tracker.process(o.chroma, o.chroma.timestampSeconds, double(p + hop) / rate, o.bass, o.lastOnset, t);
         events();
         int key = t.key.valid ? t.key.tonic + 12 * t.key.minor : -1;
         if (key != shownKey) {   // the song's key as the live display would show it
@@ -157,7 +159,16 @@ int main(int argc, char** argv) {
         }
         if (std::getenv("DZ_PREVIEW")) std::printf("preview %8.3f %s\n", double(p + hop) / rate, t.preview.best.symbol[0] ? t.preview.best.symbol : "-");
         if (t.preview.best.symbol != shownPreview) { shownPreview = t.preview.best.symbol; previewChanges++; }
-        if (t.confirmedSymbol != shownConfirmed) { shownConfirmed = t.confirmedSymbol; confirmedChanges++; }
+        if (t.confirmedSymbol != shownConfirmed) {
+            // A rename without a new chord (the notes path names a chord better once more of it is
+            // heard): scored from when it was decided, like a confirmation.
+            bool event = false;
+            for (uint32_t i = 0; i < t.eventCount; i++) event |= t.events[i].type == AnalyzerEventType::ChordConfirmed;
+            if (!event && t.confirmedSymbol[0] && !shownConfirmed.empty())
+                std::printf("chord %8.3f %-8s %.2f\n", double(p + hop) / rate - t.latencyMs / 1000.0, t.confirmedSymbol, 1.0);
+            shownConfirmed = t.confirmedSymbol;
+            confirmedChanges++;
+        }
     }
     tracker.flush(t);
     events();

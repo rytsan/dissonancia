@@ -155,6 +155,8 @@ ChromaFrontEnd::ChromaFrontEnd(const SessionConfig& s, uint32_t decimation, doub
         bass_ = std::make_unique<BassTracker>(s, cqt_, bassMin, bassMax, settleSeconds);
         cqt_.ensure_history(bass_->history_samples());
         melody_ = std::make_unique<MelodyTracker>(s, cqt_, hopSeconds_);
+        notes_ = std::make_unique<NoteFrontEnd>();
+        notes_->init(nativeRate / (decimate_ ? 2 : 1));
     }
     gated_.assign(ANA_MAX_CQT_BINS, 0);
     history_.assign(size_t(ANA_MAX_CQT_BINS) * kMedianHops, 0.f);
@@ -180,6 +182,11 @@ void ChromaFrontEnd::process(const float* x, uint32_t n, uint64_t endFrame, Outp
     if (decimate_) m = toLive_.process(x, n, live_.data());
     else std::memcpy(live_.data(), x, n * sizeof(float));
     cqt_.push(live_.data(), m);
+    out.notes = {};
+    if (notes_) {
+        notes_->push(live_.data(), m);
+        notes_->analyse(double(n) / nativeRate_, out.notes);
+    }
 
     const uint16_t bins = cqt_.bins();
     out.bins = bins;
