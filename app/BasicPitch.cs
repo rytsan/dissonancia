@@ -11,7 +11,7 @@ public sealed class BasicPitch : IDisposable
     public const int Rate = 22050, Window = 43844, Frames = 172, Pitches = 88, LowestMidi = 21;
     public const double FrameSeconds = (double)Window / Frames / Rate;   // ~11.6 ms
 
-    static string ModelPath => Path.Combine(AppContext.BaseDirectory, "models", "basic-pitch-nmp.onnx");
+    internal static string ModelPath => Path.Combine(AppContext.BaseDirectory, "models", "basic-pitch-nmp.onnx");
     public static bool Available => File.Exists(ModelPath);
 
     readonly InferenceSession _model = new(ModelPath);

@@ -28,34 +28,9 @@ public static class DemucsModel
     {
         Directory.CreateDirectory(Dir);
         string tmp = PathOf(v) + ".part";
-        try
-        {
-            using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(30) };
-            using var resp = await http.GetAsync(BaseUrl + v.File, HttpCompletionOption.ResponseHeadersRead, ct);
-            resp.EnsureSuccessStatusCode();
-            await using (var src = await resp.Content.ReadAsStreamAsync(ct))
-            await using (var dst = File.Create(tmp))
-            {
-                var buf = new byte[1 << 16];
-                long done = 0;
-                for (int n; (n = await src.ReadAsync(buf, ct)) > 0;)
-                {
-                    await dst.WriteAsync(buf.AsMemory(0, n), ct);
-                    done += n;
-                    progress((float)done / v.Size);
-                }
-            }
-            string hash;
-            await using (var f = File.OpenRead(tmp)) hash = Convert.ToHexString(await SHA256.HashDataAsync(f, ct)).ToLowerInvariant();
-            if (hash != v.Sha256) { File.Delete(tmp); return "checksum does not match: download refused"; }
-            File.Move(tmp, PathOf(v), true);
-            return null;
-        }
-        catch (Exception e) when (e is HttpRequestException or IOException or TaskCanceledException or UnauthorizedAccessException)
-        {
-            try { File.Delete(tmp); } catch (IOException) { }
-            return e is TaskCanceledException ? "cancelled" : e.Message;
-        }
+        var err = await Download.FileAsync(BaseUrl + v.File, tmp, v.Size, v.Sha256, n => progress((float)n / v.Size), ct);
+        if (err is null) File.Move(tmp, PathOf(v), true);
+        return err;
     }
 }
 
@@ -227,5 +202,40 @@ public sealed class StemTrack
         float lo = 0, hi = 0;
         for (int i = i0; i <= i1; i++) { lo = Math.Min(lo, Min[i]); hi = Math.Max(hi, Max[i]); }
         return (lo, hi);
+    }
+}
+
+/// One pinned download: written to `dest`, SHA-256 checked (a mismatch deletes it). Returns null or why.
+public static class Download
+{
+    public static async Task<string?> FileAsync(string url, string dest, long size, string sha256, Action<long> progress, CancellationToken ct)
+    {
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(60) };
+            using var resp = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
+            resp.EnsureSuccessStatusCode();
+            await using (var src = await resp.Content.ReadAsStreamAsync(ct))
+            await using (var dst = File.Create(dest))
+            {
+                var buf = new byte[1 << 16];
+                long done = 0;
+                for (int n; (n = await src.ReadAsync(buf, ct)) > 0;)
+                {
+                    await dst.WriteAsync(buf.AsMemory(0, n), ct);
+                    done += n;
+                    progress(Math.Min(done, size));
+                }
+            }
+            string hash;
+            await using (var f = File.OpenRead(dest)) hash = Convert.ToHexString(await SHA256.HashDataAsync(f, ct)).ToLowerInvariant();
+            if (hash != sha256) { File.Delete(dest); return "checksum does not match: download refused"; }
+            return null;
+        }
+        catch (Exception e) when (e is HttpRequestException or IOException or TaskCanceledException or UnauthorizedAccessException)
+        {
+            try { File.Delete(dest); } catch (IOException) { }
+            return e is TaskCanceledException ? "cancelled" : e.Message;
+        }
     }
 }

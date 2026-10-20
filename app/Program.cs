@@ -14,7 +14,12 @@ namespace Dissonancia;
 public static class Program
 {
     [STAThread]
-    public static void Main(string[] args) => BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+    public static int Main(string[] args)
+    {
+        if (args is ["--accel-check", var backend]) return Accel.CheckMain(backend);   // child of Accel.Install
+        Accel.Init();
+        return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+    }
 
     public static AppBuilder BuildAvaloniaApp() => AppBuilder.Configure<App>().UsePlatformDetect();
 }
@@ -386,6 +391,7 @@ public sealed class MainWindow : Window
     Control BuildStartTab()
     {
         var root = new StackPanel { Margin = new Thickness(24), Spacing = 18, MaxWidth = 1100, HorizontalAlignment = HorizontalAlignment.Left };
+        root.Children.Add(SystemSection());
 
         // Mode buttons
         // Clef per mode: voice and melody follow their range (Auto); guitar sounds an octave below
@@ -511,6 +517,55 @@ public sealed class MainWindow : Window
         root.Children.Add(start);
         root.Children.Add(_startStatus);
         return root;
+    }
+
+    /// SYSTEM: this machine, its GPU backend (installed on demand, checked against the CPU) and
+    /// the optional components, each present or missing with why.
+    Control SystemSection()
+    {
+        var machine = new TextBlock { TextWrapping = TextWrapping.Wrap };
+        var accel = new TextBlock { TextWrapping = TextWrapping.Wrap };
+        var parts = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = Ui.Label };
+        var install = new Button { Height = 36 };
+        var bar = new ProgressBar { Width = 320, Height = 8, Minimum = 0, Maximum = 1, IsVisible = false, VerticalAlignment = VerticalAlignment.Center };
+        var status = new TextBlock { Foreground = Ui.Label, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap, MaxWidth = 600 };
+        var action = Row(install, bar, status);
+        CancellationTokenSource? cts = null;
+        static string Mb(long bytes) => bytes >= 1L << 30 ? $"{bytes / (double)(1L << 30):0.0} GB" : $"{bytes >> 20} MB";
+        void Show()
+        {
+            var p = Accel.Machine;
+            machine.Text = $"{p.Os} · {p.Arch} · {p.Cores} cores · {Mb(p.RamMb << 20)} RAM"
+                         + (p.Gpu is null ? " · no NVIDIA GPU found" : $" · {p.Gpu} {Mb(p.VramMb << 20)} · driver {p.Driver}");
+            string device = p.Backend switch { "cuda" => "CUDA", "directml" => "DirectML", "coreml" => "CoreML", _ => "CPU" };
+            var check = p.Backend is "cpu" ? null : Accel.Passed(p.Backend);
+            accel.Text = p.Backend is "cpu" ? "Acceleration: CPU only — " + string.Join("; ", p.Issues)
+                       : check is not null ? $"Acceleration: {device} {(Accel.ActiveDevice == device ? "active" : "ready on the next start")} — checked against the CPU (max difference {check.MaxDiff:g2}; Basic Pitch {check.CpuMs:0} ms on the CPU, {check.GpuMs:0.0} ms on the GPU)"
+                       : p.Missing.Length > 0 ? $"Acceleration: {device} available — needs {string.Join(", ", p.Missing.Select(m => m.Name))}"
+                       : $"Acceleration: {device} installed, not checked yet";
+            install.IsVisible = p.Backend is not "cpu" && check is null;
+            action.IsVisible = install.IsVisible || status.Text is { Length: > 0 };
+            install.Content = cts is not null ? "CANCEL" : p.Missing.Length > 0 ? $"INSTALL GPU  ({Mb(p.DownloadBytes)})" : "CHECK GPU";
+            parts.Text = string.Join("   ·   ",
+                $"Basic Pitch {(BasicPitch.Available ? "present" : "missing")}",
+                $"Demucs separation {(!DemucsModel.HelperPresent ? "not in this build" : DemucsModel.Installed(DemucsModel.FourStems) || DemucsModel.Installed(DemucsModel.SixStems) ? "present" : "weights download on first use")}",
+                $"YourMT3+ {(YourMt3.Installed ? "present" : "weights not installed")}");
+        }
+        install.Click += async (_, _) =>
+        {
+            if (cts is not null) { cts.Cancel(); return; }
+            cts = new CancellationTokenSource();
+            bar.IsVisible = true;
+            Show();
+            var err = await Accel.Install(Accel.Machine, (stage, f) => Avalonia.Threading.Dispatcher.UIThread.Post(() => { bar.Value = f; status.Text = stage; }), cts.Token);
+            cts = null;
+            bar.IsVisible = false;
+            status.Text = err ?? "";
+            Show();
+        };
+        Show();
+        return Section("SYSTEM  (what this machine has; the GPU build is downloaded once, checksum-pinned, and used only after it agrees with the CPU)",
+            new StackPanel { Spacing = 8, Children = { machine, accel, action, parts } });
     }
 
     static string NoteValueName(int denominator) => denominator switch { 4 => "quarter ♩", 8 => "eighth ♪", _ => "sixteenth" };

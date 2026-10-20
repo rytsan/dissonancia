@@ -7,6 +7,7 @@
 // Expect: spectrogram within ~0.003, every token equal, every note equal (2026-10-19: 32/32).
 using System.Text.Json;
 using Dissonancia;
+Accel.Init();   // the GPU build when installed and checked (as the app does at startup)
 var S = args[0];
 var refj = JsonDocument.Parse(File.ReadAllText(S + "/reference.json")).RootElement;
 var wav = refj.GetProperty("wav").EnumerateArray().Select(e => e.GetSingle()).ToArray();

@@ -8,7 +8,7 @@ namespace Dissonancia;
 /// STUDIO, optional: YourMT3+ (Chang et al. 2024, "YourMT3+: Multi-instrument Music Transcription
 /// with Enhanced Transformer Architectures and Cross-dataset Stem Augmentation", Apache-2.0), the
 /// YPTF.MoE+Multi model — every note of the take with its instrument. Native: the authors' model
-/// exported to ONNX (tools/yourmt3/export_onnx.py, dev-side) and run here with onnxruntime — CUDA
+/// exported to ONNX (tools/yourmt3/export_onnx.py, dev-side) and run here with onnxruntime — on the GPU
 /// when the machine has it, else the CPU. The spectrogram, the greedy decoding loop and the
 /// token -> note decoding are ports of the authors' Python, checked against it (tools/yourmt3).
 public sealed class YourMt3 : IDisposable
@@ -44,23 +44,11 @@ public sealed class YourMt3 : IDisposable
     {
         _m = JsonSerializer.Deserialize<Meta>(File.ReadAllText(Path.Combine(Dir, "meta.json")))!;
         _events = [.. _m.events.Select(e => (e[0].GetString()!, e[1].GetInt32()))];
-        var (opt, device) = Options();
+        var (opt, device) = Accel.Options();   // the GPU when its build is installed and checked
         Device = device;
         _enc = new InferenceSession(Path.Combine(Dir, "encoder.onnx"), opt);
         _first = new InferenceSession(Path.Combine(Dir, "decoder_first.onnx"), opt);
         _next = new InferenceSession(Path.Combine(Dir, "decoder_next.onnx"), opt);
-    }
-
-    // CUDA when the onnxruntime build and the machine have it; the CPU always works.
-    static (SessionOptions, string) Options()
-    {
-        try
-        {
-            var o = new SessionOptions();
-            o.AppendExecutionProvider_CUDA();
-            return (o, "cuda");
-        }
-        catch (Exception e) when (e is OnnxRuntimeException or EntryPointNotFoundException or DllNotFoundException) { return (new SessionOptions(), "cpu"); }
     }
 
     // ---------------------------------------------------------------- spectrogram
