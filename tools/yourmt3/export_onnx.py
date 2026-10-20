@@ -3,13 +3,15 @@
 
 Usage: <root>/venv/bin/python export_onnx.py <root> <out_dir> [reference.wav [start_seconds]]
   root     the dev install made by setup.sh (torch, the authors' code and checkpoint)
-  out_dir  gets encoder.onnx, decoder_first.onnx, decoder_next.onnx, meta.json
-           (+ reference.json: spectrogram input and greedy tokens of the first segment, to
-           check the C# port against)
+  out_dir  gets encoder.onnx, decoder_first.onnx, decoder_next.onnx (graphs, weights outside),
+           meta.json, recipe.json -> copy these five to app/models/yourmt3;
+           yourmt3.weights (what every machine rebuilds from the authors' checkpoint, for checking);
+           reference.json (spectrogram input and greedy tokens of the first segment, to check the
+           C# port against)
 
-Users never run this: the app ships the ONNX files as checksum-pinned downloads and runs
-them with onnxruntime. The spectrogram (log-magnitude STFT) is computed in C#, so the
-encoder graph starts at the spectrogram.
+Users never run this: the app ships the graphs and builds the weights itself from the authors'
+checkpoint (YourMt3.Build), then runs them with onnxruntime. The spectrogram (log-magnitude STFT)
+is computed in C#, so the encoder graph starts at the spectrogram.
 """
 import json
 import os
@@ -116,16 +118,16 @@ with torch.no_grad():
 
     opset = 17
     torch.onnx.export(enc_m, (spec,), f"{out}/encoder.onnx", input_names=["spec"], output_names=["enc"],
-                      dynamic_axes={"spec": {0: "b"}, "enc": {0: "b"}}, opset_version=opset)
+                      dynamic_axes={"spec": {0: "b"}, "enc": {0: "b"}}, opset_version=opset, do_constant_folding=False)
     torch.onnx.export(first_m, (ids, enc), f"{out}/decoder_first.onnx", input_names=["ids", "enc"],
                       output_names=["logits", "self_kv", "cross_kv"],
                       dynamic_axes={"ids": {0: "b"}, "enc": {0: "b"}, "logits": {0: "b"}, "self_kv": {2: "bk"}, "cross_kv": {2: "bk"}},
-                      opset_version=opset)
+                      opset_version=opset, do_constant_folding=False)
     torch.onnx.export(next_m, (nxt, enc, self_kv, cross_kv), f"{out}/decoder_next.onnx",
                       input_names=["ids", "enc", "self_kv", "cross_kv"], output_names=["logits", "self_kv_out"],
                       dynamic_axes={"ids": {0: "b"}, "enc": {0: "b"}, "self_kv": {2: "bk", 4: "n"}, "cross_kv": {2: "bk"},
                                     "logits": {0: "b"}, "self_kv_out": {2: "bk", 4: "n1"}},
-                      opset_version=opset)
+                      opset_version=opset, do_constant_folding=False)
 
     # Reference for the C# port: the spectrogram and the greedy tokens of this segment.
     a = model.audio_cfg
@@ -141,3 +143,52 @@ with torch.no_grad():
     json.dump(meta, open(f"{out}/meta.json", "w"), indent=1)
     json.dump({"wav": wav[0, 0].tolist(), "spec": spec[0].tolist(), "tokens": tokens}, open(f"{out}/reference.json", "w"))
 print("exported", meta)
+
+# The app never downloads these ONNX files: no one hosts them. The repository keeps the graphs
+# without weights (app/models/yourmt3: these three files, meta.json, recipe.json), and every machine
+# rebuilds yourmt3.weights itself from the authors' checkpoint (pinned revision and SHA-256) by the
+# recipe: each tensor the graphs use, by its checkpoint key, at its offset. Exporting without constant
+# folding keeps every initializer a checkpoint tensor as is (no folded batch norms or transposes;
+# onnxruntime folds them when it loads the graph).
+import hashlib
+import numpy as np
+import onnx
+from onnx import numpy_helper
+
+EXP = "mc13_256_g4_all_v7_mt3f_sqr_rms_moe_wf4_n8k2_silu_rope_rp_b36_nops"
+REV = "5e66c1ea173a8186e0d20432b841d3180cc015b5"   # huggingface.co/spaces/mimbres/YourMT3, 2025-01-31
+ckpt_path = os.path.join(root, "amt/logs/2024", EXP, "checkpoints/last.ckpt")
+state = torch.load(ckpt_path, map_location="cpu", weights_only=False)["state_dict"]
+entries, offsets, pos = [], {}, 0
+with open(f"{out}/yourmt3.weights", "wb") as w:
+    for name in ["encoder", "decoder_first", "decoder_next"]:
+        m = onnx.load(f"{out}/{name}.onnx")
+        for init in m.graph.initializer:
+            key = init.name[2:] if init.name.startswith("m.") else init.name
+            t = state[key].numpy()
+            assert t.dtype == np.float32 and np.array_equal(t, numpy_helper.to_array(init)), key
+            if key not in offsets:
+                pad = -pos % 4096   # page-aligned, so onnxruntime can map each tensor
+                w.write(b"\0" * pad)
+                pos += pad
+                offsets[key] = pos
+                data = np.ascontiguousarray(t).tobytes()
+                w.write(data)
+                entries.append({"key": key, "offset": pos, "bytes": len(data)})
+                pos += len(data)
+            init.ClearField("raw_data")
+            init.data_location = onnx.TensorProto.EXTERNAL
+            del init.external_data[:]
+            for k, v in (("location", "yourmt3.weights"), ("offset", str(offsets[key])), ("length", str(t.nbytes))):
+                e = init.external_data.add()
+                e.key, e.value = k, v
+        onnx.save(m, f"{out}/{name}.onnx")
+with open(ckpt_path, "rb") as f:
+    ckpt_sha = hashlib.file_digest(f, "sha256").hexdigest()
+with open(f"{out}/yourmt3.weights", "rb") as f:
+    weights_sha = hashlib.file_digest(f, "sha256").hexdigest()
+recipe = {"checkpoint": {"url": f"https://huggingface.co/spaces/mimbres/YourMT3/resolve/{REV}/amt/logs/2024/{EXP}/checkpoints/last.ckpt",
+                         "size": os.path.getsize(ckpt_path), "sha256": ckpt_sha},
+          "weights": {"file": "yourmt3.weights", "size": pos, "sha256": weights_sha}, "tensors": entries}
+json.dump(recipe, open(f"{out}/recipe.json", "w"), indent=1)
+print("weights", pos, weights_sha, len(entries), "tensors")

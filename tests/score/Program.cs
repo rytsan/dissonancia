@@ -396,6 +396,22 @@ static float[] ReadWav(string path)   // float32 data chunk, any channel count, 
     return [];
 }
 
+// TorchCheckpoint: a tiny torch.save checkpoint (torch 2.5) with a plain tensor, a transposed view,
+// an offset view, an OrderedDict and an object the reader does not know (argparse.Namespace).
+{
+    var ckptPath = Path.Combine(Path.GetTempPath(), "dz-tiny.ckpt");
+    File.WriteAllBytes(ckptPath, Convert.FromBase64String("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"));
+    using var ck = new TorchCheckpoint(ckptPath);
+    var st = ck.State();
+    float[] F(string k) { var b = ck.Read(st[k]); var f = new float[b.Length / 4]; Buffer.BlockCopy(b, 0, f, 0, b.Length); return f; }
+    Check(st.Count == 3 && ck.Root["epoch"] is 3L, "checkpoint: state_dict with 3 tensors, epoch 3");
+    Check(F("a").SequenceEqual([0f, 1, 2, 3, 4, 5]), "checkpoint: 2x3 tensor in row order");
+    Check(F("t").SequenceEqual([0f, 3, 1, 4, 2, 5]), "checkpoint: transposed view read through its strides");
+    Check(F("s").SequenceEqual([4f, 5, 6]), "checkpoint: view at a storage offset");
+    ck.Dispose();
+    File.Delete(ckptPath);
+}
+
 Console.WriteLine(failures == 0 ? "all checks passed" : $"{failures} FAILED");
 // LIVE Música completa: key, meter and 4-bar form from confirmed chords on the beat count.
 {

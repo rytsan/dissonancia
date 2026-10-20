@@ -2,7 +2,8 @@
 //   1. export:     <root>/venv/bin/python tools/yourmt3/export_onnx.py <root> <dir> <take.wav> 3.0
 //   2. references: <root>/venv/bin/python tools/yourmt3/dz_yourmt3.py <root> <take.wav> <dir>/ref_notes.json
 //                  CUDA_VISIBLE_DEVICES= ... dz_yourmt3.py ... <dir>/ref_cpu.json   (fp32, the exact reference)
-//   3. install:    copy encoder/decoder_first/decoder_next.onnx + meta.json to YourMt3.Dir
+//   3. install:    copy encoder/decoder_first/decoder_next.onnx + meta.json + recipe.json to app/models/yourmt3,
+//                  then let the app build the weights (SYSTEM on START, or YourMt3.Build)
 //   4. check:      dotnet run --project tools/yourmt3/check-native -- <dir> <take.wav>
 // Expect: spectrogram within ~0.003, every token equal, every note equal (2026-10-19: 32/32).
 using System.Text.Json;

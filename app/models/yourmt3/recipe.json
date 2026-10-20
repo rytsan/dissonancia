@@ -1,0 +1,3169 @@
+{
+ "checkpoint": {
+  "url": "https://huggingface.co/spaces/mimbres/YourMT3/resolve/5e66c1ea173a8186e0d20432b841d3180cc015b5/amt/logs/2024/mc13_256_g4_all_v7_mt3f_sqr_rms_moe_wf4_n8k2_silu_rope_rp_b36_nops/checkpoints/last.ckpt",
+  "size": 561544628,
+  "sha256": "ae38e415c79efd5592dcb9b658cdb99ddb11d4c4e1eaa364cab04a052473fc25"
+ },
+ "weights": {
+  "file": "yourmt3.weights",
+  "size": 188901376,
+  "sha256": "ec9394bbe6f0d96b8954458b1f99280b317a2fde5bffa69a1b9f430f17324ff0"
+ },
+ "tensors": [
+  {
+   "key": "pre_encoder.0.blocks.0.bn1.weight",
+   "offset": 0,
+   "bytes": 512
+  },
+  {
+   "key": "pre_encoder.0.blocks.0.bn1.bias",
+   "offset": 4096,
+   "bytes": 512
+  },
+  {
+   "key": "pre_encoder.0.blocks.0.bn1.running_mean",
+   "offset": 8192,
+   "bytes": 512
+  },
+  {
+   "key": "pre_encoder.0.blocks.0.bn1.running_var",
+   "offset": 12288,
+   "bytes": 512
+  },
+  {
+   "key": "pre_encoder.0.blocks.0.bn2.weight",
+   "offset": 16384,
+   "bytes": 512
+  },
+  {
+   "key": "pre_encoder.0.blocks.0.bn2.bias",
+   "offset": 20480,
+   "bytes": 512
+  },
+  {
+   "key": "pre_encoder.0.blocks.0.bn2.running_mean",
+   "offset": 24576,
+   "bytes": 512
+  },
+  {
+   "key": "pre_encoder.0.blocks.0.bn2.running_var",
+   "offset": 28672,
+   "bytes": 512
+  },
+  {
+   "key": "pre_encoder.0.blocks.0.conv1.weight",
+   "offset": 32768,
+   "bytes": 4608
+  },
+  {
+   "key": "pre_encoder.0.blocks.0.conv2.weight",
+   "offset": 40960,
+   "bytes": 589824
+  },
+  {
+   "key": "pre_encoder.0.blocks.0.shortcut.weight",
+   "offset": 630784,
+   "bytes": 512
+  },
+  {
+   "key": "pre_encoder.0.blocks.0.shortcut.bias",
+   "offset": 634880,
+   "bytes": 512
+  },
+  {
+   "key": "pre_encoder.0.blocks.1.bn1.weight",
+   "offset": 638976,
+   "bytes": 512
+  },
+  {
+   "key": "pre_encoder.0.blocks.1.bn1.bias",
+   "offset": 643072,
+   "bytes": 512
+  },
+  {
+   "key": "pre_encoder.0.blocks.1.bn1.running_mean",
+   "offset": 647168,
+   "bytes": 512
+  },
+  {
+   "key": "pre_encoder.0.blocks.1.bn1.running_var",
+   "offset": 651264,
+   "bytes": 512
+  },
+  {
+   "key": "pre_encoder.0.blocks.1.bn2.weight",
+   "offset": 655360,
+   "bytes": 512
+  },
+  {
+   "key": "pre_encoder.0.blocks.1.bn2.bias",
+   "offset": 659456,
+   "bytes": 512
+  },
+  {
+   "key": "pre_encoder.0.blocks.1.bn2.running_mean",
+   "offset": 663552,
+   "bytes": 512
+  },
+  {
+   "key": "pre_encoder.0.blocks.1.bn2.running_var",
+   "offset": 667648,
+   "bytes": 512
+  },
+  {
+   "key": "pre_encoder.0.blocks.1.conv1.weight",
+   "offset": 671744,
+   "bytes": 589824
+  },
+  {
+   "key": "pre_encoder.0.blocks.1.conv2.weight",
+   "offset": 1261568,
+   "bytes": 589824
+  },
+  {
+   "key": "pre_encoder.0.blocks.2.bn1.weight",
+   "offset": 1851392,
+   "bytes": 512
+  },
+  {
+   "key": "pre_encoder.0.blocks.2.bn1.bias",
+   "offset": 1855488,
+   "bytes": 512
+  },
+  {
+   "key": "pre_encoder.0.blocks.2.bn1.running_mean",
+   "offset": 1859584,
+   "bytes": 512
+  },
+  {
+   "key": "pre_encoder.0.blocks.2.bn1.running_var",
+   "offset": 1863680,
+   "bytes": 512
+  },
+  {
+   "key": "pre_encoder.0.blocks.2.bn2.weight",
+   "offset": 1867776,
+   "bytes": 512
+  },
+  {
+   "key": "pre_encoder.0.blocks.2.bn2.bias",
+   "offset": 1871872,
+   "bytes": 512
+  },
+  {
+   "key": "pre_encoder.0.blocks.2.bn2.running_mean",
+   "offset": 1875968,
+   "bytes": 512
+  },
+  {
+   "key": "pre_encoder.0.blocks.2.bn2.running_var",
+   "offset": 1880064,
+   "bytes": 512
+  },
+  {
+   "key": "pre_encoder.0.blocks.2.conv1.weight",
+   "offset": 1884160,
+   "bytes": 589824
+  },
+  {
+   "key": "pre_encoder.0.blocks.2.conv2.weight",
+   "offset": 2473984,
+   "bytes": 589824
+  },
+  {
+   "key": "pre_decoder.0.linear.weight",
+   "offset": 3063808,
+   "bytes": 524288
+  },
+  {
+   "key": "encoder.latent_array.latents",
+   "offset": 3588096,
+   "bytes": 13312
+  },
+  {
+   "key": "encoder.rotary_emb_sca.freqs",
+   "offset": 3604480,
+   "bytes": 8
+  },
+  {
+   "key": "encoder.blocks.0.spectral_cross_attention.self.layernorm1.weight",
+   "offset": 3608576,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.spectral_cross_attention.self.layernorm1.bias",
+   "offset": 3612672,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.spectral_cross_attention.self.layernorm2.weight",
+   "offset": 3616768,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.spectral_cross_attention.self.layernorm2.bias",
+   "offset": 3620864,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.spectral_cross_attention.self.query.weight",
+   "offset": 3624960,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.0.spectral_cross_attention.self.query.bias",
+   "offset": 3690496,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.spectral_cross_attention.self.key.weight",
+   "offset": 3694592,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.0.spectral_cross_attention.self.key.bias",
+   "offset": 3760128,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.spectral_cross_attention.self.value.weight",
+   "offset": 3764224,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.0.spectral_cross_attention.self.value.bias",
+   "offset": 3829760,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.spectral_cross_attention.output.dense.weight",
+   "offset": 3833856,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.0.spectral_cross_attention.output.dense.bias",
+   "offset": 3899392,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.attention.self.layernorm1.weight",
+   "offset": 3903488,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.attention.self.layernorm1.bias",
+   "offset": 3907584,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.attention.self.query.weight",
+   "offset": 3911680,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.attention.self.query.bias",
+   "offset": 3977216,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.attention.self.key.weight",
+   "offset": 3981312,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.attention.self.key.bias",
+   "offset": 4046848,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.attention.self.value.weight",
+   "offset": 4050944,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.attention.self.value.bias",
+   "offset": 4116480,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.attention.output.dense.weight",
+   "offset": 4120576,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.attention.output.dense.bias",
+   "offset": 4186112,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.layernorm.weight",
+   "offset": 4190208,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.layernorm.bias",
+   "offset": 4194304,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.mlp.gate.weight",
+   "offset": 4198400,
+   "bytes": 4096
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.mlp.experts.0.w1.weight",
+   "offset": 4202496,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.mlp.experts.0.w2.weight",
+   "offset": 4464640,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.mlp.experts.0.gate.weight",
+   "offset": 4726784,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.mlp.experts.1.w1.weight",
+   "offset": 4988928,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.mlp.experts.1.w2.weight",
+   "offset": 5251072,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.mlp.experts.1.gate.weight",
+   "offset": 5513216,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.mlp.experts.2.w1.weight",
+   "offset": 5775360,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.mlp.experts.2.w2.weight",
+   "offset": 6037504,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.mlp.experts.2.gate.weight",
+   "offset": 6299648,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.mlp.experts.3.w1.weight",
+   "offset": 6561792,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.mlp.experts.3.w2.weight",
+   "offset": 6823936,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.mlp.experts.3.gate.weight",
+   "offset": 7086080,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.mlp.experts.4.w1.weight",
+   "offset": 7348224,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.mlp.experts.4.w2.weight",
+   "offset": 7610368,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.mlp.experts.4.gate.weight",
+   "offset": 7872512,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.mlp.experts.5.w1.weight",
+   "offset": 8134656,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.mlp.experts.5.w2.weight",
+   "offset": 8396800,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.mlp.experts.5.gate.weight",
+   "offset": 8658944,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.mlp.experts.6.w1.weight",
+   "offset": 8921088,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.mlp.experts.6.w2.weight",
+   "offset": 9183232,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.mlp.experts.6.gate.weight",
+   "offset": 9445376,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.mlp.experts.7.w1.weight",
+   "offset": 9707520,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.mlp.experts.7.w2.weight",
+   "offset": 9969664,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.0.mlp.experts.7.gate.weight",
+   "offset": 10231808,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.attention.self.layernorm1.weight",
+   "offset": 10493952,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.attention.self.layernorm1.bias",
+   "offset": 10498048,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.attention.self.query.weight",
+   "offset": 10502144,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.attention.self.query.bias",
+   "offset": 10567680,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.attention.self.key.weight",
+   "offset": 10571776,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.attention.self.key.bias",
+   "offset": 10637312,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.attention.self.value.weight",
+   "offset": 10641408,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.attention.self.value.bias",
+   "offset": 10706944,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.attention.output.dense.weight",
+   "offset": 10711040,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.attention.output.dense.bias",
+   "offset": 10776576,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.layernorm.weight",
+   "offset": 10780672,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.layernorm.bias",
+   "offset": 10784768,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.mlp.gate.weight",
+   "offset": 10788864,
+   "bytes": 4096
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.mlp.experts.0.w1.weight",
+   "offset": 10792960,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.mlp.experts.0.w2.weight",
+   "offset": 11055104,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.mlp.experts.0.gate.weight",
+   "offset": 11317248,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.mlp.experts.1.w1.weight",
+   "offset": 11579392,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.mlp.experts.1.w2.weight",
+   "offset": 11841536,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.mlp.experts.1.gate.weight",
+   "offset": 12103680,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.mlp.experts.2.w1.weight",
+   "offset": 12365824,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.mlp.experts.2.w2.weight",
+   "offset": 12627968,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.mlp.experts.2.gate.weight",
+   "offset": 12890112,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.mlp.experts.3.w1.weight",
+   "offset": 13152256,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.mlp.experts.3.w2.weight",
+   "offset": 13414400,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.mlp.experts.3.gate.weight",
+   "offset": 13676544,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.mlp.experts.4.w1.weight",
+   "offset": 13938688,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.mlp.experts.4.w2.weight",
+   "offset": 14200832,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.mlp.experts.4.gate.weight",
+   "offset": 14462976,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.mlp.experts.5.w1.weight",
+   "offset": 14725120,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.mlp.experts.5.w2.weight",
+   "offset": 14987264,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.mlp.experts.5.gate.weight",
+   "offset": 15249408,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.mlp.experts.6.w1.weight",
+   "offset": 15511552,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.mlp.experts.6.w2.weight",
+   "offset": 15773696,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.mlp.experts.6.gate.weight",
+   "offset": 16035840,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.mlp.experts.7.w1.weight",
+   "offset": 16297984,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.mlp.experts.7.w2.weight",
+   "offset": 16560128,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.local_transformer.1.mlp.experts.7.gate.weight",
+   "offset": 16822272,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.attention.self.layernorm1.weight",
+   "offset": 17084416,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.attention.self.layernorm1.bias",
+   "offset": 17088512,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.attention.self.query.weight",
+   "offset": 17092608,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.attention.self.query.bias",
+   "offset": 17158144,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.attention.self.key.weight",
+   "offset": 17162240,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.attention.self.key.bias",
+   "offset": 17227776,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.attention.self.value.weight",
+   "offset": 17231872,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.attention.self.value.bias",
+   "offset": 17297408,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.attention.output.dense.weight",
+   "offset": 17301504,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.attention.output.dense.bias",
+   "offset": 17367040,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.layernorm.weight",
+   "offset": 17371136,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.layernorm.bias",
+   "offset": 17375232,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.mlp.gate.weight",
+   "offset": 17379328,
+   "bytes": 4096
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.mlp.experts.0.w1.weight",
+   "offset": 17383424,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.mlp.experts.0.w2.weight",
+   "offset": 17645568,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.mlp.experts.0.gate.weight",
+   "offset": 17907712,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.mlp.experts.1.w1.weight",
+   "offset": 18169856,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.mlp.experts.1.w2.weight",
+   "offset": 18432000,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.mlp.experts.1.gate.weight",
+   "offset": 18694144,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.mlp.experts.2.w1.weight",
+   "offset": 18956288,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.mlp.experts.2.w2.weight",
+   "offset": 19218432,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.mlp.experts.2.gate.weight",
+   "offset": 19480576,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.mlp.experts.3.w1.weight",
+   "offset": 19742720,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.mlp.experts.3.w2.weight",
+   "offset": 20004864,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.mlp.experts.3.gate.weight",
+   "offset": 20267008,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.mlp.experts.4.w1.weight",
+   "offset": 20529152,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.mlp.experts.4.w2.weight",
+   "offset": 20791296,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.mlp.experts.4.gate.weight",
+   "offset": 21053440,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.mlp.experts.5.w1.weight",
+   "offset": 21315584,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.mlp.experts.5.w2.weight",
+   "offset": 21577728,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.mlp.experts.5.gate.weight",
+   "offset": 21839872,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.mlp.experts.6.w1.weight",
+   "offset": 22102016,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.mlp.experts.6.w2.weight",
+   "offset": 22364160,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.mlp.experts.6.gate.weight",
+   "offset": 22626304,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.mlp.experts.7.w1.weight",
+   "offset": 22888448,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.mlp.experts.7.w2.weight",
+   "offset": 23150592,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.0.mlp.experts.7.gate.weight",
+   "offset": 23412736,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.attention.self.layernorm1.weight",
+   "offset": 23674880,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.attention.self.layernorm1.bias",
+   "offset": 23678976,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.attention.self.query.weight",
+   "offset": 23683072,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.attention.self.query.bias",
+   "offset": 23748608,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.attention.self.key.weight",
+   "offset": 23752704,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.attention.self.key.bias",
+   "offset": 23818240,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.attention.self.value.weight",
+   "offset": 23822336,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.attention.self.value.bias",
+   "offset": 23887872,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.attention.output.dense.weight",
+   "offset": 23891968,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.attention.output.dense.bias",
+   "offset": 23957504,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.layernorm.weight",
+   "offset": 23961600,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.layernorm.bias",
+   "offset": 23965696,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.mlp.gate.weight",
+   "offset": 23969792,
+   "bytes": 4096
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.mlp.experts.0.w1.weight",
+   "offset": 23973888,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.mlp.experts.0.w2.weight",
+   "offset": 24236032,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.mlp.experts.0.gate.weight",
+   "offset": 24498176,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.mlp.experts.1.w1.weight",
+   "offset": 24760320,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.mlp.experts.1.w2.weight",
+   "offset": 25022464,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.mlp.experts.1.gate.weight",
+   "offset": 25284608,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.mlp.experts.2.w1.weight",
+   "offset": 25546752,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.mlp.experts.2.w2.weight",
+   "offset": 25808896,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.mlp.experts.2.gate.weight",
+   "offset": 26071040,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.mlp.experts.3.w1.weight",
+   "offset": 26333184,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.mlp.experts.3.w2.weight",
+   "offset": 26595328,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.mlp.experts.3.gate.weight",
+   "offset": 26857472,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.mlp.experts.4.w1.weight",
+   "offset": 27119616,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.mlp.experts.4.w2.weight",
+   "offset": 27381760,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.mlp.experts.4.gate.weight",
+   "offset": 27643904,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.mlp.experts.5.w1.weight",
+   "offset": 27906048,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.mlp.experts.5.w2.weight",
+   "offset": 28168192,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.mlp.experts.5.gate.weight",
+   "offset": 28430336,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.mlp.experts.6.w1.weight",
+   "offset": 28692480,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.mlp.experts.6.w2.weight",
+   "offset": 28954624,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.mlp.experts.6.gate.weight",
+   "offset": 29216768,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.mlp.experts.7.w1.weight",
+   "offset": 29478912,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.mlp.experts.7.w2.weight",
+   "offset": 29741056,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.0.temporal_transformer.1.mlp.experts.7.gate.weight",
+   "offset": 30003200,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.spectral_cross_attention.self.layernorm1.weight",
+   "offset": 30265344,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.spectral_cross_attention.self.layernorm1.bias",
+   "offset": 30269440,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.spectral_cross_attention.self.layernorm2.weight",
+   "offset": 30273536,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.spectral_cross_attention.self.layernorm2.bias",
+   "offset": 30277632,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.spectral_cross_attention.self.query.weight",
+   "offset": 30281728,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.1.spectral_cross_attention.self.query.bias",
+   "offset": 30347264,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.spectral_cross_attention.self.key.weight",
+   "offset": 30351360,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.1.spectral_cross_attention.self.key.bias",
+   "offset": 30416896,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.spectral_cross_attention.self.value.weight",
+   "offset": 30420992,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.1.spectral_cross_attention.self.value.bias",
+   "offset": 30486528,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.spectral_cross_attention.output.dense.weight",
+   "offset": 30490624,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.1.spectral_cross_attention.output.dense.bias",
+   "offset": 30556160,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.attention.self.layernorm1.weight",
+   "offset": 30560256,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.attention.self.layernorm1.bias",
+   "offset": 30564352,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.attention.self.query.weight",
+   "offset": 30568448,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.attention.self.query.bias",
+   "offset": 30633984,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.attention.self.key.weight",
+   "offset": 30638080,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.attention.self.key.bias",
+   "offset": 30703616,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.attention.self.value.weight",
+   "offset": 30707712,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.attention.self.value.bias",
+   "offset": 30773248,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.attention.output.dense.weight",
+   "offset": 30777344,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.attention.output.dense.bias",
+   "offset": 30842880,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.layernorm.weight",
+   "offset": 30846976,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.layernorm.bias",
+   "offset": 30851072,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.mlp.gate.weight",
+   "offset": 30855168,
+   "bytes": 4096
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.mlp.experts.0.w1.weight",
+   "offset": 30859264,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.mlp.experts.0.w2.weight",
+   "offset": 31121408,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.mlp.experts.0.gate.weight",
+   "offset": 31383552,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.mlp.experts.1.w1.weight",
+   "offset": 31645696,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.mlp.experts.1.w2.weight",
+   "offset": 31907840,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.mlp.experts.1.gate.weight",
+   "offset": 32169984,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.mlp.experts.2.w1.weight",
+   "offset": 32432128,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.mlp.experts.2.w2.weight",
+   "offset": 32694272,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.mlp.experts.2.gate.weight",
+   "offset": 32956416,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.mlp.experts.3.w1.weight",
+   "offset": 33218560,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.mlp.experts.3.w2.weight",
+   "offset": 33480704,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.mlp.experts.3.gate.weight",
+   "offset": 33742848,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.mlp.experts.4.w1.weight",
+   "offset": 34004992,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.mlp.experts.4.w2.weight",
+   "offset": 34267136,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.mlp.experts.4.gate.weight",
+   "offset": 34529280,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.mlp.experts.5.w1.weight",
+   "offset": 34791424,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.mlp.experts.5.w2.weight",
+   "offset": 35053568,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.mlp.experts.5.gate.weight",
+   "offset": 35315712,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.mlp.experts.6.w1.weight",
+   "offset": 35577856,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.mlp.experts.6.w2.weight",
+   "offset": 35840000,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.mlp.experts.6.gate.weight",
+   "offset": 36102144,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.mlp.experts.7.w1.weight",
+   "offset": 36364288,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.mlp.experts.7.w2.weight",
+   "offset": 36626432,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.0.mlp.experts.7.gate.weight",
+   "offset": 36888576,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.attention.self.layernorm1.weight",
+   "offset": 37150720,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.attention.self.layernorm1.bias",
+   "offset": 37154816,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.attention.self.query.weight",
+   "offset": 37158912,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.attention.self.query.bias",
+   "offset": 37224448,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.attention.self.key.weight",
+   "offset": 37228544,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.attention.self.key.bias",
+   "offset": 37294080,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.attention.self.value.weight",
+   "offset": 37298176,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.attention.self.value.bias",
+   "offset": 37363712,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.attention.output.dense.weight",
+   "offset": 37367808,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.attention.output.dense.bias",
+   "offset": 37433344,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.layernorm.weight",
+   "offset": 37437440,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.layernorm.bias",
+   "offset": 37441536,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.mlp.gate.weight",
+   "offset": 37445632,
+   "bytes": 4096
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.mlp.experts.0.w1.weight",
+   "offset": 37449728,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.mlp.experts.0.w2.weight",
+   "offset": 37711872,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.mlp.experts.0.gate.weight",
+   "offset": 37974016,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.mlp.experts.1.w1.weight",
+   "offset": 38236160,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.mlp.experts.1.w2.weight",
+   "offset": 38498304,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.mlp.experts.1.gate.weight",
+   "offset": 38760448,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.mlp.experts.2.w1.weight",
+   "offset": 39022592,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.mlp.experts.2.w2.weight",
+   "offset": 39284736,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.mlp.experts.2.gate.weight",
+   "offset": 39546880,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.mlp.experts.3.w1.weight",
+   "offset": 39809024,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.mlp.experts.3.w2.weight",
+   "offset": 40071168,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.mlp.experts.3.gate.weight",
+   "offset": 40333312,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.mlp.experts.4.w1.weight",
+   "offset": 40595456,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.mlp.experts.4.w2.weight",
+   "offset": 40857600,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.mlp.experts.4.gate.weight",
+   "offset": 41119744,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.mlp.experts.5.w1.weight",
+   "offset": 41381888,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.mlp.experts.5.w2.weight",
+   "offset": 41644032,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.mlp.experts.5.gate.weight",
+   "offset": 41906176,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.mlp.experts.6.w1.weight",
+   "offset": 42168320,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.mlp.experts.6.w2.weight",
+   "offset": 42430464,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.mlp.experts.6.gate.weight",
+   "offset": 42692608,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.mlp.experts.7.w1.weight",
+   "offset": 42954752,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.mlp.experts.7.w2.weight",
+   "offset": 43216896,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.local_transformer.1.mlp.experts.7.gate.weight",
+   "offset": 43479040,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.attention.self.layernorm1.weight",
+   "offset": 43741184,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.attention.self.layernorm1.bias",
+   "offset": 43745280,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.attention.self.query.weight",
+   "offset": 43749376,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.attention.self.query.bias",
+   "offset": 43814912,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.attention.self.key.weight",
+   "offset": 43819008,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.attention.self.key.bias",
+   "offset": 43884544,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.attention.self.value.weight",
+   "offset": 43888640,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.attention.self.value.bias",
+   "offset": 43954176,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.attention.output.dense.weight",
+   "offset": 43958272,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.attention.output.dense.bias",
+   "offset": 44023808,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.layernorm.weight",
+   "offset": 44027904,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.layernorm.bias",
+   "offset": 44032000,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.mlp.gate.weight",
+   "offset": 44036096,
+   "bytes": 4096
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.mlp.experts.0.w1.weight",
+   "offset": 44040192,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.mlp.experts.0.w2.weight",
+   "offset": 44302336,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.mlp.experts.0.gate.weight",
+   "offset": 44564480,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.mlp.experts.1.w1.weight",
+   "offset": 44826624,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.mlp.experts.1.w2.weight",
+   "offset": 45088768,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.mlp.experts.1.gate.weight",
+   "offset": 45350912,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.mlp.experts.2.w1.weight",
+   "offset": 45613056,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.mlp.experts.2.w2.weight",
+   "offset": 45875200,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.mlp.experts.2.gate.weight",
+   "offset": 46137344,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.mlp.experts.3.w1.weight",
+   "offset": 46399488,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.mlp.experts.3.w2.weight",
+   "offset": 46661632,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.mlp.experts.3.gate.weight",
+   "offset": 46923776,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.mlp.experts.4.w1.weight",
+   "offset": 47185920,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.mlp.experts.4.w2.weight",
+   "offset": 47448064,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.mlp.experts.4.gate.weight",
+   "offset": 47710208,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.mlp.experts.5.w1.weight",
+   "offset": 47972352,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.mlp.experts.5.w2.weight",
+   "offset": 48234496,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.mlp.experts.5.gate.weight",
+   "offset": 48496640,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.mlp.experts.6.w1.weight",
+   "offset": 48758784,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.mlp.experts.6.w2.weight",
+   "offset": 49020928,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.mlp.experts.6.gate.weight",
+   "offset": 49283072,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.mlp.experts.7.w1.weight",
+   "offset": 49545216,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.mlp.experts.7.w2.weight",
+   "offset": 49807360,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.0.mlp.experts.7.gate.weight",
+   "offset": 50069504,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.attention.self.layernorm1.weight",
+   "offset": 50331648,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.attention.self.layernorm1.bias",
+   "offset": 50335744,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.attention.self.query.weight",
+   "offset": 50339840,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.attention.self.query.bias",
+   "offset": 50405376,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.attention.self.key.weight",
+   "offset": 50409472,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.attention.self.key.bias",
+   "offset": 50475008,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.attention.self.value.weight",
+   "offset": 50479104,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.attention.self.value.bias",
+   "offset": 50544640,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.attention.output.dense.weight",
+   "offset": 50548736,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.attention.output.dense.bias",
+   "offset": 50614272,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.layernorm.weight",
+   "offset": 50618368,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.layernorm.bias",
+   "offset": 50622464,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.mlp.gate.weight",
+   "offset": 50626560,
+   "bytes": 4096
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.mlp.experts.0.w1.weight",
+   "offset": 50630656,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.mlp.experts.0.w2.weight",
+   "offset": 50892800,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.mlp.experts.0.gate.weight",
+   "offset": 51154944,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.mlp.experts.1.w1.weight",
+   "offset": 51417088,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.mlp.experts.1.w2.weight",
+   "offset": 51679232,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.mlp.experts.1.gate.weight",
+   "offset": 51941376,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.mlp.experts.2.w1.weight",
+   "offset": 52203520,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.mlp.experts.2.w2.weight",
+   "offset": 52465664,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.mlp.experts.2.gate.weight",
+   "offset": 52727808,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.mlp.experts.3.w1.weight",
+   "offset": 52989952,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.mlp.experts.3.w2.weight",
+   "offset": 53252096,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.mlp.experts.3.gate.weight",
+   "offset": 53514240,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.mlp.experts.4.w1.weight",
+   "offset": 53776384,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.mlp.experts.4.w2.weight",
+   "offset": 54038528,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.mlp.experts.4.gate.weight",
+   "offset": 54300672,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.mlp.experts.5.w1.weight",
+   "offset": 54562816,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.mlp.experts.5.w2.weight",
+   "offset": 54824960,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.mlp.experts.5.gate.weight",
+   "offset": 55087104,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.mlp.experts.6.w1.weight",
+   "offset": 55349248,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.mlp.experts.6.w2.weight",
+   "offset": 55611392,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.mlp.experts.6.gate.weight",
+   "offset": 55873536,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.mlp.experts.7.w1.weight",
+   "offset": 56135680,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.mlp.experts.7.w2.weight",
+   "offset": 56397824,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.1.temporal_transformer.1.mlp.experts.7.gate.weight",
+   "offset": 56659968,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.spectral_cross_attention.self.layernorm1.weight",
+   "offset": 56922112,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.spectral_cross_attention.self.layernorm1.bias",
+   "offset": 56926208,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.spectral_cross_attention.self.layernorm2.weight",
+   "offset": 56930304,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.spectral_cross_attention.self.layernorm2.bias",
+   "offset": 56934400,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.spectral_cross_attention.self.query.weight",
+   "offset": 56938496,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.2.spectral_cross_attention.self.query.bias",
+   "offset": 57004032,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.spectral_cross_attention.self.key.weight",
+   "offset": 57008128,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.2.spectral_cross_attention.self.key.bias",
+   "offset": 57073664,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.spectral_cross_attention.self.value.weight",
+   "offset": 57077760,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.2.spectral_cross_attention.self.value.bias",
+   "offset": 57143296,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.spectral_cross_attention.output.dense.weight",
+   "offset": 57147392,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.2.spectral_cross_attention.output.dense.bias",
+   "offset": 57212928,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.attention.self.layernorm1.weight",
+   "offset": 57217024,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.attention.self.layernorm1.bias",
+   "offset": 57221120,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.attention.self.query.weight",
+   "offset": 57225216,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.attention.self.query.bias",
+   "offset": 57290752,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.attention.self.key.weight",
+   "offset": 57294848,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.attention.self.key.bias",
+   "offset": 57360384,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.attention.self.value.weight",
+   "offset": 57364480,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.attention.self.value.bias",
+   "offset": 57430016,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.attention.output.dense.weight",
+   "offset": 57434112,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.attention.output.dense.bias",
+   "offset": 57499648,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.layernorm.weight",
+   "offset": 57503744,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.layernorm.bias",
+   "offset": 57507840,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.mlp.gate.weight",
+   "offset": 57511936,
+   "bytes": 4096
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.mlp.experts.0.w1.weight",
+   "offset": 57516032,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.mlp.experts.0.w2.weight",
+   "offset": 57778176,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.mlp.experts.0.gate.weight",
+   "offset": 58040320,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.mlp.experts.1.w1.weight",
+   "offset": 58302464,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.mlp.experts.1.w2.weight",
+   "offset": 58564608,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.mlp.experts.1.gate.weight",
+   "offset": 58826752,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.mlp.experts.2.w1.weight",
+   "offset": 59088896,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.mlp.experts.2.w2.weight",
+   "offset": 59351040,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.mlp.experts.2.gate.weight",
+   "offset": 59613184,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.mlp.experts.3.w1.weight",
+   "offset": 59875328,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.mlp.experts.3.w2.weight",
+   "offset": 60137472,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.mlp.experts.3.gate.weight",
+   "offset": 60399616,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.mlp.experts.4.w1.weight",
+   "offset": 60661760,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.mlp.experts.4.w2.weight",
+   "offset": 60923904,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.mlp.experts.4.gate.weight",
+   "offset": 61186048,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.mlp.experts.5.w1.weight",
+   "offset": 61448192,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.mlp.experts.5.w2.weight",
+   "offset": 61710336,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.mlp.experts.5.gate.weight",
+   "offset": 61972480,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.mlp.experts.6.w1.weight",
+   "offset": 62234624,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.mlp.experts.6.w2.weight",
+   "offset": 62496768,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.mlp.experts.6.gate.weight",
+   "offset": 62758912,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.mlp.experts.7.w1.weight",
+   "offset": 63021056,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.mlp.experts.7.w2.weight",
+   "offset": 63283200,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.0.mlp.experts.7.gate.weight",
+   "offset": 63545344,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.attention.self.layernorm1.weight",
+   "offset": 63807488,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.attention.self.layernorm1.bias",
+   "offset": 63811584,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.attention.self.query.weight",
+   "offset": 63815680,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.attention.self.query.bias",
+   "offset": 63881216,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.attention.self.key.weight",
+   "offset": 63885312,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.attention.self.key.bias",
+   "offset": 63950848,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.attention.self.value.weight",
+   "offset": 63954944,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.attention.self.value.bias",
+   "offset": 64020480,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.attention.output.dense.weight",
+   "offset": 64024576,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.attention.output.dense.bias",
+   "offset": 64090112,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.layernorm.weight",
+   "offset": 64094208,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.layernorm.bias",
+   "offset": 64098304,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.mlp.gate.weight",
+   "offset": 64102400,
+   "bytes": 4096
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.mlp.experts.0.w1.weight",
+   "offset": 64106496,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.mlp.experts.0.w2.weight",
+   "offset": 64368640,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.mlp.experts.0.gate.weight",
+   "offset": 64630784,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.mlp.experts.1.w1.weight",
+   "offset": 64892928,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.mlp.experts.1.w2.weight",
+   "offset": 65155072,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.mlp.experts.1.gate.weight",
+   "offset": 65417216,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.mlp.experts.2.w1.weight",
+   "offset": 65679360,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.mlp.experts.2.w2.weight",
+   "offset": 65941504,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.mlp.experts.2.gate.weight",
+   "offset": 66203648,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.mlp.experts.3.w1.weight",
+   "offset": 66465792,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.mlp.experts.3.w2.weight",
+   "offset": 66727936,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.mlp.experts.3.gate.weight",
+   "offset": 66990080,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.mlp.experts.4.w1.weight",
+   "offset": 67252224,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.mlp.experts.4.w2.weight",
+   "offset": 67514368,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.mlp.experts.4.gate.weight",
+   "offset": 67776512,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.mlp.experts.5.w1.weight",
+   "offset": 68038656,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.mlp.experts.5.w2.weight",
+   "offset": 68300800,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.mlp.experts.5.gate.weight",
+   "offset": 68562944,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.mlp.experts.6.w1.weight",
+   "offset": 68825088,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.mlp.experts.6.w2.weight",
+   "offset": 69087232,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.mlp.experts.6.gate.weight",
+   "offset": 69349376,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.mlp.experts.7.w1.weight",
+   "offset": 69611520,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.mlp.experts.7.w2.weight",
+   "offset": 69873664,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.local_transformer.1.mlp.experts.7.gate.weight",
+   "offset": 70135808,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.attention.self.layernorm1.weight",
+   "offset": 70397952,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.attention.self.layernorm1.bias",
+   "offset": 70402048,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.attention.self.query.weight",
+   "offset": 70406144,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.attention.self.query.bias",
+   "offset": 70471680,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.attention.self.key.weight",
+   "offset": 70475776,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.attention.self.key.bias",
+   "offset": 70541312,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.attention.self.value.weight",
+   "offset": 70545408,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.attention.self.value.bias",
+   "offset": 70610944,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.attention.output.dense.weight",
+   "offset": 70615040,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.attention.output.dense.bias",
+   "offset": 70680576,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.layernorm.weight",
+   "offset": 70684672,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.layernorm.bias",
+   "offset": 70688768,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.mlp.gate.weight",
+   "offset": 70692864,
+   "bytes": 4096
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.mlp.experts.0.w1.weight",
+   "offset": 70696960,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.mlp.experts.0.w2.weight",
+   "offset": 70959104,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.mlp.experts.0.gate.weight",
+   "offset": 71221248,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.mlp.experts.1.w1.weight",
+   "offset": 71483392,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.mlp.experts.1.w2.weight",
+   "offset": 71745536,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.mlp.experts.1.gate.weight",
+   "offset": 72007680,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.mlp.experts.2.w1.weight",
+   "offset": 72269824,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.mlp.experts.2.w2.weight",
+   "offset": 72531968,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.mlp.experts.2.gate.weight",
+   "offset": 72794112,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.mlp.experts.3.w1.weight",
+   "offset": 73056256,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.mlp.experts.3.w2.weight",
+   "offset": 73318400,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.mlp.experts.3.gate.weight",
+   "offset": 73580544,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.mlp.experts.4.w1.weight",
+   "offset": 73842688,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.mlp.experts.4.w2.weight",
+   "offset": 74104832,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.mlp.experts.4.gate.weight",
+   "offset": 74366976,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.mlp.experts.5.w1.weight",
+   "offset": 74629120,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.mlp.experts.5.w2.weight",
+   "offset": 74891264,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.mlp.experts.5.gate.weight",
+   "offset": 75153408,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.mlp.experts.6.w1.weight",
+   "offset": 75415552,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.mlp.experts.6.w2.weight",
+   "offset": 75677696,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.mlp.experts.6.gate.weight",
+   "offset": 75939840,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.mlp.experts.7.w1.weight",
+   "offset": 76201984,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.mlp.experts.7.w2.weight",
+   "offset": 76464128,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.0.mlp.experts.7.gate.weight",
+   "offset": 76726272,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.attention.self.layernorm1.weight",
+   "offset": 76988416,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.attention.self.layernorm1.bias",
+   "offset": 76992512,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.attention.self.query.weight",
+   "offset": 76996608,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.attention.self.query.bias",
+   "offset": 77062144,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.attention.self.key.weight",
+   "offset": 77066240,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.attention.self.key.bias",
+   "offset": 77131776,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.attention.self.value.weight",
+   "offset": 77135872,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.attention.self.value.bias",
+   "offset": 77201408,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.attention.output.dense.weight",
+   "offset": 77205504,
+   "bytes": 65536
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.attention.output.dense.bias",
+   "offset": 77271040,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.layernorm.weight",
+   "offset": 77275136,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.layernorm.bias",
+   "offset": 77279232,
+   "bytes": 512
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.mlp.gate.weight",
+   "offset": 77283328,
+   "bytes": 4096
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.mlp.experts.0.w1.weight",
+   "offset": 77287424,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.mlp.experts.0.w2.weight",
+   "offset": 77549568,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.mlp.experts.0.gate.weight",
+   "offset": 77811712,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.mlp.experts.1.w1.weight",
+   "offset": 78073856,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.mlp.experts.1.w2.weight",
+   "offset": 78336000,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.mlp.experts.1.gate.weight",
+   "offset": 78598144,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.mlp.experts.2.w1.weight",
+   "offset": 78860288,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.mlp.experts.2.w2.weight",
+   "offset": 79122432,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.mlp.experts.2.gate.weight",
+   "offset": 79384576,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.mlp.experts.3.w1.weight",
+   "offset": 79646720,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.mlp.experts.3.w2.weight",
+   "offset": 79908864,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.mlp.experts.3.gate.weight",
+   "offset": 80171008,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.mlp.experts.4.w1.weight",
+   "offset": 80433152,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.mlp.experts.4.w2.weight",
+   "offset": 80695296,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.mlp.experts.4.gate.weight",
+   "offset": 80957440,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.mlp.experts.5.w1.weight",
+   "offset": 81219584,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.mlp.experts.5.w2.weight",
+   "offset": 81481728,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.mlp.experts.5.gate.weight",
+   "offset": 81743872,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.mlp.experts.6.w1.weight",
+   "offset": 82006016,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.mlp.experts.6.w2.weight",
+   "offset": 82268160,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.mlp.experts.6.gate.weight",
+   "offset": 82530304,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.mlp.experts.7.w1.weight",
+   "offset": 82792448,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.mlp.experts.7.w2.weight",
+   "offset": 83054592,
+   "bytes": 262144
+  },
+  {
+   "key": "encoder.blocks.2.temporal_transformer.1.mlp.experts.7.gate.weight",
+   "offset": 83316736,
+   "bytes": 262144
+  },
+  {
+   "key": "lm_head.lm_head.weight",
+   "offset": 83578880,
+   "bytes": 1220608
+  },
+  {
+   "key": "embed_tokens.weight",
+   "offset": 84799488,
+   "bytes": 1220608
+  },
+  {
+   "key": "decoder.decoder.additive_pe.weight",
+   "offset": 86020096,
+   "bytes": 2117632
+  },
+  {
+   "key": "decoder.decoder.block.0.layer.0.SelfAttention.q.weight",
+   "offset": 88137728,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.0.layer.0.SelfAttention.k.weight",
+   "offset": 88924160,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.0.layer.0.SelfAttention.v.weight",
+   "offset": 89710592,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.0.layer.0.SelfAttention.o.weight",
+   "offset": 90497024,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.0.layer.0.layer_norm.weight",
+   "offset": 91283456,
+   "bytes": 2048
+  },
+  {
+   "key": "decoder.decoder.block.0.layer.1.EncDecAttention.q.weight",
+   "offset": 91287552,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.0.layer.1.EncDecAttention.k.weight",
+   "offset": 92073984,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.0.layer.1.EncDecAttention.v.weight",
+   "offset": 92860416,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.0.layer.1.EncDecAttention.o.weight",
+   "offset": 93646848,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.0.layer.1.layer_norm.weight",
+   "offset": 94433280,
+   "bytes": 2048
+  },
+  {
+   "key": "decoder.decoder.block.0.layer.2.DenseReluDense.wi_0.weight",
+   "offset": 94437376,
+   "bytes": 2097152
+  },
+  {
+   "key": "decoder.decoder.block.0.layer.2.DenseReluDense.wi_1.weight",
+   "offset": 96534528,
+   "bytes": 2097152
+  },
+  {
+   "key": "decoder.decoder.block.0.layer.2.DenseReluDense.wo.weight",
+   "offset": 98631680,
+   "bytes": 2097152
+  },
+  {
+   "key": "decoder.decoder.block.0.layer.2.layer_norm.weight",
+   "offset": 100728832,
+   "bytes": 2048
+  },
+  {
+   "key": "decoder.decoder.block.1.layer.0.SelfAttention.q.weight",
+   "offset": 100732928,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.1.layer.0.SelfAttention.k.weight",
+   "offset": 101519360,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.1.layer.0.SelfAttention.v.weight",
+   "offset": 102305792,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.1.layer.0.SelfAttention.o.weight",
+   "offset": 103092224,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.1.layer.0.layer_norm.weight",
+   "offset": 103878656,
+   "bytes": 2048
+  },
+  {
+   "key": "decoder.decoder.block.1.layer.1.EncDecAttention.q.weight",
+   "offset": 103882752,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.1.layer.1.EncDecAttention.k.weight",
+   "offset": 104669184,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.1.layer.1.EncDecAttention.v.weight",
+   "offset": 105455616,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.1.layer.1.EncDecAttention.o.weight",
+   "offset": 106242048,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.1.layer.1.layer_norm.weight",
+   "offset": 107028480,
+   "bytes": 2048
+  },
+  {
+   "key": "decoder.decoder.block.1.layer.2.DenseReluDense.wi_0.weight",
+   "offset": 107032576,
+   "bytes": 2097152
+  },
+  {
+   "key": "decoder.decoder.block.1.layer.2.DenseReluDense.wi_1.weight",
+   "offset": 109129728,
+   "bytes": 2097152
+  },
+  {
+   "key": "decoder.decoder.block.1.layer.2.DenseReluDense.wo.weight",
+   "offset": 111226880,
+   "bytes": 2097152
+  },
+  {
+   "key": "decoder.decoder.block.1.layer.2.layer_norm.weight",
+   "offset": 113324032,
+   "bytes": 2048
+  },
+  {
+   "key": "decoder.decoder.block.2.layer.0.SelfAttention.q.weight",
+   "offset": 113328128,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.2.layer.0.SelfAttention.k.weight",
+   "offset": 114114560,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.2.layer.0.SelfAttention.v.weight",
+   "offset": 114900992,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.2.layer.0.SelfAttention.o.weight",
+   "offset": 115687424,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.2.layer.0.layer_norm.weight",
+   "offset": 116473856,
+   "bytes": 2048
+  },
+  {
+   "key": "decoder.decoder.block.2.layer.1.EncDecAttention.q.weight",
+   "offset": 116477952,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.2.layer.1.EncDecAttention.k.weight",
+   "offset": 117264384,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.2.layer.1.EncDecAttention.v.weight",
+   "offset": 118050816,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.2.layer.1.EncDecAttention.o.weight",
+   "offset": 118837248,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.2.layer.1.layer_norm.weight",
+   "offset": 119623680,
+   "bytes": 2048
+  },
+  {
+   "key": "decoder.decoder.block.2.layer.2.DenseReluDense.wi_0.weight",
+   "offset": 119627776,
+   "bytes": 2097152
+  },
+  {
+   "key": "decoder.decoder.block.2.layer.2.DenseReluDense.wi_1.weight",
+   "offset": 121724928,
+   "bytes": 2097152
+  },
+  {
+   "key": "decoder.decoder.block.2.layer.2.DenseReluDense.wo.weight",
+   "offset": 123822080,
+   "bytes": 2097152
+  },
+  {
+   "key": "decoder.decoder.block.2.layer.2.layer_norm.weight",
+   "offset": 125919232,
+   "bytes": 2048
+  },
+  {
+   "key": "decoder.decoder.block.3.layer.0.SelfAttention.q.weight",
+   "offset": 125923328,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.3.layer.0.SelfAttention.k.weight",
+   "offset": 126709760,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.3.layer.0.SelfAttention.v.weight",
+   "offset": 127496192,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.3.layer.0.SelfAttention.o.weight",
+   "offset": 128282624,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.3.layer.0.layer_norm.weight",
+   "offset": 129069056,
+   "bytes": 2048
+  },
+  {
+   "key": "decoder.decoder.block.3.layer.1.EncDecAttention.q.weight",
+   "offset": 129073152,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.3.layer.1.EncDecAttention.k.weight",
+   "offset": 129859584,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.3.layer.1.EncDecAttention.v.weight",
+   "offset": 130646016,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.3.layer.1.EncDecAttention.o.weight",
+   "offset": 131432448,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.3.layer.1.layer_norm.weight",
+   "offset": 132218880,
+   "bytes": 2048
+  },
+  {
+   "key": "decoder.decoder.block.3.layer.2.DenseReluDense.wi_0.weight",
+   "offset": 132222976,
+   "bytes": 2097152
+  },
+  {
+   "key": "decoder.decoder.block.3.layer.2.DenseReluDense.wi_1.weight",
+   "offset": 134320128,
+   "bytes": 2097152
+  },
+  {
+   "key": "decoder.decoder.block.3.layer.2.DenseReluDense.wo.weight",
+   "offset": 136417280,
+   "bytes": 2097152
+  },
+  {
+   "key": "decoder.decoder.block.3.layer.2.layer_norm.weight",
+   "offset": 138514432,
+   "bytes": 2048
+  },
+  {
+   "key": "decoder.decoder.block.4.layer.0.SelfAttention.q.weight",
+   "offset": 138518528,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.4.layer.0.SelfAttention.k.weight",
+   "offset": 139304960,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.4.layer.0.SelfAttention.v.weight",
+   "offset": 140091392,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.4.layer.0.SelfAttention.o.weight",
+   "offset": 140877824,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.4.layer.0.layer_norm.weight",
+   "offset": 141664256,
+   "bytes": 2048
+  },
+  {
+   "key": "decoder.decoder.block.4.layer.1.EncDecAttention.q.weight",
+   "offset": 141668352,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.4.layer.1.EncDecAttention.k.weight",
+   "offset": 142454784,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.4.layer.1.EncDecAttention.v.weight",
+   "offset": 143241216,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.4.layer.1.EncDecAttention.o.weight",
+   "offset": 144027648,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.4.layer.1.layer_norm.weight",
+   "offset": 144814080,
+   "bytes": 2048
+  },
+  {
+   "key": "decoder.decoder.block.4.layer.2.DenseReluDense.wi_0.weight",
+   "offset": 144818176,
+   "bytes": 2097152
+  },
+  {
+   "key": "decoder.decoder.block.4.layer.2.DenseReluDense.wi_1.weight",
+   "offset": 146915328,
+   "bytes": 2097152
+  },
+  {
+   "key": "decoder.decoder.block.4.layer.2.DenseReluDense.wo.weight",
+   "offset": 149012480,
+   "bytes": 2097152
+  },
+  {
+   "key": "decoder.decoder.block.4.layer.2.layer_norm.weight",
+   "offset": 151109632,
+   "bytes": 2048
+  },
+  {
+   "key": "decoder.decoder.block.5.layer.0.SelfAttention.q.weight",
+   "offset": 151113728,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.5.layer.0.SelfAttention.k.weight",
+   "offset": 151900160,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.5.layer.0.SelfAttention.v.weight",
+   "offset": 152686592,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.5.layer.0.SelfAttention.o.weight",
+   "offset": 153473024,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.5.layer.0.layer_norm.weight",
+   "offset": 154259456,
+   "bytes": 2048
+  },
+  {
+   "key": "decoder.decoder.block.5.layer.1.EncDecAttention.q.weight",
+   "offset": 154263552,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.5.layer.1.EncDecAttention.k.weight",
+   "offset": 155049984,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.5.layer.1.EncDecAttention.v.weight",
+   "offset": 155836416,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.5.layer.1.EncDecAttention.o.weight",
+   "offset": 156622848,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.5.layer.1.layer_norm.weight",
+   "offset": 157409280,
+   "bytes": 2048
+  },
+  {
+   "key": "decoder.decoder.block.5.layer.2.DenseReluDense.wi_0.weight",
+   "offset": 157413376,
+   "bytes": 2097152
+  },
+  {
+   "key": "decoder.decoder.block.5.layer.2.DenseReluDense.wi_1.weight",
+   "offset": 159510528,
+   "bytes": 2097152
+  },
+  {
+   "key": "decoder.decoder.block.5.layer.2.DenseReluDense.wo.weight",
+   "offset": 161607680,
+   "bytes": 2097152
+  },
+  {
+   "key": "decoder.decoder.block.5.layer.2.layer_norm.weight",
+   "offset": 163704832,
+   "bytes": 2048
+  },
+  {
+   "key": "decoder.decoder.block.6.layer.0.SelfAttention.q.weight",
+   "offset": 163708928,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.6.layer.0.SelfAttention.k.weight",
+   "offset": 164495360,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.6.layer.0.SelfAttention.v.weight",
+   "offset": 165281792,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.6.layer.0.SelfAttention.o.weight",
+   "offset": 166068224,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.6.layer.0.layer_norm.weight",
+   "offset": 166854656,
+   "bytes": 2048
+  },
+  {
+   "key": "decoder.decoder.block.6.layer.1.EncDecAttention.q.weight",
+   "offset": 166858752,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.6.layer.1.EncDecAttention.k.weight",
+   "offset": 167645184,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.6.layer.1.EncDecAttention.v.weight",
+   "offset": 168431616,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.6.layer.1.EncDecAttention.o.weight",
+   "offset": 169218048,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.6.layer.1.layer_norm.weight",
+   "offset": 170004480,
+   "bytes": 2048
+  },
+  {
+   "key": "decoder.decoder.block.6.layer.2.DenseReluDense.wi_0.weight",
+   "offset": 170008576,
+   "bytes": 2097152
+  },
+  {
+   "key": "decoder.decoder.block.6.layer.2.DenseReluDense.wi_1.weight",
+   "offset": 172105728,
+   "bytes": 2097152
+  },
+  {
+   "key": "decoder.decoder.block.6.layer.2.DenseReluDense.wo.weight",
+   "offset": 174202880,
+   "bytes": 2097152
+  },
+  {
+   "key": "decoder.decoder.block.6.layer.2.layer_norm.weight",
+   "offset": 176300032,
+   "bytes": 2048
+  },
+  {
+   "key": "decoder.decoder.block.7.layer.0.SelfAttention.q.weight",
+   "offset": 176304128,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.7.layer.0.SelfAttention.k.weight",
+   "offset": 177090560,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.7.layer.0.SelfAttention.v.weight",
+   "offset": 177876992,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.7.layer.0.SelfAttention.o.weight",
+   "offset": 178663424,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.7.layer.0.layer_norm.weight",
+   "offset": 179449856,
+   "bytes": 2048
+  },
+  {
+   "key": "decoder.decoder.block.7.layer.1.EncDecAttention.q.weight",
+   "offset": 179453952,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.7.layer.1.EncDecAttention.k.weight",
+   "offset": 180240384,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.7.layer.1.EncDecAttention.v.weight",
+   "offset": 181026816,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.7.layer.1.EncDecAttention.o.weight",
+   "offset": 181813248,
+   "bytes": 786432
+  },
+  {
+   "key": "decoder.decoder.block.7.layer.1.layer_norm.weight",
+   "offset": 182599680,
+   "bytes": 2048
+  },
+  {
+   "key": "decoder.decoder.block.7.layer.2.DenseReluDense.wi_0.weight",
+   "offset": 182603776,
+   "bytes": 2097152
+  },
+  {
+   "key": "decoder.decoder.block.7.layer.2.DenseReluDense.wi_1.weight",
+   "offset": 184700928,
+   "bytes": 2097152
+  },
+  {
+   "key": "decoder.decoder.block.7.layer.2.DenseReluDense.wo.weight",
+   "offset": 186798080,
+   "bytes": 2097152
+  },
+  {
+   "key": "decoder.decoder.block.7.layer.2.layer_norm.weight",
+   "offset": 188895232,
+   "bytes": 2048
+  },
+  {
+   "key": "decoder.decoder.final_layer_norm.weight",
+   "offset": 188899328,
+   "bytes": 2048
+  }
+ ]
+}

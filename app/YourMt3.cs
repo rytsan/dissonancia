@@ -13,9 +13,13 @@ namespace Dissonancia;
 /// token -> note decoding are ports of the authors' Python, checked against it (tools/yourmt3).
 public sealed class YourMt3 : IDisposable
 {
+    /// The graphs (no weights) ship with the app; the weights are built on this machine (Build).
+    static string GraphDir => Path.Combine(AppContext.BaseDirectory, "models", "yourmt3");
     public static string Dir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Dissonancia", "models", "yourmt3");
-    static readonly string[] Files = ["encoder.onnx", "decoder_first.onnx", "decoder_next.onnx", "meta.json"];
-    public static bool Installed => Files.All(f => File.Exists(Path.Combine(Dir, f)));
+    static string WeightsPath => Path.Combine(Dir, "yourmt3.weights");
+    static string BuiltMark => WeightsPath + ".sha256";   // written once the weights matched the recipe
+    public static bool Shipped => File.Exists(Path.Combine(GraphDir, "recipe.json"));
+    public static bool Installed => Shipped && File.Exists(WeightsPath) && File.Exists(BuiltMark) && File.ReadAllText(BuiltMark) == Recipe().WeightsSha256;
 
     public sealed record Note(double Start, double End, int Midi, int Velocity, int Program, string Instrument, bool Drum);
     public sealed record Result(string Model, List<Note> Notes);
@@ -43,7 +47,7 @@ public sealed class YourMt3 : IDisposable
 
     public YourMt3()
     {
-        _m = JsonSerializer.Deserialize<Meta>(File.ReadAllText(Path.Combine(Dir, "meta.json")))!;
+        _m = JsonSerializer.Deserialize<Meta>(File.ReadAllText(Path.Combine(GraphDir, "meta.json")))!;
         _events = [.. _m.events.Select(e => (e[0].GetString()!, e[1].GetInt32()))];
         var (opt, device) = Accel.Options();   // the GPU when its build is installed and checked
         Device = device;
@@ -55,9 +59,82 @@ public sealed class YourMt3 : IDisposable
             "directml" => new OrtMemoryInfo("DML", OrtAllocatorType.DeviceAllocator, 0, OrtMemType.Default),
             _ => OrtMemoryInfo.DefaultInstance,
         };
-        _enc = new InferenceSession(Path.Combine(Dir, "encoder.onnx"), opt);
-        _first = new InferenceSession(Path.Combine(Dir, "decoder_first.onnx"), opt);
-        _next = new InferenceSession(Path.Combine(Dir, "decoder_next.onnx"), opt);
+        // The graphs name their weights by offset in yourmt3.weights, which onnxruntime looks up
+        // next to the graph file: so the app's graphs (2.7 MB) are copied next to the weights.
+        InferenceSession Load(string graph)
+        {
+            File.Copy(Path.Combine(GraphDir, graph), Path.Combine(Dir, graph), true);
+            return new(Path.Combine(Dir, graph), opt);
+        }
+        _enc = Load("encoder.onnx");
+        _first = Load("decoder_first.onnx");
+        _next = Load("decoder_next.onnx");
+    }
+
+    // ---------------------------------------------------------------- weights
+
+    public sealed record RecipeInfo(string CheckpointUrl, long CheckpointSize, string CheckpointSha256, long WeightsSize, string WeightsSha256,
+                                    (string Key, long Offset, long Bytes)[] Tensors);
+
+    public static RecipeInfo Recipe()
+    {
+        var r = JsonDocument.Parse(File.ReadAllText(Path.Combine(GraphDir, "recipe.json"))).RootElement;
+        var c = r.GetProperty("checkpoint");
+        var w = r.GetProperty("weights");
+        return new(c.GetProperty("url").GetString()!, c.GetProperty("size").GetInt64(), c.GetProperty("sha256").GetString()!,
+                   w.GetProperty("size").GetInt64(), w.GetProperty("sha256").GetString()!,
+                   [.. r.GetProperty("tensors").EnumerateArray().Select(t => (t.GetProperty("key").GetString()!, t.GetProperty("offset").GetInt64(), t.GetProperty("bytes").GetInt64()))]);
+    }
+
+    /// Builds the weights on this machine: downloads the authors' checkpoint (pinned revision and
+    /// SHA-256), takes each tensor the graphs use from it, in the recipe's order and offsets, checks
+    /// the result against the recipe's SHA-256 and deletes the checkpoint. Returns null or why.
+    public static async Task<string?> Build(Action<string, float> progress, CancellationToken ct)
+    {
+        var r = Recipe();
+        Directory.CreateDirectory(Dir);
+        var ckpt = Path.Combine(Dir, "checkpoint.ckpt");
+        if (!File.Exists(ckpt))
+        {
+            var err = await Download.FileAsync(r.CheckpointUrl, ckpt + ".part", r.CheckpointSize, r.CheckpointSha256,
+                                               n => progress("YourMT3+ checkpoint (the authors')", (float)n / r.CheckpointSize), ct);
+            if (err is not null) return err;
+            File.Move(ckpt + ".part", ckpt, true);
+        }
+        progress("building the YourMT3+ weights", 0);
+        var tmp = WeightsPath + ".part";
+        try
+        {
+            string sha = await Task.Run(() =>
+            {
+                using var source = new TorchCheckpoint(ckpt);
+                var state = source.State();
+                using var hash = System.Security.Cryptography.IncrementalHash.CreateHash(System.Security.Cryptography.HashAlgorithmName.SHA256);
+                using var f = File.Create(tmp);
+                long pos = 0;
+                foreach (var (key, offset, bytes) in r.Tensors.OrderBy(t => t.Offset))
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var pad = new byte[offset - pos];   // the recipe aligns each tensor; the gaps are zeros
+                    var data = source.Read(state[key]);
+                    if (data.Length != bytes) throw new InvalidDataException($"{key}: {data.Length} bytes, the recipe says {bytes}");
+                    foreach (var b in (byte[][])[pad, data]) { f.Write(b); hash.AppendData(b); }
+                    pos = offset + bytes;
+                    progress("building the YourMT3+ weights", (float)pos / r.WeightsSize);
+                }
+                return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+            }, ct);
+            if (sha != r.WeightsSha256) { File.Delete(tmp); File.Delete(ckpt); return "built weights do not match the recipe (checksum)"; }
+            File.Move(tmp, WeightsPath, true);
+            File.WriteAllText(BuiltMark, sha);
+            File.Delete(ckpt);
+            return null;
+        }
+        catch (Exception e) when (e is IOException or InvalidDataException or KeyNotFoundException or InvalidCastException or OperationCanceledException)
+        {
+            try { File.Delete(tmp); } catch (IOException) { }
+            return e is OperationCanceledException ? "cancelled" : e.Message;
+        }
     }
 
     // ---------------------------------------------------------------- spectrogram

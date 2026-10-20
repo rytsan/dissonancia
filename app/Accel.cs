@@ -316,8 +316,9 @@ public static class Accel
 }
 
 /// Automatic setup: at every start, in the background, whatever this machine should have and lacks —
-/// the GPU build for its backend and the Demucs weights (when the separation helper is in this
-/// build). A failure or a cancel is remembered, so it is not retried at every start: the SYSTEM
+/// the GPU build for its backend, the Demucs weights (when the separation helper is in this build)
+/// and the YourMT3+ weights (built here from the authors' checkpoint). Nothing comes from us:
+/// every download is the upstream file at a pinned version and checksum. A failure or a cancel is remembered, so it is not retried at every start: the SYSTEM
 /// section shows why and installs on request; the automatic run can also be turned off there.
 public static class Setup
 {
@@ -341,13 +342,14 @@ public static class Setup
         DemucsModel.HelperPresent ? new[] { DemucsModel.FourStems, DemucsModel.SixStems }.Where(v => !DemucsModel.Installed(v)) : [];
 
     static bool GpuPending(Accel.Profile p) => p.Backend is not "cpu" && Accel.Passed(p.Backend) is null;
+    static bool Mt3Pending => YourMt3.Shipped && !YourMt3.Installed;
 
     /// What still needs installing on this machine, and its download size.
     public static (bool Needed, long Bytes) Pending()
     {
         var p = Accel.Machine;
-        long bytes = (GpuPending(p) ? p.DownloadBytes : 0) + MissingDemucs().Sum(v => v.Size);
-        return (GpuPending(p) || MissingDemucs().Any(), bytes);
+        long bytes = (GpuPending(p) ? p.DownloadBytes : 0) + MissingDemucs().Sum(v => v.Size) + (Mt3Pending ? YourMt3.Recipe().CheckpointSize : 0);
+        return (GpuPending(p) || MissingDemucs().Any() || Mt3Pending, bytes);
     }
 
     /// At startup: runs unless turned off or a previous run failed or was cancelled.
@@ -372,6 +374,7 @@ public static class Setup
                 Stage = $"Demucs {v.Stems}-stem weights";
                 if (await DemucsModel.InstallAsync(v, f => Progress = f, ct) is { } d) errors.Add($"Demucs {v.Stems} stems: {d}");
             }
+            if (Mt3Pending && !ct.IsCancellationRequested && await YourMt3.Build((s, f) => (Stage, Progress) = (s, f), ct) is { } m) errors.Add("YourMT3+: " + m);
             Error = ct.IsCancellationRequested ? "cancelled" : errors.Count > 0 ? string.Join("; ", errors) : null;
             if (Error is not null) { Directory.CreateDirectory(Accel.Root); File.WriteAllText(SkipFile, Error); }
             Running = false;

@@ -7,3 +7,17 @@ http://www.apache.org/licenses/LICENSE-2.0
 Unmodified. Paper: R. M. Bittner, J. J. Bosch, D. Rubinstein, G. Meseguer-Brocal, S. Ewert,
 "A Lightweight Instrument-Agnostic Model for Polyphonic Note Transcription and Multipitch
 Estimation", ICASSP 2022.
+
+yourmt3/ — the YourMT3+ YPTF.MoE+Multi (noPS) model's graphs, without weights: encoder.onnx,
+decoder_first.onnx, decoder_next.onnx (ONNX export of the authors' PyTorch model by
+tools/yourmt3/export_onnx.py; the mixture-of-experts layer rewritten for export, same results),
+meta.json (its token vocabulary and instrument programs) and recipe.json. The weights are not
+here: each machine downloads the authors' checkpoint from
+https://huggingface.co/spaces/mimbres/YourMT3 (pinned revision and SHA-256 in recipe.json) and
+rebuilds yourmt3.weights from it (app/YourMt3.cs, Build).
+
+Copyright 2024 Sungkyun Chang et al. Licensed under the Apache License, Version 2.0:
+http://www.apache.org/licenses/LICENSE-2.0
+Modified (exported to ONNX, see above). Paper: S. Chang, E. Benetos, H. Kirchhoff, S. Dixon,
+"YourMT3+: Multi-instrument Music Transcription with Enhanced Transformer Architectures and
+Cross-dataset Stem Augmentation", IEEE MLSP 2024.
