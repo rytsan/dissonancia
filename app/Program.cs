@@ -489,9 +489,11 @@ public sealed class MainWindow : Window
         };
         smallest.SelectionChanged += (_, _) => _session.SmallestNote = values[Math.Max(0, smallest.SelectedIndex)];
         var triplets = new CheckBox { Content = "Allow eighth triplets", IsChecked = _session.Triplets };
+        var inversions = new CheckBox { Content = "Show inversions in LIVE (D/F♯; off: D)", IsChecked = _session.ShowInversions };
+        inversions.IsCheckedChanged += (_, _) => _session.ShowInversions = inversions.IsChecked == true;
         triplets.IsCheckedChanged += (_, _) => _session.Triplets = triplets.IsChecked == true;
         root.Children.Add(Section("NOTATION  (SCORE quantization: shorter notes are snapped to this grid; applies to the next SCORE view)",
-            Row(Labeled("Smallest note value", smallest), Labeled(" ", triplets))));
+            Row(Labeled("Smallest note value", smallest), Labeled(" ", triplets), Labeled(" ", inversions))));
 
         // Audio settings
         // Audio settings: requests only — the core reads back the real rate/period and the status strip shows them.

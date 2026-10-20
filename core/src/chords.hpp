@@ -117,6 +117,7 @@ public:
         uint32_t eventCount;
         AnalyzerEvent events[4];
         KeyEstimate key;             // the song's key so far
+        char harmony[16];            // the harmony underneath (notes path): triads, slow; "" = none
     };
 
     // hopSeconds: analysis hop; latencyCompensation subtracted from event times (§13).
@@ -154,13 +155,15 @@ private:
     ChordHistory history_;
     ChordCandidate previous_{};      // confirmed chord before cur_ (symbol "" = none): cadence context
     KeyTracker key_;
-    ChordHmm hmm_;
+    ChordHmm hmm_, harmony_;
     int curState_ = -1;              // HMM state of cur_ (notes path)
     double lastAudible_ = -1;
     int bassCount_[12]{};            // lowest note per hop while the current chord sounds (notes path)
     int pendingState_ = -1;          // the HMM's decision, and since when it has held (notes path)
     double pendingSince_ = 0;
     static constexpr double kHoldSeconds = 0.2;
+    int harmonyPending_ = -1, harmonyShown_ = -1;
+    double harmonySince_ = 0;
     double quietSince_ = -1;         // silence start (< 0: sounding), for the accumulator's gaps
     bool lastSparse_ = false;        // the last sounding frame had <= 2 notes (a picked note)
     float acc_[12]{};                // arpeggio accumulator (decaying max-hold of chroma energy)

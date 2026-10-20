@@ -574,7 +574,7 @@ void ChordMatcher::match(const float* energy, const ChordHistory& h, int bassPc,
 
 ChordTracker::ChordTracker(const SessionConfig& s, double hopSeconds, double latencyCompensation)
     : matcher_(s), hop_(hopSeconds), latencyComp_(latencyCompensation),
-      confirmSeconds_(s.quality == AudioQuality::HighPrecision ? 0.6 : 0.4), releaseSeconds_(0.15), key_(hopSeconds), hmm_(hopSeconds) {}
+      confirmSeconds_(s.quality == AudioQuality::HighPrecision ? 0.6 : 0.4), releaseSeconds_(0.15), key_(hopSeconds), hmm_(hopSeconds), harmony_(hopSeconds, ChordHmm::harmony()) {}
 
 // Persistence-weighted mean chroma over [from, to]: each pitch class weighs by the share of frames
 // in which it is strong (>= 0.3 of the frame maximum in amplitude). Chord tones ring through the
@@ -802,6 +802,7 @@ void ChordTracker::process_notes(const NoteFrame& notes, const ChromaVector& chr
     bool minor = false;
     const bool keyOn = matcher_.context_key(tonic, minor);
     hmm_.step(notes, keyOn, tonic, minor);
+    harmony_.step(notes, keyOn, tonic, minor);
     if (notes.audible) lastAudible_ = t;
     const bool sounding = lastAudible_ >= 0 && t - lastAudible_ < 0.6;
     const double lagSeconds = hmm_.lag_hops() * hop_;
@@ -827,6 +828,7 @@ void ChordTracker::process_notes(const NoteFrame& notes, const ChromaVector& chr
         previous_ = {};
         curState_ = -1;
         hmm_.reset();
+        harmony_.reset();
     }
     // The chord's bass: the lowest note heard most often while it sounds; an inversion only when that
     // is not the root most of the time (an alternating thumb is still root position).
@@ -872,6 +874,14 @@ void ChordTracker::process_notes(const NoteFrame& notes, const ChromaVector& chr
     out.confirmed = active_ && out.preview.best.symbol[0] && std::strcmp(out.preview.best.symbol, cur_.c.symbol) == 0;
     out.latencyMs = float(lagSeconds * 1000);
     out.confirmElapsedMs = 0;
+    // The harmony underneath changes on screen once it has held 0.8 s (a passing Em between two Ds is
+    // the chord played, not the harmony).
+    const int h = harmony_.decided();
+    if (h != harmonyPending_) harmonyPending_ = h, harmonySince_ = t;
+    if (!sounding) harmonyShown_ = -1;
+    else if (h >= 0 && (harmonyShown_ < 0 || t - harmonySince_ >= 0.8)) harmonyShown_ = h;
+    std::memset(out.harmony, 0, sizeof out.harmony);
+    if (harmonyShown_ >= 0) matcher_.symbol(ChordHmm::root(harmonyShown_), ChordHmm::quality(harmonyShown_), out.harmony);
 }
 
 void ChordTracker::flush(Output& out) {

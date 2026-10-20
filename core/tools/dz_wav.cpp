@@ -114,7 +114,8 @@ int main(int argc, char** argv) {
     ChromaFrontEnd::Output o{};
     ChordTracker::Output t{};
     std::string shownPreview, shownConfirmed;
-    int shownKey = -1;   // tonic + 12 * minor, -1 = no valid estimate
+    int shownKey = -1;
+    std::string shownHarmony;   // tonic + 12 * minor, -1 = no valid estimate
     int previewChanges = 0, confirmedChanges = 0;
     auto events = [&] {
         for (uint32_t i = 0; i < t.eventCount; i++)
@@ -145,6 +146,10 @@ int main(int argc, char** argv) {
         if (noteChords) tracker.process_notes(o.notes, o.chroma, o.chroma.timestampSeconds, double(p + hop) / rate, t);
         else tracker.process(o.chroma, o.chroma.timestampSeconds, double(p + hop) / rate, o.bass, o.lastOnset, t);
         events();
+        if (noteChords && t.harmony != shownHarmony) {   // the harmony underneath, as the display would show it
+            shownHarmony = t.harmony;
+            if (!shownHarmony.empty()) std::printf("harmony %8.3f %s\n", double(p + hop) / rate, t.harmony);
+        }
         int key = t.key.valid ? t.key.tonic + 12 * t.key.minor : -1;
         if (key != shownKey) {   // the song's key as the live display would show it
             static const char* names[12] = {"C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"};

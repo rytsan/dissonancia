@@ -307,6 +307,7 @@ struct LiveSnapshot {
     double lastOnsetSeconds;           // sample clock, delay-compensated; < 0 = none yet
     ContextEstimate context;           // tempo heard so far (display only)
     KeyEstimate songKey;               // key heard so far (chord modes)
+    char harmonySymbol[16];            // the harmony underneath (major/minor triads, slow), "" = none
     float waveMin[ANA_WAVE_COLUMNS];
     float waveMax[ANA_WAVE_COLUMNS];
     float scope[ANA_SCOPE_SAMPLES];    // last samples, oldest first

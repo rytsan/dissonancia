@@ -156,6 +156,7 @@ unsafe struct LiveSnapshotNative
     public double LastOnsetSeconds;
     public ContextEstimateNative Context;
     public KeyEstimateNative SongKey;
+    public fixed byte HarmonySymbol[16];
     public fixed float WaveMin[WaveColumns];
     public fixed float WaveMax[WaveColumns];
     public fixed float Scope[ScopeSamples];
@@ -325,7 +326,7 @@ public sealed class NativeLiveSource : ILiveSource
     LiveSnapshotNative _snap;   // held in a field: ana_read_snapshot copies into it in place
     readonly AnalyzerEventNative[] _events = new AnalyzerEventNative[256];
     uint _nextSequence;
-    readonly TextCache _symbol = new(), _confirmed = new(), _roman = new(), _alt0 = new(), _alt1 = new(), _alt2 = new(), _reason = new(), _event = new();
+    readonly TextCache _symbol = new(), _confirmed = new(), _harmony = new(), _roman = new(), _alt0 = new(), _alt1 = new(), _alt2 = new(), _reason = new(), _event = new();
     string _alternatives = "";
     readonly int[][] _pcSets = Enumerable.Range(0, 9).Select(n => new int[n]).ToArray();
     readonly int[][] _heldSets = Enumerable.Range(0, 9).Select(n => new int[n]).ToArray();
@@ -434,7 +435,9 @@ public sealed class NativeLiveSource : ILiveSource
             notes.CopyTo(f.Voices, 0);
         }
         fixed (byte* cs = _snap.ConfirmedSymbol) f.DisplayChord = _confirmed.Get(cs, 16, Display);
+        fixed (byte* hs = _snap.HarmonySymbol) f.Harmony = _harmony.Get(hs, 16, Display);
         f.CandidateChord = !f.ChordConfirmed && f.ChordSymbol.Length > 0 && f.ChordConfirmElapsedMs >= 120 ? f.ChordSymbol : "";
+        if (!_session.ShowInversions) (f.DisplayChord, f.CandidateChord) = (NoBass(f.DisplayChord), NoBass(f.CandidateChord));
         if (f.DisplayChord.Length == 0) f.DisplayChord = f.CandidateChord;   // nothing confirmed yet: the candidate, dimmed
         if (f.ChordConfirmed) f.DisplayRoman = f.ChordRoman;                 // the roman of the chord on display
         else if (f.DisplayChord.Length == 0) f.DisplayRoman = "";
@@ -477,13 +480,13 @@ public sealed class NativeLiveSource : ILiveSource
                     switch (ev[i].Type)
                     {
                         case AnalyzerEventType.ChordConfirmed:   // chord timeline: one cell per confirmed change, newest last
-                            f.TimelineBars.Add(_event.Get(d + 24, 16, Display));
+                            f.TimelineBars.Add(_session.ShowInversions ? _event.Get(d + 24, 16, Display) : NoBass(_event.Get(d + 24, 16, Display)));
                             f.TimelineRomans.Add(_event.Get(d + 62, 12, DisplayRoman));
                             if (f.TimelineBars.Count > 8) { f.TimelineBars.RemoveAt(0); f.TimelineRomans.RemoveAt(0); }
                             break;
                         case AnalyzerEventType.ChordEnded when f.TimelineBars.Count > 0:
                             // A bass that settled after the confirmation adds the inversion: the final symbol wins.
-                            f.TimelineBars[^1] = _event.Get(d + 24, 16, Display);
+                            f.TimelineBars[^1] = _session.ShowInversions ? _event.Get(d + 24, 16, Display) : NoBass(_event.Get(d + 24, 16, Display));
                             f.TimelineRomans[^1] = _event.Get(d + 62, 12, DisplayRoman);
                             _song.AddChord(*(double*)d, f.TimelineBars[^1]);
                             SongReadout(f);
@@ -527,6 +530,8 @@ public sealed class NativeLiveSource : ILiveSource
 
     /// ASCII chord symbol from the core -> display ("F#m7b5" -> "F♯m7♭5"; letters are upper case, so 'b' is a flat).
     static string Display(string s) => s.Replace('#', '♯').Replace('b', '♭');
+    /// The chord without its inversion (D/F# -> D), for a display set to show none.
+    static string NoBass(string s) => s.IndexOf('/') is var i and > 0 ? s[..i] : s;
 
     /// ASCII Roman numeral -> display ("viio7/V" -> "vii°7/V", "viih7" -> "viiø7", "bVII" -> "♭VII").
     static string DisplayRoman(string s) => s.Replace('#', '♯').Replace('b', '♭').Replace('o', '°').Replace('h', 'ø');

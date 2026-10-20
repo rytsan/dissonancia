@@ -341,7 +341,10 @@ public sealed class LcdModule : RackModule
             double dot = Math.Min((inner.Width - status - 10) / (7 * 6 * 1.3), (split - inner.Y - 62) / (7 * 1.3));
             // The confirmed chord stays on the panel; a candidate that has held 120 ms shows beside it.
             bool steady = f.DisplayChord.Length > 0 && f.DisplayChord != f.CandidateChord;
-            Plasma.DotText(ctx, f.DisplayChord, inner.X, inner.Y, dot, cells: 7, dim: !steady);
+            // Música completa leads with the harmony underneath (G ... D ...), the chord played under
+            // it; the instrument modes the other way round.
+            bool harmonyFirst = Session.Live == LiveMode.FullSong && f.Harmony.Length > 0;
+            Plasma.DotText(ctx, harmonyFirst ? f.Harmony : f.DisplayChord, inner.X, inner.Y, dot, cells: 7, dim: !harmonyFirst && !steady);
 
             bool pending = f.CandidateChord.Length > 0;
             Plasma.Lamp(ctx, new Point(rx - 140, inner.Y + 8), 4.5, pending);
@@ -358,7 +361,9 @@ public sealed class LcdModule : RackModule
             Plasma.Text(ctx, ms, rx, inner.Y + 58, 13, true, Ui.Mono, Ui.Align.Right);
 
             double textY = inner.Y + dot * 1.3 * 7 + 10;
-            Plasma.Text(ctx, $"alt  {f.ChordAlternatives}", inner.X, textY, 13, false);
+            string second = harmonyFirst ? (f.DisplayChord.Length > 0 ? $"PLAYED  {f.DisplayChord}" : "")
+                          : f.Harmony.Length > 0 ? $"HARMONY  {f.Harmony}" : f.ChordAlternatives.Length > 0 ? $"alt  {f.ChordAlternatives}" : "";
+            Plasma.Text(ctx, second, inner.X, textY, 13, second.Length > 0 && !second.StartsWith("alt"));
             if (f.ChordReason.Length > 0) Plasma.Text(ctx, f.ChordReason, inner.X, textY + 18, 12, false);
             if (f.DisplayRoman.Length > 0) Plasma.Text(ctx, f.DisplayRoman, rx, textY - 4, 18, steady, Ui.Mono, Ui.Align.Right);
             if (f.Cadence.Length > 0) Plasma.Text(ctx, f.Cadence, rx, textY + 18, 12, false, Ui.Mono, Ui.Align.Right);

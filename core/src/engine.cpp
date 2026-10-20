@@ -412,6 +412,7 @@ void Engine::process_hop(const float* x, uint32_t n) {
     s.lastOnsetSeconds = chroma_ && cout_.lastOnset >= 0 ? cout_.lastOnset - compensationMs() / 1000.0 : -1;
     s.context = contextOut_;
     s.songKey = chout_.key;
+    std::memcpy(s.harmonySymbol, chout_.harmony, sizeof s.harmonySymbol);
     snapshots_.publish();
 }
 

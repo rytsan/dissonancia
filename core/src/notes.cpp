@@ -158,14 +158,11 @@ namespace {
 constexpr int8_t kIv[ChordHmm::kQualities][4] = {{0, 4, 7, -1}, {0, 3, 7, -1}, {0, 4, 7, 10}, {0, 4, 7, 11}, {0, 3, 7, 10},
                                                  {0, 3, 6, -1}, {0, 5, 7, -1}, {0, 2, 7, -1}, {0, 7, -1, -1}, {0, 4, 7, 2}};
 constexpr float kPrior[ChordHmm::kQualities] = {0, 0, -0.7f, -1.2f, -1.0f, -1.5f, -1.5f, -1.5f, -2.5f, -1.0f};   // simpler is likelier
-// Per-hop weight of the notes' evidence against the cost of a change: at 1, two changes in a row
-// (C, then the old notes and the new together, then G) are cheap; 0.2 measured best (tools/loopback).
-constexpr float kEvidence = 0.2f;
-constexpr float kNewBass = 0.2f;              // what remains of the old notes when a new bass arrives
-constexpr float kStay = 0.99f;                 // per hop (20 ms): a chord lasts ~2 s on average
-// memory of a note (s); a melody-register note counts fully once it has lasted kSustain (a passing
-// note is short) and weighs kTrebleWeight; lower notes count at once (a strummed change is sharp)
-constexpr float kTau = 0.3f, kSustain = 0.4f, kTrebleWeight = 0.5f;
+// Params: evidence 0.2 per hop measured best (tools/loopback): at 1, two changes in a row (C, then
+// the old notes and the new together, then G) are cheap.
+// a melody-register note counts fully once it has lasted kSustain (a passing note is short) and
+// weighs kTrebleWeight; lower notes count at once (a strummed change is sharp)
+constexpr float kSustain = 0.4f, kTrebleWeight = 0.5f;
 const float kLogIn = std::log(0.9f), kLogOut = std::log(0.08f);
 
 uint16_t mask_of(int state) {
@@ -176,8 +173,8 @@ uint16_t mask_of(int state) {
 }
 }  // namespace
 
-ChordHmm::ChordHmm(double hopSeconds, double lagSeconds)
-    : hop_(hopSeconds), lag_(std::max(1, int(std::lround(lagSeconds / hopSeconds)))), back_(size_t(lag_) * kStates) {
+ChordHmm::ChordHmm(double hopSeconds, Params p)
+    : hop_(hopSeconds), p_(p), lag_(std::max(1, int(std::lround(p.lag / hopSeconds)))), back_(size_t(lag_) * kStates) {
     reset();
 }
 
@@ -193,7 +190,7 @@ void ChordHmm::reset() {
 
 void ChordHmm::step(const NoteFrame& notes, bool keyOn, int keyTonic, bool keyMinor) {
     // memory of the notes heard: recency, sustain, register
-    const float decay = std::exp(-float(hop_) / kTau);
+    const float decay = std::exp(-float(hop_) / p_.tau);
     for (float& v : mem_) v *= decay;
     bool on[128]{};
     for (int i = 0; i < notes.count; i++) on[notes.midi[i]] = true;
@@ -201,7 +198,7 @@ void ChordHmm::step(const NoteFrame& notes, bool keyOn, int keyTonic, bool keyMi
     // A new bass note that was not sounding (the change's downbeat): what came before mostly goes,
     // or the old chord's notes and the new one's add up to a chord in between (C then G: Em7).
     if (notes.count && notes.midi[0] % 12 != lastBass_ && mem_[notes.midi[0] % 12] < 0.3f && age_[notes.midi[0]] <= float(hop_) * 1.5f)
-        for (float& v : mem_) v *= kNewBass;
+        for (float& v : mem_) v *= p_.newBass;
     if (notes.count) lastBass_ = notes.midi[0] % 12;
     for (int i = 0; i < notes.count; i++) {
         const int m = notes.midi[i];
@@ -220,7 +217,7 @@ void ChordHmm::step(const NoteFrame& notes, bool keyOn, int keyTonic, bool keyMi
     // Viterbi step: stay, or move from the best state
     int prevBest = 0;
     for (int s = 1; s < kStates; s++) if (alpha_[s] > alpha_[prevBest]) prevBest = s;
-    const float logStay = std::log(kStay), logMove = std::log((1 - kStay) / (kStates - 1));
+    const float logStay = std::log(p_.stay), logMove = std::log((1 - p_.stay) / (kStates - 1));
     uint8_t* back = &back_[size_t(row_) * kStates];
     float top = -1e30f;
     for (int s = 0; s < kStates; s++) {
@@ -241,7 +238,8 @@ void ChordHmm::step(const NoteFrame& notes, bool keyOn, int keyTonic, bool keyMi
             if (bass >= 0) e += (m >> bass & 1) ? (root(s) == bass ? 0.3f : 0.f) : -1.f;
             if (keyOn && (m & ~scale) == 0) e += 0.3f;   // diatonic
         }
-        alpha_[s] = std::max(stay, move) + kEvidence * e + kPrior[s % kQualities] * float(hop_) * 5;
+        alpha_[s] = std::max(stay, move) + p_.evidence * e + kPrior[s % kQualities] * float(hop_) * 5;
+        if (p_.triads && s % kQualities > 1) alpha_[s] = -1e9f;   // only major and minor triads
         top = std::max(top, alpha_[s]);
     }
     for (float& a : alpha_) a -= top;

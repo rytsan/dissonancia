@@ -30,6 +30,7 @@ public sealed class Session
     // Notation (SCORE): shortest notated value, as a note-value denominator; 0 = the meter's beat unit.
     public int SmallestNote;
     public bool Triplets;
+    public bool ShowInversions = true;     // LIVE chord display: D/F#; off: D
 
     /// Piano: grand staff (treble + bass, split at C4); the clef setting does not apply (spec §22.2).
     public bool GrandStaff => Mode == AppMode.PianoChords;
@@ -51,6 +52,7 @@ public sealed class LiveFrame
     public bool ClipLatched;
 
     public string ChordSymbol = "";        // matcher preview, every hop (flickers with every strum)
+    public string Harmony = "";            // the harmony underneath (core: triads, slow), "" = none
     // What the display shows: the confirmed chord, steady; a candidate only once it has held 120 ms.
     public string DisplayChord = "", CandidateChord = "", DisplayRoman = "";
     public float ChordConfidence;
@@ -194,6 +196,7 @@ public sealed class FakeLiveSource(Session session) : ILiveSource
         if (f.ChordConfirmed) f.TimelineBars.Add(chord.Symbol);
         f.ProvisionalChord = f.ChordConfirmed ? "" : chord.Symbol;
         f.DisplayChord = chord.Symbol;
+        f.Harmony = chord.Symbol.Split('/')[0].Replace("maj7", "").Replace("7", "").Replace("sus4", "").Replace("add9", "");   // design data: the triad underneath
         f.CandidateChord = "";
         f.DisplayRoman = "";
         f.BarPhase = age / bar;

@@ -55,7 +55,21 @@ public:
     static constexpr int kStates = 12 * kQualities;
     static const ChordQuality kQuality[kQualities];
 
-    explicit ChordHmm(double hopSeconds, double lagSeconds = 0.6);
+    struct Params {
+        double lag = 0.6;          // decision delay (s)
+        float stay = 0.99f;        // per hop (20 ms): a chord lasts ~2 s on average
+        float tau = 0.3f;          // memory of a note (s)
+        float evidence = 0.2f;     // per-hop weight of the notes against the cost of a change
+        float newBass = 0.2f;      // what remains of the old notes when a new bass arrives
+        bool triads = false;       // major and minor triads only (the harmony underneath)
+    };
+    // The chord played: every quality, quick.
+    static Params played() { return {}; }
+    // The harmony underneath (the "campo harmonico" a listener sums up: G ... D ...): triads only,
+    // slow to change, long memory; passing chords, inversions and colours fold into it.
+    static Params harmony() { return {1.5, 0.998f, 1.0f, 0.1f, 0.5f, true}; }
+
+    explicit ChordHmm(double hopSeconds, Params p = played());
     void reset();
     // keyOn: a key to prefer (the session's, else a valid estimate); tonic pitch class, minor mode.
     void step(const NoteFrame& notes, bool keyOn, int keyTonic, bool keyMinor);
@@ -67,6 +81,7 @@ public:
 
 private:
     double hop_;
+    Params p_;
     int lag_;
     float mem_[12]{};
     float age_[128]{};
