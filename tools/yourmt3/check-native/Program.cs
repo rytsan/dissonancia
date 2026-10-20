@@ -13,6 +13,7 @@ var refj = JsonDocument.Parse(File.ReadAllText(S + "/reference.json")).RootEleme
 var wav = refj.GetProperty("wav").EnumerateArray().Select(e => e.GetSingle()).ToArray();
 var spec = refj.GetProperty("spec").EnumerateArray().SelectMany(r => r.EnumerateArray().Select(e => e.GetSingle())).ToArray();
 using var m = new YourMt3();
+if (Environment.GetEnvironmentVariable("DZ_MT3_BATCH") is { Length: > 0 } batch) m.Batch = int.Parse(batch);   // segments per decoder run
 Console.WriteLine("device " + m.Device);
 var mine = m.Spectrogram(wav, out int frames, out int bins);
 Console.WriteLine($"spec {frames}x{bins} vs {spec.Length}: max |diff| {mine.Zip(spec).Max(z => Math.Abs(z.First - z.Second)):0.000000}");
@@ -34,6 +35,7 @@ sw.Restart();
 var audio = StemTrack.ReadMono(args[1], out int rate);
 var all = m.Transcribe(audio, rate);
 Console.WriteLine($"whole take native: {all.Count} notes in {sw.ElapsedMilliseconds} ms");
+Console.WriteLine("notes hash " + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(string.Join(";", all.Select(n => FormattableString.Invariant($"{n.Start:0.000} {n.End:0.000} {n.Midi} {n.Instrument}"))))))[..12]);   // equal across batch sizes and devices
 foreach (var n in all.Take(8)) Console.WriteLine($"  {n.Start:0.00}-{n.End:0.00} {n.Midi} {n.Instrument}");
 var cpuRef = JsonDocument.Parse(File.ReadAllText(S + "/ref_cpu.json")).RootElement.GetProperty("notes").EnumerateArray()
     .Select(n => (n.GetProperty("start").GetDouble(), n.GetProperty("end").GetDouble(), n.GetProperty("midi").GetInt32(), n.GetProperty("instrument").GetString())).ToList();

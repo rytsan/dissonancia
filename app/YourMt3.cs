@@ -38,6 +38,7 @@ public sealed class YourMt3 : IDisposable
     readonly (string Type, int Value)[] _events;
     readonly InferenceSession _enc, _first, _next;
     readonly RunOptions _run = new();
+    readonly OrtMemoryInfo _mem;   // where the caches stay between steps
     public string Device { get; }
 
     public YourMt3()
@@ -46,6 +47,13 @@ public sealed class YourMt3 : IDisposable
         _events = [.. _m.events.Select(e => (e[0].GetString()!, e[1].GetInt32()))];
         var (opt, device) = Accel.Options();   // the GPU when its build is installed and checked
         Device = device;
+        Batch = device == "cpu" ? 1 : 8;
+        _mem = device switch
+        {
+            "cuda" => new OrtMemoryInfo(OrtMemoryInfo.allocatorCUDA, OrtAllocatorType.DeviceAllocator, 0, OrtMemType.Default),
+            "directml" => new OrtMemoryInfo("DML", OrtAllocatorType.DeviceAllocator, 0, OrtMemType.Default),
+            _ => OrtMemoryInfo.DefaultInstance,
+        };
         _enc = new InferenceSession(Path.Combine(Dir, "encoder.onnx"), opt);
         _first = new InferenceSession(Path.Combine(Dir, "decoder_first.onnx"), opt);
         _next = new InferenceSession(Path.Combine(Dir, "decoder_next.onnx"), opt);
@@ -112,43 +120,67 @@ public sealed class YourMt3 : IDisposable
 
     /// Greedy tokens of one segment, per decoding channel (as the authors' generate: stop at EOS,
     /// PAD after it).
-    public int[][] Tokens(float[] spec, int frames, int bins)
+    public int[][] Tokens(float[] spec, int frames, int bins) => Tokens(spec, 1, frames, bins)[0];
+
+    /// The same for `batch` segments at once (specs back to back): one encoder run and one decoder
+    /// step for all of them, until every channel of every segment has ended.
+    public int[][][] Tokens(float[] specs, int batch, int frames, int bins)
     {
         const int eos = 1, pad = 0;
-        int k = _m.channels;
-        // OrtValues straight from one run to the next: the cross-attention cache alone is ~35 MB,
-        // and copying it through managed tensors every step made each step ~7x slower.
-        using var specV = OrtValue.CreateTensorValueFromMemory(spec, [1, frames, bins]);
-        using var encOut = _enc.Run(_run, ["spec"], [specV], ["enc"]);
-        var idsBuf = new long[k];
-        using var ids = OrtValue.CreateTensorValueFromMemory(idsBuf, [1, k, 1]);
-        using var first = _first.Run(_run, ["ids", "enc"], [ids, encOut[0]], ["logits", "self_kv", "cross_kv"]);
-        var tokens = Enumerable.Range(0, k).Select(_ => new List<int>()).ToArray();
-        var alive = Enumerable.Repeat(true, k).ToArray();
-        var next = Argmax(first[0], k);
+        int k = _m.channels, rows = batch * k;
+        // The caches go from one run to the next as OrtValues left where the model runs (GPU memory
+        // on a GPU): the cross-attention cache alone is ~35 MB per segment, and copying it out and
+        // back every step made each step several times slower. Only the logits come to the CPU.
+        using var specV = OrtValue.CreateTensorValueFromMemory(specs, [batch, frames, bins]);
+        using var encOut = Run(_enc, [("spec", specV)], [], ["enc"]);
+        var idsBuf = new long[rows];
+        using var ids = OrtValue.CreateTensorValueFromMemory(idsBuf, [batch, k, 1]);
+        using var first = Run(_first, [("ids", ids), ("enc", encOut[0])], ["logits"], ["self_kv", "cross_kv"]);
+        var tokens = Enumerable.Range(0, rows).Select(_ => new List<int>()).ToArray();
+        var alive = Enumerable.Repeat(true, rows).ToArray();
+        var next = Argmax(first[0], rows);
         IDisposableReadOnlyCollection<OrtValue>? step = null;
         try
         {
             for (int n = 0; ; n++)
             {
-                for (int c = 0; c < k; c++)
+                for (int r = 0; r < rows; r++)
                 {
-                    tokens[c].Add(alive[c] ? next[c] : pad);
-                    if (next[c] == eos) alive[c] = false;
+                    tokens[r].Add(alive[r] ? next[r] : pad);
+                    if (next[r] == eos) alive[r] = false;
                 }
                 if (!alive.Any(a => a) || n + 1 >= _m.max_tokens) break;
-                for (int c = 0; c < k; c++) idsBuf[c] = next[c];
-                var o = _next.Run(_run, ["ids", "enc", "self_kv", "cross_kv"], [ids, encOut[0], step?[1] ?? first[1], first[2]], ["logits", "self_kv_out"]);
+                for (int r = 0; r < rows; r++) idsBuf[r] = next[r];
+                var o = Run(_next, [("ids", ids), ("enc", encOut[0]), ("self_kv", step?[1] ?? first[1]), ("cross_kv", first[2])], ["logits"], ["self_kv_out"]);
                 step?.Dispose();
                 step = o;
-                next = Argmax(o[0], k);
+                next = Argmax(o[0], rows);
             }
         }
         finally { step?.Dispose(); }
-        return [.. tokens.Select(t => t.ToArray())];
+        // A segment's channels stop at its own longest one, as when it is decoded alone.
+        return [.. Enumerable.Range(0, batch).Select(i =>
+        {
+            var seg = tokens.AsSpan(i * k, k).ToArray();
+            int len = seg.Max(t => t.IndexOf(eos) is var e and >= 0 ? e + 1 : t.Count);
+            return seg.Select(t => t.Take(len).ToArray()).ToArray();
+        })];
     }
 
-    static int[] Argmax(OrtValue logits, int k)   // (1, K, 1, V)
+    // Outputs in the order named: cpuOut in CPU memory (to read), deviceOut where the model ran (to feed back).
+    IDisposableReadOnlyCollection<OrtValue> Run(InferenceSession s, (string Name, OrtValue Value)[] inputs, string[] cpuOut, string[] deviceOut)
+    {
+        using var b = s.CreateIoBinding();
+        foreach (var (n, v) in inputs) b.BindInput(n, v);
+        foreach (var n in cpuOut) b.BindOutputToDevice(n, OrtMemoryInfo.DefaultInstance);
+        foreach (var n in deviceOut) b.BindOutputToDevice(n, _mem);
+        b.SynchronizeBoundInputs();
+        s.RunWithBinding(_run, b);
+        b.SynchronizeBoundOutputs();
+        return b.GetOutputValues();
+    }
+
+    static int[] Argmax(OrtValue logits, int k)   // (B, K, 1, V): k = B*K rows
     {
         var l = logits.GetTensorDataAsSpan<float>();
         int v = l.Length / k;
@@ -164,19 +196,28 @@ public sealed class YourMt3 : IDisposable
     }
 
     /// The whole recording (mono, any rate): 2.048 s segments back to back, as the authors slice it.
+    /// Segments decoded together: on a GPU one step for several costs about the same as for one;
+    /// on the CPU the time grows with the batch, so one at a time.
+    public int Batch { get; set; }
+
     public List<Note> Transcribe(float[] audio, int rate, Func<double, bool>? progress = null)
     {
         var x = Resample(audio, rate, _m.sample_rate);
         int seg = _m.input_frames, count = Math.Max(1, (x.Length + seg - 1) / seg);
         var segments = new List<int[][]>();
         var buf = new float[seg];
-        for (int i = 0; i < count; i++)
+        for (int i = 0; i < count;)
         {
             if (progress is not null && !progress((double)i / count)) return [];
-            Array.Clear(buf);
-            Array.Copy(x, i * seg, buf, 0, Math.Min(seg, x.Length - i * seg));
-            var spec = Spectrogram(buf, out int frames, out int bins);
-            segments.Add(Tokens(spec, frames, bins));
+            int batch = Math.Min(Batch, count - i), frames = 0, bins = 0;
+            var specs = new List<float>();
+            for (int j = 0; j < batch; j++, i++)
+            {
+                Array.Clear(buf);
+                Array.Copy(x, i * seg, buf, 0, Math.Min(seg, x.Length - i * seg));
+                specs.AddRange(Spectrogram(buf, out frames, out bins));
+            }
+            segments.AddRange(Tokens([.. specs], batch, frames, bins));
         }
         return Notes(segments);
     }
