@@ -122,8 +122,25 @@ int main(int argc, char** argv) {
             else if (t.events[i].type == AnalyzerEventType::ChordEnded)   // the take / score label
                 std::printf("ended %8.3f %8.3f %s\n", t.events[i].data.chord.startTimeSeconds, t.events[i].data.chord.endTimeSeconds, t.events[i].data.chord.symbol);
     };
+    // DEV: DZ_CHROMA_IN=file ("t c0..c11" per line) replaces the chord input, to try another front end.
+    std::vector<std::pair<double, std::vector<float>>> chromaIn;
+    if (const char* in = std::getenv("DZ_CHROMA_IN")) {
+        FILE* f = std::fopen(in, "r");
+        double tt;
+        while (f && std::fscanf(f, "%lf", &tt) == 1) {
+            std::vector<float> v(12);
+            for (float& e : v) if (std::fscanf(f, "%f", &e) != 1) e = 0;
+            chromaIn.emplace_back(tt, v);
+        }
+        if (f) std::fclose(f);
+    }
+    size_t inPos = 0;
     for (size_t p = 0; p + hop <= x.size(); p += hop) {
         fe.process(x.data() + p, hop, p + hop, o);
+        if (!chromaIn.empty()) {
+            while (inPos + 1 < chromaIn.size() && chromaIn[inPos + 1].first <= o.chroma.timestampSeconds) inPos++;
+            for (int k = 0; k < 12; k++) o.chroma.raw[k] = chromaIn[inPos].second[k];
+        }
         tracker.process(o.chroma, o.chroma.timestampSeconds, double(p + hop) / rate, o.bass, o.lastOnset, t);
         events();
         int key = t.key.valid ? t.key.tonic + 12 * t.key.minor : -1;
@@ -132,6 +149,11 @@ int main(int argc, char** argv) {
             if (key < 0) std::printf("key %8.3f -\n", double(p + hop) / rate);
             else std::printf("key %8.3f %s %s r %.2f margin %.2f\n", double(p + hop) / rate, names[t.key.tonic], t.key.minor ? "minor" : "major", t.key.correlation, t.key.margin);
             shownKey = key;
+        }
+        if (std::getenv("DZ_CHROMA")) {   // the chord recognizer's input, for note-level evaluation
+            std::printf("chroma %8.3f", o.chroma.timestampSeconds);
+            for (float v : o.chroma.raw) std::printf(" %.4g", v);
+            std::printf(" bass %d %d\n", o.bass.valid ? o.bass.midi : -1, int(o.bass.settled));
         }
         if (std::getenv("DZ_PREVIEW")) std::printf("preview %8.3f %s\n", double(p + hop) / rate, t.preview.best.symbol[0] ? t.preview.best.symbol : "-");
         if (t.preview.best.symbol != shownPreview) { shownPreview = t.preview.best.symbol; previewChanges++; }
