@@ -152,12 +152,12 @@ void NoteFrontEnd::analyse(double hopSeconds, NoteFrame& out) {
 
 const ChordQuality ChordHmm::kQuality[kQualities] = {ChordQuality::Major, ChordQuality::Minor, ChordQuality::Dom7, ChordQuality::Maj7,
                                                      ChordQuality::Min7, ChordQuality::Diminished, ChordQuality::Sus4, ChordQuality::Sus2,
-                                                     ChordQuality::Power};
+                                                     ChordQuality::Power, ChordQuality::Add9};
 
 namespace {
 constexpr int8_t kIv[ChordHmm::kQualities][4] = {{0, 4, 7, -1}, {0, 3, 7, -1}, {0, 4, 7, 10}, {0, 4, 7, 11}, {0, 3, 7, 10},
-                                                 {0, 3, 6, -1}, {0, 5, 7, -1}, {0, 2, 7, -1}, {0, 7, -1, -1}};
-constexpr float kPrior[ChordHmm::kQualities] = {0, 0, -0.7f, -1.2f, -1.0f, -1.5f, -1.5f, -1.5f, -2.5f};   // simpler is likelier
+                                                 {0, 3, 6, -1}, {0, 5, 7, -1}, {0, 2, 7, -1}, {0, 7, -1, -1}, {0, 4, 7, 2}};
+constexpr float kPrior[ChordHmm::kQualities] = {0, 0, -0.7f, -1.2f, -1.0f, -1.5f, -1.5f, -1.5f, -2.5f, -1.0f};   // simpler is likelier
 // Per-hop weight of the notes' evidence against the cost of a change: at 1, two changes in a row
 // (C, then the old notes and the new together, then G) are cheap; 0.2 measured best (tools/loopback).
 constexpr float kEvidence = 0.2f;

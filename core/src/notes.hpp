@@ -25,7 +25,7 @@
 namespace dz {
 
 struct NoteFrame {
-    static constexpr int kMax = 3;
+    static constexpr int kMax = 4;
     uint8_t count = 0;
     int8_t midi[kMax]{};      // lowest first
     bool audible = false;     // above the audibility floor
@@ -51,7 +51,7 @@ private:
 
 class ChordHmm {
 public:
-    static constexpr int kQualities = 9;
+    static constexpr int kQualities = 10;
     static constexpr int kStates = 12 * kQualities;
     static const ChordQuality kQuality[kQualities];
 

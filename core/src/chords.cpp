@@ -840,13 +840,17 @@ void ChordTracker::process_notes(const NoteFrame& notes, const ChromaVector& chr
     };
     if (active_ && notes.count) bassCount_[notes.midi[0] % 12]++;
     const int d = hmm_.decided();
-    if (sounding && d >= 0 && active_ && d != curState_ && ChordHmm::root(d) == cur_.c.rootPitchClass) {
+    // A change counts once the decision has held it for 0.2 s: the lagged decision may revise itself
+    // hop to hop at a boundary, and a 20 ms chord is never what was played.
+    if (d != pendingState_) pendingState_ = d, pendingSince_ = t;
+    const bool held = d >= 0 && t - pendingSince_ >= kHoldSeconds;
+    if (sounding && held && active_ && d != curState_ && ChordHmm::root(d) == cur_.c.rootPitchClass) {
         // Same root, another quality: the same chord heard better (a seventh or sus at its start was
         // the previous chord still ringing). Renamed in place; no change, no new chord.
         matcher_.describe(ChordHmm::root(d), ChordHmm::quality(d), chordBass(ChordHmm::root(d)), cur_.c);
         curState_ = d;
-    } else if (sounding && d >= 0 && (!active_ || d != curState_)) {
-        const double start = std::max(t - lagSeconds, active_ ? cur_.start + hop_ : 0.0);
+    } else if (sounding && held && (!active_ || d != curState_)) {
+        const double start = std::max(pendingSince_ - lagSeconds, active_ ? cur_.start + hop_ : 0.0);
         if (active_) {
             matcher_.describe(cur_.c.rootPitchClass, cur_.c.quality, chordBass(cur_.c.rootPitchClass), cur_.c);
             emit(out, AnalyzerEventType::ChordEnded, cur_, start);

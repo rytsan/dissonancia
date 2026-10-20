@@ -152,6 +152,11 @@ int main(int argc, char** argv) {
             else std::printf("key %8.3f %s %s r %.2f margin %.2f\n", double(p + hop) / rate, names[t.key.tonic], t.key.minor ? "minor" : "major", t.key.correlation, t.key.margin);
             shownKey = key;
         }
+        if (std::getenv("DZ_NOTEDUMP")) {   // the perceived notes per hop (NoteFrontEnd)
+            std::printf("notes %8.3f%s", double(p + hop) / rate, o.notes.audible ? "" : " (quiet)");
+            for (int i = 0; i < o.notes.count; i++) std::printf(" %d", o.notes.midi[i]);
+            std::printf("\n");
+        }
         if (std::getenv("DZ_CHROMA")) {   // the chord recognizer's input, for note-level evaluation
             std::printf("chroma %8.3f", o.chroma.timestampSeconds);
             for (float v : o.chroma.raw) std::printf(" %.4g", v);

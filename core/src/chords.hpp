@@ -158,6 +158,9 @@ private:
     int curState_ = -1;              // HMM state of cur_ (notes path)
     double lastAudible_ = -1;
     int bassCount_[12]{};            // lowest note per hop while the current chord sounds (notes path)
+    int pendingState_ = -1;          // the HMM's decision, and since when it has held (notes path)
+    double pendingSince_ = 0;
+    static constexpr double kHoldSeconds = 0.2;
     double quietSince_ = -1;         // silence start (< 0: sounding), for the accumulator's gaps
     bool lastSparse_ = false;        // the last sounding frame had <= 2 notes (a picked note)
     float acc_[12]{};                // arpeggio accumulator (decaying max-hold of chroma energy)
