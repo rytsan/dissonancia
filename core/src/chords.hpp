@@ -143,6 +143,8 @@ private:
     ChordHistory history_;
     ChordCandidate previous_{};      // confirmed chord before cur_ (symbol "" = none): cadence context
     KeyTracker key_;
+    double quietSince_ = -1;         // silence start (< 0: sounding), for the accumulator's gaps
+    bool lastSparse_ = false;        // the last sounding frame had <= 2 notes (a picked note)
     float acc_[12]{};                // arpeggio accumulator (decaying max-hold of chroma energy)
     // Chroma of the last kSegFrames hops (5 s at 20 ms): a candidate is confirmed on its segment
     // since the attack, and a chord is relabelled on its whole duration when it ends.

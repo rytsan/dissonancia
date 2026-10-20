@@ -387,3 +387,22 @@ TEST_CASE("the estimated key is the tonal context when the session has none") {
     keyed.hint(c);
     CHECK(keyed.context(3, ChordQuality::Major, -1, ChordQuality::Unknown, nullptr) == before);
 }
+
+TEST_CASE("damped fingerpicking: one short note at a time, gaps between them, still the chord") {
+    // Thumb, then the treble strings, every note damped after 150 ms with 225 ms of silence after
+    // it: two bars of C, two of Am (eighths at 80 BPM).
+    std::vector<Segment> segs;
+    auto bar = [&](std::vector<int> notes) {
+        for (int m : notes) { segs.push_back({{m}, 0.15}); segs.push_back({{}, 0.225}); }
+    };
+    for (int b = 0; b < 2; b++) bar({48, 55, 60, 64, 60, 55, 60, 64});
+    for (int b = 0; b < 2; b++) bar({45, 52, 57, 60, 57, 52, 57, 60});
+    Result r = run(segs, session(), true, 0.1);
+    std::string labels;
+    for (const auto& e : r.ended) labels += std::string(e.symbol) + " ";
+    INFO("ended: " << labels);
+    REQUIRE(!r.ended.empty());
+    CHECK(std::string(r.ended[0].symbol).rfind("C", 0) == 0);
+    CHECK(std::string(r.ended.back().symbol).rfind("Am", 0) == 0);
+    CHECK(r.ended.size() <= 4);
+}

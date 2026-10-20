@@ -655,16 +655,21 @@ void ChordTracker::process(const ChromaVector& chroma, double t, double frameEnd
     // Arpeggio accumulator (§12): a decaying max-hold of chroma energy. tau 0.25 s keeps a note
     // above the 0.3 amplitude threshold for ~0.6 s (the live 300-600 ms window). Used only when the
     // frame alone shows <= 2 notes but the recent past shows a chord: never smears strummed changes.
+    // Damped picking leaves gaps between its notes: through a silence under 0.6 s after a picked
+    // note the accumulator holds (no decay) and the chord stays open; a longer one clears it.
     const float decay = float(std::exp(-hop_ / 0.25));
     float mxNow = 0, mxAcc = 0;
-    bool silentFrame = true;
+    for (int i = 0; i < 12; i++) mxNow = std::max(mxNow, chroma.raw[i]);
+    const bool silentFrame = mxNow <= 0;
+    if (!silentFrame) quietSince_ = -1;
+    else if (quietSince_ < 0) quietSince_ = t;
+    const bool gap = silentFrame && lastSparse_ && t - quietSince_ <= 0.6;
     for (int i = 0; i < 12; i++) {
-        silentFrame &= chroma.raw[i] <= 0;
-        acc_[i] = std::max(acc_[i] * decay, chroma.raw[i]);
-        mxNow = std::max(mxNow, chroma.raw[i]);
+        if (!silentFrame) acc_[i] = std::max(acc_[i] * decay, chroma.raw[i]);
+        else if (!gap) acc_[i] = 0;
         mxAcc = std::max(mxAcc, acc_[i]);
     }
-    if (silentFrame) std::fill(acc_, acc_ + 12, 0.f);
+    if (!silentFrame) lastSparse_ = strong(chroma.raw, mxNow) <= 2;
     key_.process(chroma.raw);
     matcher_.hint(key_.estimate());
     out.key = key_.estimate();
@@ -672,9 +677,10 @@ void ChordTracker::process(const ChromaVector& chroma, double t, double frameEnd
     segTime_[segPos_] = t;
     segPos_ = (segPos_ + 1) % kSegFrames;
     const bool arpeggio = !silentFrame && strong(chroma.raw, mxNow) <= 2 && strong(acc_, mxAcc) >= 3;
+    const bool held = gap && strong(acc_, mxAcc) >= 3;   // between two picked notes: still the chord
     const int bassPc = bass.valid && bass.settled ? bass.pitchClass : -1;
-    matcher_.match(arpeggio ? acc_ : chroma.raw, history_, bassPc, out.preview);
-    out.preview.best.arpeggiated = arpeggio;
+    matcher_.match(arpeggio || held ? acc_ : chroma.raw, history_, bassPc, out.preview);
+    out.preview.best.arpeggiated = arpeggio || held;
     const ChordCandidate& best = out.preview.best;
     const bool sound = best.symbol[0] != 0;
 
@@ -688,8 +694,9 @@ void ChordTracker::process(const ChromaVector& chroma, double t, double frameEnd
             previous_ = {};
         }
     } else {
-        silentSince_ = -1;
-        lastSound_ = t;
+        // A gap between picked notes builds the chord like a note, but the chord does not last
+        // into the gap: it ends at the last note heard.
+        if (!held) silentSince_ = -1, lastSound_ = t;
         // Hysteresis: the confirmed chord holds while it is still a close runner-up. An up-strum on
         // the top strings, a passing melody note or a drum hit tilts one frame, not the harmony.
         bool holds = false;
