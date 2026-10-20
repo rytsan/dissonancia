@@ -14,24 +14,20 @@ namespace dz {
 
 namespace {
 
-constexpr int kStates = ChordMatcher::kTemplates + 1, kSilence = ChordMatcher::kTemplates;
-// Cost of a chord change in summed score units (a new chord must out-score the current one by
-// this much over its frames, ~0.1 per frame for 2 s). Swept 2 / 4 / 6 / 10 / 16 on the band mix
-// (take labels 84 / 92 / 98 / 99 / 99 %); 16 starts to merge real changes on the validation
-// progressions (jazz 93 %), 10 keeps them all at 100 %.
-constexpr float kChangePenalty = 10.0f;
-
 struct Frame {
     double t;          // chroma timestamp, sample clock seconds
     float raw[12];
     int8_t bass;       // settled bass pitch class, -1 none
     bool silent;
+    NoteFrame notes;   // perceived notes (NoteFrontEnd)
 };
 
 }  // namespace
 
 std::vector<AnalyzerEvent> decode_chords(const SessionConfig& s, const float* x, size_t n, uint32_t rate, double comp,
-                                         bool grid, const std::function<bool(double)>& progress) {
+                                         bool /*grid*/, const std::function<bool(double)>& progress) {
+    // ponytail: the metronome grid of a REC take (changes on the beats) is not used by the notes HMM
+    // yet; add it as a lower change cost on the beats if takes show changes off the beat.
     const LiveConfig c = live_config(s.mode, s.quality, rate);
     const uint32_t hop = uint32_t(std::lround(c.hopSeconds * rate));
     ChromaFrontEnd fe(s, c.decimation, rate, c.fMin, c.fMax, c.binsPerOctave, hop, c.bassMin, c.bassMax, c.windowSeconds);
@@ -40,6 +36,7 @@ std::vector<AnalyzerEvent> decode_chords(const SessionConfig& s, const float* x,
     // Pass 1: frames and onsets.
     std::vector<Frame> frames;
     std::vector<double> onsets;
+    KeyTracker key(c.hopSeconds);
     for (size_t pos = 0; pos + hop <= n; pos += hop) {
         fe.process(x + pos, hop, pos + hop, o);
         Frame f{};
@@ -48,60 +45,70 @@ std::vector<AnalyzerEvent> decode_chords(const SessionConfig& s, const float* x,
         f.bass = o.bass.valid && o.bass.settled ? o.bass.pitchClass : int8_t(-1);
         f.silent = true;
         for (float v : f.raw) f.silent &= v <= 0;
+        f.notes = o.notes;
+        key.process(o.chroma.raw);
         frames.push_back(f);
         if (o.onset) onsets.push_back(o.lastOnset);
         if (progress && (pos / hop) % 64 == 0 && !progress(0.8 * double(pos) / double(n))) return {};
     }
     if (frames.empty()) return {};
 
-    // Pass 2: Viterbi. score(s, t) + (stay ? 0 : -penalty); silence is its own state.
+    // Pass 2: the chord HMM over the perceived notes (as LIVE), decoded with the whole take: every
+    // frame decided from the past and the future. Silence (no note heard for 0.6 s) separates.
     ChordMatcher matcher(s);
-    const float penalty = kChangePenalty;
-    // Metronome grid: a change shows in the chroma from the attack to ~120 ms after it (the low CQT
-    // bins refill), so a frame counts as "on" a beat from 60 ms before to 120 ms after it. Half the
-    // cost on a downbeat, the full cost on the other beats (0.75 split chords on beat 2), 1.2 off
-    // the grid; 0.4-0.6 / 0.9-1.0 / 1.0-1.4 measured the same on the band mix and validation.
-    const double beat = 60.0 / std::max(20.f, s.bpm);
-    const int perBar = std::max<int>(1, s.meter.numerator);
-    auto grid_factor = [&](double t) {
-        const double b = t / beat;
-        const long nearest = std::lround(b - 0.03 / beat);
-        const double d = t - nearest * beat;
-        if (d < -0.06 || d > 0.12) return 1.2f;
-        return nearest % perBar == 0 ? 0.5f : 1.0f;
-    };
-    std::vector<uint8_t> back(frames.size() * kStates);
-    std::vector<float> prev(kStates, 0.f), cur(kStates), e(kStates);
+    const KeyEstimate k = key.estimate();
+    int tonic = 0;
+    bool minor = false;
+    if (s.keySet) {
+        minor = s.keyMode != KeyMode::Major;
+        tonic = (7 * (s.keyFifths + 12) + (minor ? 9 : 0)) % 12;
+    } else if (k.valid) tonic = k.tonic, minor = k.minor;
+    std::vector<NoteFrame> notes(frames.size());
+    for (size_t i = 0; i < frames.size(); i++) notes[i] = frames[i].notes;
+    const std::vector<int> path = ChordHmm::decode(notes, c.hopSeconds, ChordHmm::played(), s.keySet || k.valid, tonic, minor);
+    std::vector<bool> quiet(frames.size());
+    // quiet: nothing heard yet, or nothing for 0.6 s
+    double lastHeard = -1e9;
     for (size_t i = 0; i < frames.size(); i++) {
-        const Frame& f = frames[i];
-        matcher.score_all(f.raw, f.bass, e.data());
-        for (int k = 0; k < ChordMatcher::kTemplates; k++) e[size_t(k)] = f.silent ? 0.f : e[size_t(k)] <= ChordMatcher::kRuledOut ? -2.f : e[size_t(k)];
-        e[kSilence] = f.silent ? 1.f : 0.3f;
-        int best = 0;
-        for (int k = 1; k < kStates; k++) if (prev[size_t(k)] > prev[size_t(best)]) best = k;
-        const float cost = penalty * (grid ? grid_factor(f.t - comp) : 1.f);
-        for (int k = 0; k < kStates; k++) {
-            const float stay = prev[size_t(k)], move = prev[size_t(best)] - cost;
-            const bool keep = i == 0 || stay >= move;
-            cur[size_t(k)] = e[size_t(k)] + (i == 0 ? 0 : keep ? stay : move);
-            back[i * kStates + size_t(k)] = uint8_t(keep ? k : best);
-        }
-        std::swap(prev, cur);
-    }
-    std::vector<int> path(frames.size());
-    int st = int(std::max_element(prev.begin(), prev.end()) - prev.begin());
-    for (size_t i = frames.size(); i-- > 0;) {
-        path[i] = st;
-        st = back[i * kStates + size_t(st)];
+        const double t = double(i) * c.hopSeconds;
+        if (frames[i].notes.audible) lastHeard = t;
+        quiet[i] = !frames[i].notes.audible && t - lastHeard > 0.6;
     }
 
-    // Segments of the path, labelled on their own frames.
-    struct Seg { size_t a, b; };   // frames [a, b)
+    // Segments of the path; within a chord, a bass that holds 0.3 s or more is its own segment
+    // (the detail STUDIO shows: G then G/F# under the same G, Em7/B).
+    struct Seg { size_t a, b; ChordCandidate c; };   // frames [a, b)
     std::vector<Seg> segs;
+    const size_t minBass = size_t(std::lround(0.3 / c.hopSeconds));
     for (size_t i = 0; i < frames.size();) {
         size_t j = i;
-        while (j < frames.size() && path[j] == path[i]) j++;
-        if (path[i] != kSilence) segs.push_back({i, j});
+        while (j < frames.size() && path[j] == path[i] && quiet[j] == quiet[i]) j++;
+        if (!quiet[i]) {
+            // runs of the settled bass that hold 0.3 s (shorter ones belong to the runs around them);
+            // none: the bass heard most often
+            std::vector<std::pair<size_t, int>> runs;   // (first frame, bass pitch class)
+            int votes[12]{};
+            for (size_t f = i; f < j;) {
+                const int b0 = frames[f].bass;   // the bass tracker's settled bass (the lowest perceived note
+                size_t g = f;                    // wanders in picking, when the treble outweighs the ringing bass)
+                while (g < j && frames[g].bass == b0) g++;
+                if (b0 >= 0) votes[b0] += int(g - f);
+                if (b0 >= 0 && g - f >= minBass && (runs.empty() || runs.back().second != b0)) runs.emplace_back(f, b0);
+                f = g;
+            }
+            if (runs.empty()) {
+                const int most = int(std::max_element(votes, votes + 12) - votes);
+                runs.emplace_back(i, votes[most] > 0 ? most : -1);
+            }
+            // the previous chord's bass still ringing at the start of this one is not its inversion
+            if (runs.size() > 1 && !segs.empty() && segs.back().b == i && runs.front().second == (segs.back().c.hasBass ? segs.back().c.bassPitchClass : segs.back().c.rootPitchClass)) runs.erase(runs.begin());
+            runs.front().first = i;
+            for (size_t r = 0; r < runs.size(); r++) {
+                Seg g{runs[r].first, r + 1 < runs.size() ? runs[r + 1].first : j, {}};
+                matcher.describe(ChordHmm::root(path[i]), ChordHmm::quality(path[i]), runs[r].second, g.c, true);
+                segs.push_back(g);
+            }
+        }
         i = j;
     }
 
@@ -113,26 +120,8 @@ std::vector<AnalyzerEvent> decode_chords(const SessionConfig& s, const float* x,
     uint32_t seq = 0;
     for (size_t si = 0; si < segs.size(); si++) {
         const Seg& g = segs[si];
-        // Persistence-weighted mean (normalised frames): chord tones ring through the segment.
-        float mean[12]{}, present[12]{};
-        int bassVotes[12]{}, voiced = 0;
-        for (size_t i = g.a; i < g.b; i++) {
-            const Frame& f = frames[i];
-            float mx = 0;
-            for (float v : f.raw) mx = std::max(mx, v);
-            if (mx <= 0) continue;
-            for (int k = 0; k < 12; k++) { mean[k] += f.raw[k] / mx; present[k] += f.raw[k] >= 0.09f * mx; }
-            if (f.bass >= 0) bassVotes[f.bass]++;
-            voiced++;
-        }
-        if (voiced < 3) continue;
-        for (int k = 0; k < 12; k++) { float share = present[k] / float(voiced); mean[k] = mean[k] / float(voiced) * share * share; }
-        int bass = int(std::max_element(bassVotes, bassVotes + 12) - bassVotes);
-        if (bassVotes[bass] < voiced * 3 / 10) bass = -1;   // no bass that held for 30 % of the chord
-        ChordRecognitionResult r;
-        matcher.match(mean, history, bass, r);
-        if (!r.best.symbol[0]) continue;
-
+        ChordRecognitionResult r{};
+        r.best = g.c;
         // Start: the attack that began the segment (the chroma lags the change by the CQT windows),
         // within 0.25 s before; the previous chord then ends there (no overlap, no gap).
         double start = frames[g.a].t, end = g.b < frames.size() ? frames[g.b].t : frames.back().t + c.hopSeconds;

@@ -337,6 +337,7 @@ public sealed class NativeLiveSource : ILiveSource
     int[] _frets = [];
     readonly LiveSong _song = new();
     KeyOption? _songKey;
+    string _lastHarmony = "";
     string _songKeyText = "";
 
     /// Events lost between core and GUI (sequence gaps), shown as incomplete event log.
@@ -436,6 +437,14 @@ public sealed class NativeLiveSource : ILiveSource
         }
         fixed (byte* cs = _snap.ConfirmedSymbol) f.DisplayChord = _confirmed.Get(cs, 16, Display);
         fixed (byte* hs = _snap.HarmonySymbol) f.Harmony = _harmony.Get(hs, 16, Display);
+        // Chord timeline (LIVE): one cell per change of the harmony underneath, newest last.
+        if (f.Harmony.Length > 0 && f.Harmony != _lastHarmony)
+        {
+            f.TimelineBars.Add(f.Harmony);
+            f.TimelineRomans.Add("");
+            if (f.TimelineBars.Count > 8) { f.TimelineBars.RemoveAt(0); f.TimelineRomans.RemoveAt(0); }
+            _lastHarmony = f.Harmony;
+        }
         f.CandidateChord = !f.ChordConfirmed && f.ChordSymbol.Length > 0 && f.ChordConfirmElapsedMs >= 120 ? f.ChordSymbol : "";
         if (!_session.ShowInversions) (f.DisplayChord, f.CandidateChord) = (NoBass(f.DisplayChord), NoBass(f.CandidateChord));
         if (f.DisplayChord.Length == 0) f.DisplayChord = f.CandidateChord;   // nothing confirmed yet: the candidate, dimmed
@@ -479,16 +488,8 @@ public sealed class NativeLiveSource : ILiveSource
                     byte* d = ev[i].Data;
                     switch (ev[i].Type)
                     {
-                        case AnalyzerEventType.ChordConfirmed:   // chord timeline: one cell per confirmed change, newest last
-                            f.TimelineBars.Add(_session.ShowInversions ? _event.Get(d + 24, 16, Display) : NoBass(_event.Get(d + 24, 16, Display)));
-                            f.TimelineRomans.Add(_event.Get(d + 62, 12, DisplayRoman));
-                            if (f.TimelineBars.Count > 8) { f.TimelineBars.RemoveAt(0); f.TimelineRomans.RemoveAt(0); }
-                            break;
-                        case AnalyzerEventType.ChordEnded when f.TimelineBars.Count > 0:
-                            // A bass that settled after the confirmation adds the inversion: the final symbol wins.
-                            f.TimelineBars[^1] = _session.ShowInversions ? _event.Get(d + 24, 16, Display) : NoBass(_event.Get(d + 24, 16, Display));
-                            f.TimelineRomans[^1] = _event.Get(d + 62, 12, DisplayRoman);
-                            _song.AddChord(*(double*)d, f.TimelineBars[^1]);
+                        case AnalyzerEventType.ChordEnded:
+                            _song.AddChord(*(double*)d, _event.Get(d + 24, 16, Display));   // played chords, exact times: meter and form
                             SongReadout(f);
                             break;
                         case AnalyzerEventType.Cadence:

@@ -74,7 +74,8 @@ public:
 
     // A chord named for display and events: symbol (with the inversion when the bass is one of its
     // tones), its tones, Roman numeral and function in the session key.
-    void describe(int root, ChordQuality q, int bassPc, ChordCandidate& out) const;
+    // anyBass: a bass outside the chord is shown too (G/F#, a passing bass under G: STUDIO detail).
+    void describe(int root, ChordQuality q, int bassPc, ChordCandidate& out, bool anyBass = false) const;
     // The key the context uses (the session's, else the hinted estimate); false = none.
     bool context_key(int& tonic, bool& minor) const { tonic = ctxTonic_; minor = ctxMinor_; return ctxOn_; }
 

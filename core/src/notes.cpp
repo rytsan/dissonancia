@@ -11,6 +11,7 @@ constexpr int kLowMidi = 40, kHighMidi = 88;           // E2 .. E6, candidate fu
 constexpr int kBassTop = 52, kTrebleBottom = 67;       // registers: [40,52) bass, [52,67) middle, [67,89) treble
 constexpr float kRegister = 0.5f, kGlobal = 0.15f;     // strong within its register / against the frame's best
 constexpr float kFloorDb = 30, kFadeDbPerSecond = 21.5f;
+constexpr float kAbsoluteFloorDb = -10;   // ~-70 dBFS for a full-scale sine (|X| = n/4 at 4096): silence
 constexpr int kMaxPeaks = 256;
 }  // namespace
 
@@ -76,7 +77,7 @@ void NoteFrontEnd::analyse(double hopSeconds, NoteFrame& out) {
     }
     runMax_ = std::max(top, runMax_ - kFadeDbPerSecond * float(hopSeconds));
     bool now[128]{};
-    if (top >= runMax_ - kFloorDb) {
+    if (top >= runMax_ - kFloorDb && top > kAbsoluteFloorDb) {
         out.audible = true;
         // peaks 60 Hz .. 5 kHz within 60 dB of the loudest
         int peak[kMaxPeaks], np = 0;
@@ -188,7 +189,7 @@ void ChordHmm::reset() {
     heard_ = false;
 }
 
-void ChordHmm::step(const NoteFrame& notes, bool keyOn, int keyTonic, bool keyMinor) {
+void ChordHmm::evidence(const NoteFrame& notes, bool keyOn, int keyTonic, bool keyMinor, float* e) {
     // memory of the notes heard: recency, sustain, register
     const float decay = std::exp(-float(hop_) / p_.tau);
     for (float& v : mem_) v *= decay;
@@ -214,6 +215,30 @@ void ChordHmm::step(const NoteFrame& notes, bool keyOn, int keyTonic, bool keyMi
         static const int major[7] = {0, 2, 4, 5, 7, 9, 11}, minor[8] = {0, 2, 3, 5, 7, 8, 10, 11};   // minor with its leading tone
         for (int i = 0; i < (keyMinor ? 8 : 7); i++) scale |= uint16_t(1u << ((keyTonic + (keyMinor ? minor[i] : major[i])) % 12));
     }
+    for (int s = 0; s < kStates; s++) {
+        float v = 0;
+        if (mx > 0.05f) {
+            const uint16_t m = mask_of(s);
+            int size = 0;
+            float inSum = 0;
+            for (int p = 0; p < 12; p++) {
+                const bool in = m >> p & 1;
+                size += in;
+                if (in) inSum += mem_[p];
+                v += mem_[p] * (in ? kLogIn : kLogOut);
+            }
+            v += 0.4f * (inSum / float(size) - 1);   // completeness: tones left unheard cost a little
+            if (bass >= 0) v += (m >> bass & 1) ? (root(s) == bass ? 0.3f : 0.f) : -1.f;
+            if (keyOn && (m & ~scale) == 0) v += 0.3f;   // diatonic
+        }
+        e[s] = p_.evidence * v + kPrior[s % kQualities] * float(hop_) * 5;
+        if (p_.triads && s % kQualities > 1) e[s] = -1e9f;   // only major and minor triads
+    }
+}
+
+void ChordHmm::step(const NoteFrame& notes, bool keyOn, int keyTonic, bool keyMinor) {
+    float e[kStates];
+    evidence(notes, keyOn, keyTonic, keyMinor, e);
     // Viterbi step: stay, or move from the best state
     int prevBest = 0;
     for (int s = 1; s < kStates; s++) if (alpha_[s] > alpha_[prevBest]) prevBest = s;
@@ -223,23 +248,7 @@ void ChordHmm::step(const NoteFrame& notes, bool keyOn, int keyTonic, bool keyMi
     for (int s = 0; s < kStates; s++) {
         const float stay = alpha_[s] + logStay, move = alpha_[prevBest] + logMove;
         back[s] = uint8_t(stay >= move ? s : prevBest);
-        float e = 0;
-        if (mx > 0.05f) {
-            const uint16_t m = mask_of(s);
-            int size = 0;
-            float inSum = 0;
-            for (int p = 0; p < 12; p++) {
-                const bool in = m >> p & 1;
-                size += in;
-                if (in) inSum += mem_[p];
-                e += mem_[p] * (in ? kLogIn : kLogOut);
-            }
-            e += 0.4f * (inSum / float(size) - 1);   // completeness: tones left unheard cost a little
-            if (bass >= 0) e += (m >> bass & 1) ? (root(s) == bass ? 0.3f : 0.f) : -1.f;
-            if (keyOn && (m & ~scale) == 0) e += 0.3f;   // diatonic
-        }
-        alpha_[s] = std::max(stay, move) + p_.evidence * e + kPrior[s % kQualities] * float(hop_) * 5;
-        if (p_.triads && s % kQualities > 1) alpha_[s] = -1e9f;   // only major and minor triads
+        alpha_[s] = std::max(stay, move) + e[s];
         top = std::max(top, alpha_[s]);
     }
     for (float& a : alpha_) a -= top;
@@ -254,6 +263,33 @@ void ChordHmm::step(const NoteFrame& notes, bool keyOn, int keyTonic, bool keyMi
         for (int k = 0; k < lag_; k++) s = back_[size_t((row_ - 1 - k + 2 * lag_) % lag_) * kStates + size_t(s)];
         decided_ = s;
     }
+}
+
+std::vector<int> ChordHmm::decode(const std::vector<NoteFrame>& frames, double hopSeconds, Params p, bool keyOn, int keyTonic, bool keyMinor) {
+    ChordHmm h(hopSeconds, p);
+    std::vector<uint8_t> back(frames.size() * kStates);
+    float alpha[kStates]{}, e[kStates];
+    const float logStay = std::log(p.stay), logMove = std::log((1 - p.stay) / (kStates - 1));
+    for (size_t i = 0; i < frames.size(); i++) {
+        h.evidence(frames[i], keyOn, keyTonic, keyMinor, e);
+        int prevBest = 0;
+        for (int s = 1; s < kStates; s++) if (alpha[s] > alpha[prevBest]) prevBest = s;
+        float top = -1e30f;
+        for (int s = 0; s < kStates; s++) {
+            const float stay = alpha[s] + logStay, move = alpha[prevBest] + logMove;
+            back[i * kStates + size_t(s)] = uint8_t(stay >= move ? s : prevBest);
+            alpha[s] = std::max(stay, move) + e[s];
+            top = std::max(top, alpha[s]);
+        }
+        for (float& a : alpha) a -= top;
+    }
+    std::vector<int> path(frames.size());
+    int s = int(std::max_element(alpha, alpha + kStates) - alpha);
+    for (size_t i = frames.size(); i-- > 0;) {
+        path[i] = s;
+        s = back[i * kStates + size_t(s)];
+    }
+    return path;
 }
 
 }  // namespace dz

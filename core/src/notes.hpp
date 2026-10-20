@@ -73,6 +73,8 @@ public:
     void reset();
     // keyOn: a key to prefer (the session's, else a valid estimate); tonic pitch class, minor mode.
     void step(const NoteFrame& notes, bool keyOn, int keyTonic, bool keyMinor);
+    // The whole recording at once (STUDIO): the best chord per frame, from the past and the future.
+    static std::vector<int> decode(const std::vector<NoteFrame>& frames, double hopSeconds, Params p, bool keyOn, int keyTonic, bool keyMinor);
     int current() const { return best_; }        // best state now (preview), -1 = nothing heard yet
     int decided() const { return decided_; }     // the state decided for lag_ hops ago, -1 = none yet
     int lag_hops() const { return lag_; }
@@ -80,6 +82,9 @@ public:
     static ChordQuality quality(int state) { return kQuality[state % kQualities]; }
 
 private:
+    // Updates the memory of the notes heard and writes each state's log evidence for this hop.
+    void evidence(const NoteFrame& notes, bool keyOn, int keyTonic, bool keyMinor, float* e);
+
     double hop_;
     Params p_;
     int lag_;

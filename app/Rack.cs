@@ -341,9 +341,9 @@ public sealed class LcdModule : RackModule
             double dot = Math.Min((inner.Width - status - 10) / (7 * 6 * 1.3), (split - inner.Y - 62) / (7 * 1.3));
             // The confirmed chord stays on the panel; a candidate that has held 120 ms shows beside it.
             bool steady = f.DisplayChord.Length > 0 && f.DisplayChord != f.CandidateChord;
-            // Música completa leads with the harmony underneath (G ... D ...), the chord played under
-            // it; the instrument modes the other way round.
-            bool harmonyFirst = Session.Live == LiveMode.FullSong && f.Harmony.Length > 0;
+            // LIVE leads with the harmony underneath (G ... D ...: absolute chords, the sum of what
+            // sounds); the chord played, with its colours and inversion, is the line under it.
+            bool harmonyFirst = f.Harmony.Length > 0;
             Plasma.DotText(ctx, harmonyFirst ? f.Harmony : f.DisplayChord, inner.X, inner.Y, dot, cells: 7, dim: !harmonyFirst && !steady);
 
             bool pending = f.CandidateChord.Length > 0;

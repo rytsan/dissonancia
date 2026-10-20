@@ -195,7 +195,7 @@ constexpr DegreeRule kMinorRules[] = {
 
 }  // namespace
 
-void ChordMatcher::describe(int root, ChordQuality q, int bassPc, ChordCandidate& c) const {
+void ChordMatcher::describe(int root, ChordQuality q, int bassPc, ChordCandidate& c, bool anyBass) const {
     c = {};
     const QualityDef& d = def(q);
     c.rootPitchClass = int8_t(root);
@@ -204,7 +204,7 @@ void ChordMatcher::describe(int root, ChordQuality q, int bassPc, ChordCandidate
     symbol(root, q, c.symbol);
     c.expectedCount = uint8_t(d.n);
     for (int i = 0; i < d.n; i++) c.expected[i] = int8_t((root + d.iv[i]) % 12);
-    if (bassPc >= 0 && contains(c.expected, d.n, bassPc)) {
+    if (bassPc >= 0 && (anyBass || contains(c.expected, d.n, bassPc))) {
         c.hasBass = 1;
         c.bassPitchClass = int8_t(bassPc);
         if (bassPc != root) slash(root, q, bassPc, c.symbol);

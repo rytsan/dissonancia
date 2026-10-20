@@ -4,6 +4,7 @@
 # with MIREX "majmin": the root and a major or minor third must match; sus, dim, aug and no-chord
 # spans are left out.
 #   python3 tools/loopback/guitarset.py <annotation dir> <audio_mono-mic dir> [limit]
+#   GS_OFFLINE=1: the STUDIO whole-take decoder instead of LIVE ("now" = GS_OLD binary, "notes" = this one)
 import json, os, subprocess, sys
 from collections import defaultdict
 
@@ -40,9 +41,14 @@ def chords_of(jams):
     a = anns[-1]
     return [(o["time"], o["time"] + o["duration"], o["value"]) for o in a["data"]]
 
+OFFLINE = os.environ.get("GS_OFFLINE")
 def run(wav, notes):
     env = dict(os.environ)
     env.pop("DZ_NOTES", None)
+    if OFFLINE:
+        exe = DZ if notes else os.environ.get("GS_OLD", DZ)
+        out = subprocess.run([exe, wav, "guitar", "balanced", "offline"], capture_output=True, text=True, env=env).stdout
+        return sorted((float(l.split()[1]), l.split()[3]) for l in out.splitlines() if l.startswith("ended"))
     if notes: env["DZ_NOTES"] = "1"
     out = subprocess.run([DZ, wav, "guitar"], capture_output=True, text=True, env=env).stdout
     ev = []
