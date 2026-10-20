@@ -842,7 +842,7 @@ void ChordTracker::process_notes(const NoteFrame& notes, const ChromaVector& chr
     };
     if (active_ && notes.count) bassCount_[notes.midi[0] % 12]++;
     const int d = hmm_.decided();
-    // A change counts once the decision has held it for 0.2 s: the lagged decision may revise itself
+    // A change counts once the decision has held it for 0.1 s: the lagged decision may revise itself
     // hop to hop at a boundary, and a 20 ms chord is never what was played.
     if (d != pendingState_) pendingState_ = d, pendingSince_ = t;
     const bool held = d >= 0 && t - pendingSince_ >= kHoldSeconds;
@@ -872,14 +872,16 @@ void ChordTracker::process_notes(const NoteFrame& notes, const ChromaVector& chr
     if (active_) std::memcpy(out.confirmedSymbol, cur_.c.symbol, sizeof out.confirmedSymbol);
     else std::memset(out.confirmedSymbol, 0, sizeof out.confirmedSymbol);
     out.confirmed = active_ && out.preview.best.symbol[0] && std::strcmp(out.preview.best.symbol, cur_.c.symbol) == 0;
-    out.latencyMs = float(lagSeconds * 1000);
+    // What a player waits from a change to the screen (tools/loopback/latency.py measures it).
+    out.latencyMs = float((lagSeconds + kHoldSeconds + kFrontEndSeconds) * 1000);
     out.confirmElapsedMs = 0;
-    // The harmony underneath changes on screen once it has held 0.8 s (a passing Em between two Ds is
-    // the chord played, not the harmony).
+    // The harmony underneath: its own HMM is slow to change, so a passing Em between two Ds stays the
+    // chord played. No hold on top: a hold of 0.8 s made the harmony ~2.4 s late without steadying it
+    // (a hold steadies only from ~0.6 s up; tools/loopback/latency.py).
     const int h = harmony_.decided();
-    if (h != harmonyPending_) harmonyPending_ = h, harmonySince_ = t;
+    out.harmonyLatencyMs = float((harmony_.lag_hops() * hop_ + kFrontEndSeconds) * 1000);
     if (!sounding) harmonyShown_ = -1;
-    else if (h >= 0 && (harmonyShown_ < 0 || t - harmonySince_ >= 0.8)) harmonyShown_ = h;
+    else if (h >= 0) harmonyShown_ = h;
     std::memset(out.harmony, 0, sizeof out.harmony);
     if (harmonyShown_ >= 0) matcher_.symbol(ChordHmm::root(harmonyShown_), ChordHmm::quality(harmonyShown_), out.harmony);
 }

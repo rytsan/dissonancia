@@ -61,7 +61,7 @@ public sealed class LiveFrame
     public string ChordReason = "";
     public string ChordRoman = "";         // Roman numeral in the session key, "" = no key
     public string Cadence = "", CadenceEvidence = "";   // last cadence candidate (live: harmonic evidence only)
-    public float ChordLatencyMs, ChordConfirmElapsedMs;
+    public float ChordLatencyMs, ChordConfirmElapsedMs, HarmonyLatencyMs;
     public Pitch Bass;
     public bool BassSettled, BassValid;
     public float BassSettleRemainingMs;
@@ -189,6 +189,7 @@ public sealed class FakeLiveSource(Session session) : ILiveSource
         f.ChordAlternatives = chord.Alternatives;
         f.ChordReason = f.BassSettled ? chord.Reason : "bass not settled";
         f.ChordLatencyMs = 118 + (float)(6 * Math.Sin(t * 3.1));
+        f.HarmonyLatencyMs = 1000;
         f.ChordConfirmElapsedMs = f.ChordConfirmed ? 0 : (float)(age * 1000);
 
         f.TimelineBars.Clear();

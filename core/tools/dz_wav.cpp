@@ -117,7 +117,10 @@ int main(int argc, char** argv) {
     int shownKey = -1;
     std::string shownHarmony;   // tonic + 12 * minor, -1 = no valid estimate
     int previewChanges = 0, confirmedChanges = 0;
+    double now = 0;   // when the event is shown (the chord line carries the start the lag backdated it to)
     auto events = [&] {
+        for (uint32_t i = 0; i < t.eventCount; i++)
+            if (t.events[i].type == AnalyzerEventType::ChordConfirmed) std::printf("shown %8.3f %s\n", now, t.events[i].data.chord.symbol);
         for (uint32_t i = 0; i < t.eventCount; i++)
             if (t.events[i].type == AnalyzerEventType::ChordConfirmed)
                 std::printf("chord %8.3f %-8s %.2f\n", t.events[i].data.chord.startTimeSeconds, t.events[i].data.chord.symbol, t.events[i].data.chord.confidence);
@@ -145,6 +148,7 @@ int main(int argc, char** argv) {
         }
         if (noteChords) tracker.process_notes(o.notes, o.chroma, o.chroma.timestampSeconds, double(p + hop) / rate, t);
         else tracker.process(o.chroma, o.chroma.timestampSeconds, double(p + hop) / rate, o.bass, o.lastOnset, t);
+        now = double(p + hop) / rate;
         events();
         if (noteChords && t.harmony != shownHarmony) {   // the harmony underneath, as the display would show it
             shownHarmony = t.harmony;

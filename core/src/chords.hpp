@@ -118,6 +118,7 @@ public:
         uint32_t eventCount;
         AnalyzerEvent events[4];
         KeyEstimate key;             // the song's key so far
+        float harmonyLatencyMs;      // a change of harmony -> shown (notes path)
         char harmony[16];            // the harmony underneath (notes path): triads, slow; "" = none
     };
 
@@ -162,9 +163,9 @@ private:
     int bassCount_[12]{};            // lowest note per hop while the current chord sounds (notes path)
     int pendingState_ = -1;          // the HMM's decision, and since when it has held (notes path)
     double pendingSince_ = 0;
-    static constexpr double kHoldSeconds = 0.2;
-    int harmonyPending_ = -1, harmonyShown_ = -1;
-    double harmonySince_ = 0;
+    static constexpr double kHoldSeconds = 0.1;
+    static constexpr double kFrontEndSeconds = 0.12;   // half the notes' STFT window + the two hops a note must last
+    int harmonyShown_ = -1;
     double quietSince_ = -1;         // silence start (< 0: sounding), for the accumulator's gaps
     bool lastSparse_ = false;        // the last sounding frame had <= 2 notes (a picked note)
     float acc_[12]{};                // arpeggio accumulator (decaying max-hold of chroma energy)

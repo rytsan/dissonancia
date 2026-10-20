@@ -308,6 +308,8 @@ struct LiveSnapshot {
     ContextEstimate context;           // tempo heard so far (display only)
     KeyEstimate songKey;               // key heard so far (chord modes)
     char harmonySymbol[16];            // the harmony underneath (major/minor triads, slow), "" = none
+    float harmonyLatencyMs;            // a change of harmony -> shown (chordLatencyMs: the same for the chord played)
+    uint8_t _pad5[4];
     float waveMin[ANA_WAVE_COLUMNS];
     float waveMax[ANA_WAVE_COLUMNS];
     float scope[ANA_SCOPE_SAMPLES];    // last samples, oldest first

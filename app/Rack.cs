@@ -357,7 +357,7 @@ public sealed class LcdModule : RackModule
                 Plasma.Lamp(ctx, new Point(rx - 136 + i * 13.5, inner.Y + 30), 3.6, i < f.ChordConfidence * 10);
             Plasma.Text(ctx, $"{f.ChordConfidence:0.00}", rx, inner.Y + 40, 12, true, Ui.Mono, Ui.Align.Right);
 
-            string ms = f.ChordConfirmed ? Ui.Ms(f.ChordLatencyMs) : $"{Ui.Ms(f.ChordLatencyMs)} · +{f.ChordConfirmElapsedMs:0}";
+            string ms = harmonyFirst ? Ui.Ms(f.HarmonyLatencyMs) : f.ChordConfirmed ? Ui.Ms(f.ChordLatencyMs) : $"{Ui.Ms(f.ChordLatencyMs)} · +{f.ChordConfirmElapsedMs:0}";
             Plasma.Text(ctx, ms, rx, inner.Y + 58, 13, true, Ui.Mono, Ui.Align.Right);
 
             double textY = inner.Y + dot * 1.3 * 7 + 10;

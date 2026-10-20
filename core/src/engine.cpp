@@ -413,6 +413,7 @@ void Engine::process_hop(const float* x, uint32_t n) {
     s.context = contextOut_;
     s.songKey = chout_.key;
     std::memcpy(s.harmonySymbol, chout_.harmony, sizeof s.harmonySymbol);
+    s.harmonyLatencyMs = s.harmonySymbol[0] ? chout_.harmonyLatencyMs + s.latencyProcessingMs : 0.f;
     snapshots_.publish();
 }
 

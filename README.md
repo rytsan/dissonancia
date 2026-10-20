@@ -33,8 +33,9 @@ prior. Two readings run side by side:
 - **Chord played**: every quality (7, maj7, m7, sus, add9, dim, 5), the line
   under it. Inversions (D/F♯) are an option in START.
 
-Latency: first pitch 30 ms, stable note 50 ms, bass settled 220 ms, chord
-confirmed within a second. CPU about 1 %.
+Latency, from a change to the screen (`tools/loopback/latency.py`): first
+pitch 30 ms, stable note 50 ms, bass settled 220 ms, chord played ~0.5 s,
+harmony ~1 s. CPU about 1 %.
 
 ## STUDIO
 

@@ -4,6 +4,7 @@
 # with MIREX "majmin": the root and a major or minor third must match; sus, dim, aug and no-chord
 # spans are left out.
 #   python3 tools/loopback/guitarset.py <annotation dir> <audio_mono-mic dir> [limit]
+#   GS_SHOWN=1: LIVE scored by what is on screen when it is (the lag's delay counts), not backdated
 #   GS_OFFLINE=1: the STUDIO whole-take decoder instead of LIVE ("now" = GS_OLD binary, "notes" = this one)
 import json, os, subprocess, sys
 from collections import defaultdict
@@ -54,7 +55,7 @@ def run(wav, notes):
     ev = []
     for line in out.splitlines():
         f = line.split()
-        if f and f[0] == "chord": ev.append((float(f[1]), f[2]))
+        if f and f[0] == ("shown" if os.environ.get("GS_SHOWN") else "chord"): ev.append((float(f[1]), f[2]))
         if f and f[0] == "ended": pass
     return sorted(ev)
 
