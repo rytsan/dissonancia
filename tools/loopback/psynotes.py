@@ -3,7 +3,9 @@
 #   OUT: "t midi midi ..." per frame (noteeval.py, notechords.py); CHROMA: "t c0..c11" for
 #   dz_wav's DZ_CHROMA_IN. Measured 2026-10-20 against YourMT3+ on a flamenco guitar take: note
 #   precision 0.71 vs 0.56 for the core's chroma (F1 0.75 vs 0.64); on synthetic picking 0.91-0.93
-#   vs 0.75-0.79. As the chord matcher's input it does worse (the matcher expects partials).
+#   vs 0.75-0.79. As the chord matcher's input it does worse (the matcher expects partials); through
+#   hmmchords.py it does better (see there). FLOOR (dB under the recent loudest frame) and PERSIST
+#   (frames a note must last) keep damping noise and attacks out.
 # Per frame (STFT 8192 @ 44.1k, hop 1024):
 #   1. loudness per bin: power -> dB, equal-loudness (A-weighting approx), -> sones-like (Stevens 0.3)
 #   2. masking: spreading function on the Bark scale (Schroeder); a peak counts only above the mask
@@ -39,9 +41,13 @@ aw = 20 * np.log10(np.maximum(ra, 1e-9)) + 2.0          # A-weighting dB
 NAMES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"]
 REG = [(40, 52, "bass"), (52, 67, "mid"), (67, 89, "treb")]   # by fundamental MIDI
 
+FLOOR = float(os.environ.get("FLOOR", 30))   # dB below the recent loudest frame: inaudible, no notes
+run = {"max": -200.0}
 def frame_notes(seg):
     X = np.abs(np.fft.rfft(seg * win)) ** 2
     db = 10 * np.log10(X + 1e-12) + aw
+    run["max"] = max(db.max(), run["max"] - 0.5)    # recent loudest, fading ~20 dB/s
+    if db.max() < run["max"] - FLOOR: return []
     # peaks (local maxima above the floor)
     pk = np.where((db[1:-1] > db[:-2]) & (db[1:-1] >= db[2:]) & (freqs[1:-1] > 60) & (freqs[1:-1] < 5000))[0] + 1
     if len(pk) == 0: return []
@@ -95,6 +101,11 @@ def frame_notes(seg):
 
 import os
 frames = [(t * H / sr + N / 2 / sr, frame_notes(x[t * H:t * H + N])) for t in range(0, (len(x) - N) // H)]
+# a note is heard when it lasts two frames (an attack or a damping noise lasts one)
+PERSIST = int(os.environ.get("PERSIST", 2))
+if PERSIST > 1:
+    sets = [set(m for m, s, r in ns) for _, ns in frames]
+    frames = [(t, [(m, s, r) for m, s, r in ns if all(m in sets[j] for j in range(max(0, i - PERSIST + 1), i + 1))]) for i, (t, ns) in enumerate(frames)]
 with open(os.environ.get("OUT", "psy.notes.txt"), "w") as f:
     for t, ns in frames: f.write(f"{t:.3f} " + " ".join(str(m) for m, s, r in ns) + "\n")
 if os.environ.get("CHROMA"):   # per-frame pitch-class salience (register-normalised), the chord input
