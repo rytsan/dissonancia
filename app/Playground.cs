@@ -340,6 +340,48 @@ public sealed class Playground
 
     void Changed() { Publish(); Save(); }
 
+    // ---------------------------------------------------------------- MIDI files
+
+    /// A .mid's notes as blocks after the selected entry: pads (channel 10, notes 36..51) and the
+    /// sampler (other channels); its markers make the blocks, the same block again in a row its repeats.
+    public void ImportMidi(string path, int spb)
+    {
+        SongMidi.Imported im;
+        try { im = SongMidi.Import(File.ReadAllBytes(path), spb); }
+        catch (Exception e) when (e is IOException or InvalidDataException or IndexOutOfRangeException or UnauthorizedAccessException) { Status = "MIDI: " + e.Message; return; }
+        static bool Same(SongBlock a, SongBlock b) => a.Name == b.Name && a.Bars == b.Bars && a.Steps.AsSpan().SequenceEqual(b.Steps) && a.Notes.SequenceEqual(b.Notes);
+        var made = new List<int>();   // block index per imported block (one block for the same one again)
+        foreach (var b in im.Blocks)
+        {
+            int same = b.Name.Length > 0 ? made.FirstOrDefault(i => Same(S.Blocks[i], b), -1) : -1;
+            if (same >= 0) { made.Add(same); continue; }
+            b.Id = NewId();
+            if (b.Name.Length == 0) b.Name = NewName();
+            S.Blocks.Add(b);
+            made.Add(S.Blocks.Count - 1);
+        }
+        int at = Selected + 1;
+        foreach (var bi in made)
+        {
+            if (at > 0 && at - 1 >= Selected + 1 && S.Order[at - 1].Block == bi) { S.Order[at - 1].Repeats++; continue; }
+            S.Order.Insert(at++, new SongEntry { Block = bi });
+        }
+        Selected = Math.Min(Selected + 1, S.Order.Count - 1);
+        Status = $"MIDI: {im.Notes} notas em {made.Distinct().Count()} blocos" + (im.Bpm > 0 ? $" · arquivo a {im.Bpm:0} bpm" : "");
+        Changed();
+    }
+
+    /// The timeline, or the selected block alone, as a .mid.
+    public void ExportMidi(string path, int spb, float bpm, int beatsPerBar, int beatUnit, bool blockOnly)
+    {
+        try
+        {
+            File.WriteAllBytes(path, SongMidi.Export(S, spb, bpm, beatsPerBar, beatUnit, blockOnly ? SelEntry.Block : null));
+            Status = "MIDI: " + Path.GetFileName(path);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Status = "MIDI: " + e.Message; }
+    }
+
     // ---------------------------------------------------------------- the pedalboard
 
     public PedalDef AddPedal(int kind)

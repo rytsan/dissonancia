@@ -94,6 +94,7 @@ public sealed class MainWindow : Window
             [ModuleKind.Transport] = transport, [ModuleKind.Status] = new StatusModule(),
             [ModuleKind.Metrics] = new MetricsModule(), [ModuleKind.Pads] = new PadsModule(), [ModuleKind.Sequencer] = new SequencerModule(), [ModuleKind.Midi] = new MidiModule(), [ModuleKind.Song] = new SongModule(), [ModuleKind.Pedals] = new PedalboardModule(),
         };
+        ((SequencerModule)catalog[ModuleKind.Sequencer]).Song = (SongModule)catalog[ModuleKind.Song];
         ((SongModule)catalog[ModuleKind.Song]).Bounced += () =>
         {   // the timeline rendered, into STUDIO's library and on its tracks
             if (Playground.Current.Bounce(out var path) is { } err) { Playground.Current.Status = "bounce: " + err; return; }

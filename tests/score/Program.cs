@@ -249,6 +249,30 @@ Check(RackCatalog.WithPlayground(RackCatalog.Default(LiveMode.Acoustic), true).T
       && !RackCatalog.WithPlayground(RackCatalog.WithPlayground(RackCatalog.Default(LiveMode.Acoustic), true), false).Any(e => RackCatalog.Playground.Contains(e.Module)),
     "playground: PLAYGROUND puts its units on top of the rack and takes them out again");
 
+// Playground MIDI: a song out as a .mid and back, block for block; a plain file (type 0, running status, note-on 0 as off).
+{
+    var st = new PlaygroundState();
+    var ba = new SongBlock { Id = 1, Name = "A" };
+    ba.Resize(2);
+    ba.Set(0, 0, 100); ba.Set(2, 4, 90); ba.Set(0, 16 + 8, 127);
+    ba.Notes.Add(new SongNote(16 + 3, 6, 64, 80));
+    var bb = new SongBlock { Id = 2, Name = "B" };
+    bb.Set(1, 12, 70);
+    st.Blocks = [ba, bb];
+    st.Order = [new SongEntry { Block = 0, Repeats = 2 }, new SongEntry { Block = 1 }];
+    var mf = SongMidi.Export(st, 16, 100, 4, 4);
+    var im = SongMidi.Import(mf, 16);
+    Check(im.Blocks.Count == 3 && Math.Abs(im.Bpm - 100) < 0.1 && im.Blocks.Select(b => b.Name).SequenceEqual(["A", "A", "B"]), $"midi: markers give the blocks back ({im.Blocks.Count}, {im.Bpm})");
+    var a0 = im.Blocks[0];
+    Check(a0.Bars == 2 && a0.At(0, 0) == 100 && a0.At(2, 4) == 90 && a0.At(0, 24) == 127 && a0.Notes.SequenceEqual([new SongNote(19, 6, 64, 80)])
+          && im.Blocks[1].Steps.AsSpan().SequenceEqual(a0.Steps) && im.Blocks[2].At(1, 12) == 70, "midi: pads (channel 10) and sampler notes come back where they were");
+    Check(SongMidi.Import(SongMidi.Export(st, 16, 100, 4, 4, only: 1), 16).Blocks is [{ Name: "B" } b1] && b1.At(1, 12) == 70, "midi: one block alone");
+    byte[] plain = [(byte)'M', (byte)'T', (byte)'h', (byte)'d', 0, 0, 0, 6, 0, 0, 0, 1, 0, 96, (byte)'M', (byte)'T', (byte)'r', (byte)'k', 0, 0, 0, 18,
+                    0, 0x90, 60, 100, 48, 60, 0, 0, 0x99, 38, 90, 24, 38, 0, 0, 0xFF, 0x2F, 0];
+    var ip = SongMidi.Import(plain, 16);
+    Check(ip.Blocks.Count == 1 && ip.Blocks[0].Notes.SequenceEqual([new SongNote(0, 2, 60, 100)]) && ip.Blocks[0].At(2, 2) == 90, $"midi: a plain type-0 file ({ip.Notes} notes)");
+}
+
 // DS-C lunchbox: what the cables reach, the serial run from SAI (rendered with its inserts), loops.
 {
     CableLink L(string f, string t) => new() { From = f, To = t };

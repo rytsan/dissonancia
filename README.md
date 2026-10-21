@@ -45,7 +45,10 @@ harmony ~1 s. CPU about 1 %.
   playing: your input into its loop (round trip compensated), pad hits and notes into its pattern
   at the nearest sixteenth. **BOUNCE → STUDIO** renders the timeline and opens it on STUDIO's tracks.
 - **Pads** (16 WAVs; a MIDI pad controller on notes 36–51), a **sampler** (one WAV on every other
-  MIDI note, repitched from its root), a **sequencer** editing the selected block bar by bar.
+  MIDI note, repitched from its root), a **sequencer** editing the selected block bar by bar. A
+  block is MIDI: pad n is note 35 + n on channel 10, the sampler's notes are notes with lengths.
+  **MIDI import / export**: the timeline (or one block) as a .mid with a marker per block, back
+  block for block; any .mid comes in quantized to the sixteenth.
 - **Pedalboard**: drive, octave, chorus, tempo delay, reverb, filter as stompboxes, patched with
   cables between ENTRADA (the input), PADS, SAÍDA (the output) and GRAVAR (what REC records).
 - **MIDI controller** with MIDI learn. Everything plays through the LIVE output on the metronome's

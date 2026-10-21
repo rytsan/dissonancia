@@ -246,7 +246,8 @@ public sealed class PadsModule : KeyedModule
 /// sound); the sixteenth playing lit when that block and bar play.
 public sealed class SequencerModule : KeyedModule
 {
-    public SequencerModule() { Title = "DS-Q  SEQUENCER · BLOCO SELECIONADO"; }
+    public SequencerModule() { Title = "DS-Q  SEQUENCER MIDI · BLOCO SELECIONADO · pad n = nota 35 + n, canal 10"; }
+    public SongModule? Song;   // its MIDI export
 
     protected override void Draw(DrawingContext ctx, Rect r)
     {
@@ -259,7 +260,8 @@ public sealed class SequencerModule : KeyedModule
         Key(ctx, new Rect(r.X + 50, r.Y + 20, 22, 20), "▶", () => P.Page = Math.Min(blk.Bars - 1, P.Page + 1), withLed: false);
         Ui.Text(ctx, "compasso", r.X + 2, r.Y + 44, 7, Ui.Label, Ui.Sans);
         Key(ctx, new Rect(r.X, r.Y + 56, 72, 20), "LIMPAR", P.ClearBlock, withLed: false);
-        if (blk.Notes.Count > 0) Ui.Text(ctx, $"{blk.Notes.Count} notas", r.X + 2, r.Y + 80, 8, Ui.LcdText, Ui.Mono);
+        Key(ctx, new Rect(r.X, r.Y + 80, 72, 20), "MIDI ▸", () => Song?.MidiOut(true), withLed: false);
+        if (blk.Notes.Count > 0) Ui.Text(ctx, $"{blk.Notes.Count} notas MIDI do sampler", r.X + 2, r.Y + 104, 8, Ui.LcdText, Ui.Mono);
         var rows = Enumerable.Range(0, 16).Where(k => s.Pads[k].Path.Length > 0 || Enumerable.Range(0, blk.Bars * 16).Any(i => blk.At(k, i) > 0)).ToList();
         if (rows.Count == 0) rows = [0, 1, 2, 3];
         double x0 = r.X + 150, cw = Math.Max(14, (r.Right - x0) / 16 - 3), rh = Math.Max(10, Math.Min(22, (r.Height - 16) / rows.Count - 3));
@@ -307,12 +309,14 @@ public sealed class SongModule : KeyedModule
         Key(ctx, new Rect(r.X + 188, r.Y, 40, 24), "■", P.Stop, false, withLed: false);
         Key(ctx, new Rect(r.X + 232, r.Y, 74, 24), "● REC", P.Record, P.Armed && (P.Recording || blink), Ui.Red);
         Key(ctx, new Rect(r.X + 310, r.Y, 150, 24), "BOUNCE → STUDIO", () => Bounced?.Invoke(), false, withLed: false);
+        Key(ctx, new Rect(r.Right - 236, r.Y, 116, 24), "IMPORTAR MIDI", () => MidiIn(), withLed: false);
+        Key(ctx, new Rect(r.Right - 116, r.Y, 116, 24), "EXPORTAR MIDI", () => MidiOut(false), withLed: false);
         string where = P.Starting ? "começa no próximo compasso…"
             : P.Playing && P.Entry >= 0 && P.Entry < s.Order.Count
                 ? $"{s.Blocks[s.Order[P.Entry].Block].Name} · compasso {P.Bar + 1}/{s.Blocks[s.Order[P.Entry].Block].Bars} · vez {P.Repeat + 1}/{s.Order[P.Entry].Repeats}"
                   + (P.Queued >= 0 && P.Queued < s.Order.Count ? $" · próximo compasso: {s.Blocks[s.Order[P.Queued].Block].Name}" : "") + (P.Recording ? " · GRAVANDO" : "")
                 : "parado";
-        Ui.Text(ctx, where, r.X + 472, r.Y + 5, 11, P.Recording ? Ui.Red : Ui.LcdText, Ui.Mono);
+        Ui.Text(ctx, where.Length > 60 ? where[..60] : where, r.X + 472, r.Y + 5, 11, P.Recording ? Ui.Red : Ui.LcdText, Ui.Mono);
 
         // The lane.
         var lane = new Rect(r.X, r.Y + 32, r.Width, Math.Max(36, r.Height - 32 - 32));
@@ -372,6 +376,26 @@ public sealed class SongModule : KeyedModule
 
     /// BOUNCE → STUDIO (the window renders the timeline and opens it in STUDIO).
     public event Action? Bounced;
+
+    async void MidiIn()
+    {
+        if (TopLevel.GetTopLevel(this)?.StorageProvider is not { } sp) return;
+        var files = await sp.OpenFilePickerAsync(new FilePickerOpenOptions { Title = "Importar MIDI", FileTypeFilter = [new FilePickerFileType("MIDI") { Patterns = ["*.mid", "*.midi"] }] });
+        if (files.Count > 0 && files[0].TryGetLocalPath() is { } path) P.ImportMidi(path, Math.Clamp(Session.BeatsPerBar * 4, 1, 16));
+    }
+
+    /// The timeline (or the selected block) to a .mid at the metronome's tempo.
+    public async void MidiOut(bool block)
+    {
+        if (TopLevel.GetTopLevel(this)?.StorageProvider is not { } sp) return;
+        var f = await sp.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = block ? $"Exportar o bloco {P.SelBlock.Name} como MIDI" : "Exportar a música como MIDI", DefaultExtension = "mid",
+            SuggestedFileName = block ? $"bloco-{P.SelBlock.Name}.mid" : $"musica-{DateTime.Now:yyyyMMdd-HHmm}.mid",
+            FileTypeChoices = [new FilePickerFileType("MIDI") { Patterns = ["*.mid"] }],
+        });
+        if (f?.TryGetLocalPath() is { } path) P.ExportMidi(path, Math.Clamp(Session.BeatsPerBar * 4, 1, 16), Frame!.Bpm > 0 ? Frame.Bpm : Session.Bpm, Session.BeatsPerBar, Session.BeatUnit, block);
+    }
 }
 
 /// DS-I MIDI: the controller's port, activity, the last message, MIDI learn for the keys, and the
