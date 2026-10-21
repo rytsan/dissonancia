@@ -46,6 +46,8 @@ import     fades, gain stems         strips     bass, beats      meter,     Musi
                                      + VST3                      fixes      WAV, JSON, chart
 ```
 
+- **From LIVE**: a take recorded in LIVE is on the tracks when you open STUDIO, with its session
+  (mode, tempo, meter, key).
 - **Chords in detail**: the same notes model decoded over the whole take at
   once (past and future), every quality, and a bass that holds becomes a slash
   chord (G/B, D/F♯).

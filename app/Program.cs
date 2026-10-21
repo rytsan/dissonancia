@@ -157,7 +157,11 @@ public sealed class MainWindow : Window
             _scoreTab,
         };
         Content = _tabs;
-        _tabs.SelectionChanged += (_, _) => { if (_tabs.SelectedIndex == 0) _syncStart(); };   // tap tempo may have moved
+        _tabs.SelectionChanged += (_, _) =>
+        {
+            if (_tabs.SelectedIndex == 0) _syncStart();   // tap tempo may have moved
+            if (_tabs.SelectedItem == _studioTab) _studio.EnterFromLive();   // the take just recorded in LIVE on the tracks
+        };
         Opened += (_, _) => RequestAnimationFrame(OnFrame);
     }
 

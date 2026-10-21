@@ -140,6 +140,31 @@ public sealed class StudioState
 
     public void ReloadLibrary() => Library = StudioLibrary.Load();
 
+    // LIVE -> STUDIO: a take recorded in LIVE since STUDIO last looked is on the tracks when STUDIO
+    // opens (with its session: mode, tempo, meter, key). One being finished (its sidecar not yet
+    // written) is waited for a few seconds.
+    string? _newestSeen;
+    long _liveBy;
+    public void EnterFromLive()
+    {
+        if (Recording) return;   // STUDIO's own REC opens its take itself
+        if (!OpenNewTake()) _liveBy = Environment.TickCount64 + 5000;
+    }
+    bool OpenNewTake()
+    {
+        ReloadLibrary();
+        var newest = Library.FirstOrDefault(i => i.Kind == "REC")?.Path;
+        if (newest is null) return true;
+        if (!File.Exists(Path.ChangeExtension(newest, ".json"))) return false;   // still being written
+        bool fresh = newest != _newestSeen;
+        _newestSeen = newest;
+        if (!fresh || newest == Current) return true;
+        Open(newest);
+        Status = $"take do LIVE na trilha: {Path.GetFileNameWithoutExtension(newest)} ({Session.Mode}, {Session.Bpm:0} bpm)";
+        Changed?.Invoke();
+        return true;
+    }
+
     public double Rate => Math.Max(1, Player?.Rate ?? 1);
     public double Beat => 60.0 / Math.Max(20, Session.Bpm);
     public double Bar => Beat * Math.Max(1, Session.BeatsPerBar);
@@ -1073,6 +1098,12 @@ public sealed class StudioState
     }
 
     public void Poll()
+    {
+        if (_liveBy > 0 && (OpenNewTake() || Environment.TickCount64 > _liveBy)) _liveBy = 0;
+        PollJobs();
+    }
+
+    void PollJobs()
     {
         PollRecording();
         PollSeparation();
@@ -2381,6 +2412,7 @@ public sealed class StudioView : DockPanel
     }
 
     public void TogglePlay() => _s.TogglePlay();
+    public void EnterFromLive() { _s.EnterFromLive(); Refresh(); }
     public bool DeleteCable() => _s.Bay?.DeleteCable() ?? false;
     public void OpenFirst() { if (_s.Library.Count > 0) _s.Open(_s.Library[0].Path); Refresh(); }
     /// Screenshot tool: the newest take already separated (its stems as tracks).
