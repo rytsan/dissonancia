@@ -141,6 +141,8 @@ public sealed class SongBlock
     public byte[] Steps { get; set; } = new byte[16 * 16];
     public List<SongNote> Notes { get; set; } = [];
     public bool HasLoop { get; set; }
+    /// The metronome's tempo when its loop was recorded (the loop is that long; it does not stretch yet).
+    public float LoopBpm { get; set; }
     public byte At(int pad, int step) => Steps[pad * Bars * 16 + step];
     public void Set(int pad, int step, byte v) => Steps[pad * Bars * 16 + step] = v;
 
@@ -172,6 +174,7 @@ public sealed class Playground
     public int Step = -1, Voices, Entry = -1, Bar, Repeat, Queued = -1;
     public bool Playing, Recording, Looping, Starting;
     public bool Armed;                                  // REC on (the core records while it plays)
+    public float Bpm;                                   // the metronome's (the window sets it every frame)
     public int Selected;                                // the timeline entry being edited
     public int Page;                                    // the bar of its block the sequencer shows
     public float PeakDb = -120;
@@ -367,8 +370,9 @@ public sealed class Playground
             S.Order.Insert(at++, new SongEntry { Block = bi });
         }
         Selected = Math.Min(Selected + 1, S.Order.Count - 1);
-        Status = $"MIDI: {im.Notes} notas em {made.Distinct().Count()} blocos" + (im.Bpm > 0 ? $" · arquivo a {im.Bpm:0} bpm" : "");
+        Status = $"MIDI: {im.Notes} notas em {made.Distinct().Count()} blocos" + (im.Bpm > 0 ? $" · metrônomo a {Math.Round(im.Bpm):0} bpm, o do arquivo" : "");
         Changed();
+        if (im.Bpm > 0) Command?.Invoke(FormattableString.Invariant($"tempo:{im.Bpm}"));   // the song at the file's tempo
     }
 
     /// The timeline, or the selected block alone, as a .mid.
@@ -472,7 +476,12 @@ public sealed class Playground
     void SaveLoops()
     {
         Directory.CreateDirectory(Path.GetDirectoryName(LoopPath(0))!);
-        foreach (var b in S.Blocks) b.HasLoop = PgApi.LoopFile(_h, b.Id, LoopPath(b.Id), 1) == 0;
+        foreach (var b in S.Blocks)
+        {
+            bool had = b.HasLoop;
+            b.HasLoop = PgApi.LoopFile(_h, b.Id, LoopPath(b.Id), 1) == 0;
+            if (b.HasLoop && (!had || b.LoopBpm <= 0)) b.LoopBpm = Bpm;
+        }
         Save();
     }
 

@@ -342,7 +342,11 @@ public sealed class SongModule : KeyedModule
             if (P.Queued == i && blink) ctx.DrawRectangle(null, new ImmutablePen((IImmutableBrush)Ui.Green, 2, new ImmutableDashStyle([3, 2], 0)), box.Inflate(3.5), 6, 6);
             Ui.Text(ctx, b.Name, box.X + 6, box.Y + 3, 14, Ui.LabelBright, Ui.SansBold);
             if (box.Width > 50) Ui.Text(ctx, $"{b.Bars}c{(e.Repeats > 1 ? $" ×{e.Repeats}" : "")}", box.X + 6, box.Bottom - 15, 9, Ui.LabelBright, Ui.Mono);
-            if (b.HasLoop) Ui.Text(ctx, "◉", box.Right - 14, box.Y + 3, 10, Ui.Red, Ui.SansBold);
+            if (b.HasLoop)
+            {   // a loop recorded at another tempo plays at its own length: said on the block
+                bool off = b.LoopBpm > 0 && P.Bpm > 0 && Math.Abs(b.LoopBpm - P.Bpm) > 0.5f;
+                Ui.Text(ctx, off ? $"◉ {b.LoopBpm:0}" : "◉", box.Right - (off ? 40 : 14), box.Y + 3, 10, off ? Ui.Amber : Ui.Red, Ui.SansBold);
+            }
             int idx = i;
             Area(box, () => { P.Selected = idx; P.Page = 0; });
             x += box.Width + 3;

@@ -102,7 +102,16 @@ public sealed class MainWindow : Window
             _tabs.SelectedItem = _studioTab;
             _studio.OpenPath(path);
         };
-        Playground.Current.Command += c => { if (c == "rec") _source.ToggleRec(Clock()); else if (c == "metro") _source.ToggleMetronome(); };
+        Playground.Current.Command += c =>
+        {
+            if (c == "rec") _source.ToggleRec(Clock());
+            else if (c == "metro") _source.ToggleMetronome();
+            else if (c.StartsWith("tempo:") && float.TryParse(c[6..], System.Globalization.CultureInfo.InvariantCulture, out var bpm))
+            {   // the sequencer runs on the metronome: a MIDI file's tempo becomes the session's (refused by the core during REC)
+                _session.Bpm = MathF.Round(Math.Clamp(bpm, 30, 300));
+                _source.SetTempo(_session.Bpm);
+            }
+        };
         _pedals = (PedalboardModule)catalog[ModuleKind.Pedals];
         _modules = [.. catalog.Values, _stage];
         foreach (var m in _modules) { m.Frame = _frame; m.Session = _session; }
@@ -184,6 +193,7 @@ public sealed class MainWindow : Window
         if (_lastFrame > 0) _frame.DisplayMs = (float)((now - _lastFrame) * 1000);   // measured frame interval
         _lastFrame = now;
         _source.Read(_frame, now);
+        Playground.Current.Bpm = _frame.Bpm;
         Playground.Current.Poll();
         SyncRack();
         if (_tabs.SelectedItem == _studioTab) _studio.Tick();
@@ -282,6 +292,7 @@ public sealed class MainWindow : Window
     public void Step(double now)
     {
         _source.Read(_frame, now);
+        Playground.Current.Bpm = _frame.Bpm;
         Playground.Current.Poll();
         SyncRack();
         foreach (var m in _modules) m.InvalidateVisual();
