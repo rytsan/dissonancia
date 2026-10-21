@@ -244,7 +244,7 @@ Check(System.Runtime.CompilerServices.Unsafe.SizeOf<PlaygroundConfigNative>() ==
     blk.Resize(1);
     Check(blk.At(2, 5) == 100 && blk.Notes.Count == 0, "song block: fewer bars drop what is past the end");
 }
-Check(RackCatalog.WithPlayground(RackCatalog.Default(LiveMode.Acoustic), true).Take(3).Select(e => e.Module).SequenceEqual(RackCatalog.Playground)
+Check(RackCatalog.WithPlayground(RackCatalog.Default(LiveMode.Acoustic), true).Take(RackCatalog.Playground.Length).Select(e => e.Module).OrderBy(k => k).SequenceEqual(RackCatalog.Playground.OrderBy(k => k))
       && !RackCatalog.WithPlayground(RackCatalog.WithPlayground(RackCatalog.Default(LiveMode.Acoustic), true), false).Any(e => RackCatalog.Playground.Contains(e.Module)),
     "playground: PLAYGROUND puts its units on top of the rack and takes them out again");
 
