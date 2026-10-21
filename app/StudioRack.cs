@@ -311,6 +311,9 @@ public sealed class StudioState
     }
     public void Select() => Changed?.Invoke();
     public bool ConsoleView;
+    // Panels that open and close as in a DAW (the transport's view keys): the browser, the signal
+    // routing, the measuring tubes. The arrangement takes the room they leave.
+    public bool ShowBrowser = true, ShowRouting, ShowMeters;
 
     /// Installs the weights if needed (one download, checksum-pinned), then separates the edited take.
     public async void Separate()
@@ -1199,7 +1202,7 @@ public sealed class RackRail : Control
 /// DS-T: transport (1U).
 public sealed class TransportUnit : StudioUnit
 {
-    public TransportUnit(StudioState s) : base(s, "DS-T", "TRANSPORT") { Height = 86; }
+    public TransportUnit(StudioState s) : base(s, "DS-T", "TRANSPORT") { Height = 128; }
 
     protected override void DrawContent(DrawingContext ctx, Rect r)
     {
@@ -1259,6 +1262,47 @@ public sealed class TransportUnit : StudioUnit
         }
         Ui.Text(ctx, S.Session.KeySet ? S.Session.Key.Label : "sem armadura", lx + 16, y + 40, 10, Ui.Label, Ui.Mono);
         Ui.Text(ctx, $"CPU {Cpu():0} %", r.Right, y + 40, 10, Ui.Label, Ui.Mono, Ui.Align.Right);
+
+        // Second row, as a DAW's toolbar: the views on the left, the processes on the right, in the
+        // order they are used (mode, separate, analyse; then the score and the delivery).
+        double ty = r.Y + 66, tx = r.X;
+        foreach (var (label, on, act) in new (string, bool, Action)[]
+        {
+            ("BROWSER", S.ShowBrowser, () => S.ShowBrowser = !S.ShowBrowser),
+            ("ROTEAMENTO", S.ShowRouting, () => S.ShowRouting = !S.ShowRouting),
+            ("MEDIÇÃO", S.ShowMeters, () => S.ShowMeters = !S.ShowMeters),
+        })
+        {
+            double w = label.Length * 7.5 + 22;
+            Key(ctx, new Rect(tx, ty, w, 26), label, () => { act(); S.Select(); }, on, Ui.Amber);
+            tx += w + 6;
+        }
+        tx += 18;
+        string mode = S.Choir ? "CORO" : S.Mode switch
+        {
+            AppMode.VoiceMono => "VOZ", AppMode.InstrumentMono => "MELODIA", AppMode.GuitarChords => "VIOLÃO", AppMode.PianoChords => "PIANO", _ => "GERAL",
+        };
+        string sepLabel = !DemucsModel.HelperPresent ? "SEM DEMUCS" : S.Stems.Count > 0 ? "SEPARADO" : DemucsModel.Installed(S.Variant) ? "SEPARAR" : "SEPARAR*";
+        bool idle = S.Current is not null && !S.Running && !S.Separating;
+        foreach (var (label, lit, led, en, act) in new (string, bool, IBrush, bool, Action)[]
+        {
+            (mode, true, Ui.Amber, !S.Running, S.CycleMode),
+            (sepLabel, S.Stems.Count > 0 || S.Separating, Ui.Amber, DemucsModel.HelperPresent && idle, S.Separate),
+            ("ANALISAR", S.Running, Ui.Green, idle, S.Analyze),
+            ("CANCELAR", false, Ui.Red, S.Running || S.Separating, S.Cancel),
+            ("SCORE", S.Result is not null, Ui.Green, S.Current is not null, S.OpenScore),
+            ("ENTREGAR", false, Ui.Amber, S.Result is not null && !S.Running, () => S.Deliver()),
+        })
+        {
+            double w = Math.Max(64, label.Length * 7.5 + 22);
+            Key(ctx, new Rect(tx, ty, w, 26), label, act, lit, led, en);
+            tx += w + 6;
+        }
+        // Progress as an LED bar (separation amber, analysis green).
+        bool sep = S.Separating;
+        int litN = (int)Math.Round((sep ? S.SepProgress : S.Running ? S.Progress : S.Result is not null ? 1 : 0) * 16);
+        for (int i = 0; i < 16; i++) Ui.Led(ctx, new Point(tx + 10 + i * 11, ty + 13), 3.6, i < litN, sep ? Ui.Amber : Ui.Green, sep ? Ui.AmberOff : Ui.GreenOff);
+        if (sepLabel == "SEPARAR*") Ui.Text(ctx, $"* baixa o Demucs ({S.Variant.Size / 1_000_000} MB) uma vez", tx + 4, ty + 26, 7, Ui.Label, Ui.Mono);
     }
 
     // Process CPU over the last second, across all cores (100 % = one core busy).
@@ -1431,7 +1475,11 @@ public sealed class RecorderUnit : StudioUnit
         var card = new Rect(area.X, area.Y, 170, area.Height);
         ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF24272B)), new ImmutablePen(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF0B0C0D)), 1), card, 3, 3);
         Ui.Text(ctx, "CANAIS", card.X + 8, card.Y + 4, 8, Ui.Label, Ui.SansBold);
-        double laneH = 44;
+        // Lanes under the tracks, as a DAW's chord and MIDI tracks: the harmony (triads, with their
+        // degrees), the chords in detail, the notes.
+        bool noteLane = S.ResultTake is { } lt && (lt.Notes.Count > 0 || lt.IsChoir);
+        const double harmonyH = 40, chordH = 32, notesH = 44;
+        double laneH = harmonyH + chordH + (noteLane ? notesH : 0);
         double stemH = S.Stems.Count == 0 ? 0 : Math.Clamp((area.Height - 30 - laneH) * 0.55 / S.Stems.Count, 26, 60);
         double trackH = Math.Max(60, area.Height - 30 - laneH - stemH * S.Stems.Count);
         _cards.Clear();
@@ -1446,7 +1494,6 @@ public sealed class RecorderUnit : StudioUnit
         Ui.Text(ctx, "PLAY", card.X + 24, card.Y + 58, 8, Ui.Label, Ui.SansBold);
         Ui.Led(ctx, new Point(card.X + 70, card.Y + 64), 3.5, !S.Edits.IsEmpty, Ui.Amber, Ui.AmberOff);
         Ui.Text(ctx, "EDITADO", card.X + 78, card.Y + 58, 8, Ui.Label, Ui.SansBold);
-        string laneName = S.Choir ? "↳ CORO SATB + CIFRAS" : S.Stems.Count > 0 ? "↳ VOZ + CIFRAS" : S.Mode is AppMode.VoiceMono or AppMode.InstrumentMono ? "↳ NOTAS" : "↳ ACORDES";
         var stemNames = new Dictionary<string, string> { ["vocals"] = "VOZ", ["bass"] = "BAIXO", ["other"] = "OUTROS", ["drums"] = "BATERIA", ["guitar"] = "VIOLÃO", ["piano"] = "PIANO" };
         for (int i = 0; i < S.Stems.Count; i++)
         {
@@ -1458,7 +1505,13 @@ public sealed class RecorderUnit : StudioUnit
             Plasma.DotText(ctx, $"{i + 2}", card.Right - 22, sy + stemH / 2 - 8, 2.2, 1);
             CardControls(ctx, i + 1, card.Right - 82, sy + stemH / 2 - 9, 52, compact: true);
         }
-        Ui.Text(ctx, laneName, card.X + 16, area.Y + 22 + trackH + stemH * S.Stems.Count + 14, 10, S.ResultTake is null ? Ui.Label : Ui.Amber, Ui.SansBold);
+        double laneY = area.Y + 22 + trackH + stemH * S.Stems.Count + 4;
+        var laneInk = S.ResultTake is null ? Ui.Label : Ui.Amber;
+        Ui.Text(ctx, "↳ HARMONIA", card.X + 16, laneY + 6, 10, laneInk, Ui.SansBold);
+        var degreesIn = S.Session.KeySet ? S.Session.Key : S.Suggestion?.Key;
+        Ui.Text(ctx, degreesIn is null ? "sem tom: sem graus" : $"graus em {degreesIn.Tonic}{(degreesIn.Minor ? "m" : "")}{(S.Session.KeySet ? "" : " (sugerido)")}", card.X + 28, laneY + 20, 8, Ui.Label, Ui.Sans);
+        Ui.Text(ctx, "↳ ACORDES", card.X + 16, laneY + harmonyH + 8, 10, laneInk, Ui.SansBold);
+        if (noteLane) Ui.Text(ctx, S.Choir ? "↳ CORO SATB" : "↳ NOTAS", card.X + 16, laneY + harmonyH + chordH + 14, 10, laneInk, Ui.SansBold);
 
         var bezel = new Rect(card.Right + 8, area.Y, area.Right - card.Right - 8, area.Height);
         ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF0B0C0D)), null, bezel, 5, 5);
@@ -1561,22 +1614,39 @@ public sealed class RecorderUnit : StudioUnit
                 }
             }
 
-        // Transcription lane: the offline result of these edits.
+        // Transcription lanes: the offline result of these edits.
         ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0x55000000)), null, _lane);
+        var harmonyLane = new Rect(_lane.X, _lane.Y, _lane.Width, harmonyH);
+        var chordLane = new Rect(_lane.X, harmonyLane.Bottom, _lane.Width, chordH);
+        var notesLane = new Rect(_lane.X, chordLane.Bottom, _lane.Width, noteLane ? notesH : 0);
+        ctx.DrawLine(PhosphorLine, chordLane.TopLeft, chordLane.TopRight);
+        if (noteLane) ctx.DrawLine(PhosphorLine, notesLane.TopLeft, notesLane.TopRight);
         if (S.ResultTake is { } take)
         {
             double off = S.Compensation;   // result times are compensated; the screen is file time
+            // The harmony map: what a listener sums up (G ... D ... G), each with its degree in the key.
+            foreach (var h in LeadSheet.Harmony(take.Chords, S.Session.KeySet ? S.Session.Key : S.Suggestion?.Key))
+            {
+                double a = XAt((h.Start + off) * S.Rate), b = XAt((h.End + off) * S.Rate);
+                if (b < harmonyLane.X || a > harmonyLane.Right) continue;
+                var box = new Rect(Math.Max(a, harmonyLane.X) + 1, harmonyLane.Y + 3, Math.Max(2, Math.Min(b, harmonyLane.Right) - Math.Max(a, harmonyLane.X) - 2), harmonyLane.Height - 6);
+                bool now = p.Position >= (h.Start + off) * S.Rate && p.Position < (h.End + off) * S.Rate;
+                ctx.DrawRectangle(now ? new ImmutableSolidColorBrush(Color.FromUInt32(0xFF1E2A22)) : new ImmutableSolidColorBrush(Color.FromUInt32(0xFF12181A)), Ui.LcdLineDim, box, 3, 3);
+                if (box.Width > 18) Ui.Text(ctx, h.Symbol, box.X + 5, box.Y + 2, 14, now ? Plasma.Lit : Phosphor, Ui.Mono);
+                if (box.Width > 18 && h.Roman.Length > 0) Ui.Text(ctx, h.Roman, box.X + 5, box.Y + 19, 10, PhosphorDim, Ui.Mono);
+            }
             foreach (var ch in take.Chords)
             {
                 double a = XAt((ch.Start + off) * S.Rate), b = XAt((ch.End + off) * S.Rate);
-                if (b < _lane.X || a > _lane.Right) continue;
-                var box = new Rect(Math.Max(a, _lane.X) + 1, _lane.Y + 4, Math.Max(2, Math.Min(b, _lane.Right) - Math.Max(a, _lane.X) - 2), _lane.Height - 8);
+                if (b < chordLane.X || a > chordLane.Right) continue;
+                var box = new Rect(Math.Max(a, chordLane.X) + 1, chordLane.Y + 3, Math.Max(2, Math.Min(b, chordLane.Right) - Math.Max(a, chordLane.X) - 2), chordLane.Height - 6);
                 bool low = ch.Confidence < 0.5f;
                 bool picked = S.Picked is ("chord", var ps) && Math.Abs(ps - ch.Start) < Review.MatchSeconds;
                 if (picked) ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0x33FFB000)), null, box, 2, 2);
                 ctx.DrawRectangle(null, new ImmutablePen((IImmutableBrush)(picked ? Ui.LabelBright : low ? Ui.Amber : Ui.Green), picked ? 2 : 1), box, 2, 2);
                 _events.Add((box, "chord", ch.Start));
-                if (box.Width > 26) Plasma.DotText(ctx, ch.Symbol.Length > 6 ? ch.Symbol[..6] : ch.Symbol, box.X + 4, box.Y + 6, 2.6, dim: low);
+                int fit = (int)((box.Width - 6) / 7);   // mono 11 px
+                if (fit >= 1) Ui.Text(ctx, ch.Symbol.Length > fit ? ch.Symbol[..fit] : ch.Symbol, box.X + 4, box.Y + 4, 11, low ? Ui.Amber : Plasma.Lit, Ui.Mono);
             }
             // The melody, or a choir's four sections (S9) in their colours, on one pitch axis.
             var lines = take.IsChoir
@@ -1591,15 +1661,15 @@ public sealed class RecorderUnit : StudioUnit
                     foreach (var n in notes)
                     {
                         double a = XAt((n.Start + off) * S.Rate), b = XAt((n.End + off) * S.Rate);
-                        if (b < _lane.X || a > _lane.Right) continue;
-                        double yy = _lane.Bottom - 6 - (n.Midi - lo) / (double)(hi - lo) * (_lane.Height - 12);
-                        var nr = new Rect(Math.Max(a, _lane.X), yy - 1.5, Math.Max(2, b - a - 1), take.IsChoir ? 3 : 4);
+                        if (b < notesLane.X || a > notesLane.Right) continue;
+                        double yy = notesLane.Bottom - 6 - (n.Midi - lo) / (double)(hi - lo) * (notesLane.Height - 12);
+                        var nr = new Rect(Math.Max(a, notesLane.X), yy - 1.5, Math.Max(2, b - a - 1), take.IsChoir ? 3 : 4);
                         bool picked = S.Picked is (var pk, var ps) && pk == kind && Math.Abs(ps - n.Start) < Review.MatchSeconds;
                         ctx.DrawRectangle(picked ? Ui.LabelBright : ink, picked ? new ImmutablePen((IImmutableBrush)Ui.Amber, 1) : null, picked ? nr.Inflate(1.5) : nr, 1, 1);
                         _events.Insert(0, (nr.Inflate(new Thickness(1, 3)), kind, n.Start));   // notes before the chord boxes they sit in
                     }
                 if (take.IsChoir)
-                    for (int i = 0; i < 4; i++) Ui.Text(ctx, "SATB"[i].ToString(), _lane.Right - 44 + i * 10, _lane.Y + 2, 8, ChoirInk[i], Ui.Mono);
+                    for (int i = 0; i < 4; i++) Ui.Text(ctx, "SATB"[i].ToString(), notesLane.Right - 44 + i * 10, notesLane.Y + 2, 8, ChoirInk[i], Ui.Mono);
             }
         }
         else Ui.Text(ctx, S.Running ? "analisando…" : "sem transcrição: DA · ANALISAR", _lane.X + 8, _lane.Y + 14, 10, PhosphorDim, Ui.Mono);
@@ -1863,25 +1933,9 @@ public sealed class ChainUnit : StudioUnit
         var an = new Rect(x, y, r.Right - x, h);
         if (S.OpenVst is { } ov && c.Vst.Contains(ov)) { DrawParams(ctx, an, ov); return; }
         DrawDevice(ctx, an, an0.Length > 0 ? string.Join(" ", an0) : "DA", an0.Length > 0 ? "ANALISADOR · ENVIO PRÉ-FADER" : "ANALISADOR · canal sem análise", an0.Length > 0);
-        string mode = S.Choir ? "CORO" : S.Mode switch
-        {
-            AppMode.VoiceMono => "VOZ", AppMode.InstrumentMono => "MELODIA", AppMode.GuitarChords => "VIOLÃO", AppMode.PianoChords => "PIANO", _ => "GERAL",
-        };
+        // The processes are on the transport's toolbar; here, what the analysis made of this take.
         double ix = an.X + 14, iy = an.Y + 24;
-        Key(ctx, new Rect(ix, iy, 80, 28), mode, () => { S.CycleMode(); InvalidateVisual(); }, true, Ui.Amber, !S.Running);
-        string sepLabel = !DemucsModel.HelperPresent ? "SEM DEMUCS" : S.Stems.Count > 0 ? "SEPARADO" : DemucsModel.Installed(S.Variant) ? "SEPARAR" : "SEPARAR*";
-        Key(ctx, new Rect(ix + 86, iy, 92, 28), sepLabel, S.Separate, S.Stems.Count > 0 || S.Separating, Ui.Amber, DemucsModel.HelperPresent && S.Current is not null && !S.Separating && !S.Running);
-        Key(ctx, new Rect(ix, iy + 34, 80, 28), "ANALISAR", S.Analyze, S.Running, Ui.Green, S.Current is not null && !S.Running && !S.Separating);
-        Key(ctx, new Rect(ix + 86, iy + 34, 92, 28), "CANCELAR", S.Cancel, false, Ui.Red, S.Running || S.Separating);
-        Key(ctx, new Rect(ix + 184, iy, 76, 28), "SCORE", S.OpenScore, S.Result is not null, Ui.Green, S.Current is not null);
-        Key(ctx, new Rect(ix + 184, iy + 34, 76, 28), "ENTREGAR", () => S.Deliver(), false, Ui.Amber, S.Result is not null && !S.Running);
-        if (sepLabel == "SEPARAR*") Ui.Text(ctx, $"* baixa o Demucs ({S.Variant.Size / 1_000_000} MB) uma vez", ix, iy + 66, 8, Ui.Label, Ui.Mono);
-        // Progress as an LED bar (separation amber, analysis green).
-        bool sep = S.Separating;
-        int lit = (int)Math.Round((sep ? S.SepProgress : S.Running ? S.Progress : S.Result is not null ? 1 : 0) * 20);
-        for (int i = 0; i < 20; i++) Ui.Led(ctx, new Point(ix + 6 + i * 12.5, iy + 82), 4, i < lit, sep ? Ui.Amber : Ui.Green, sep ? Ui.AmberOff : Ui.GreenOff);
-        // Plasma readout of the result.
-        var win = new Rect(ix, iy + 94, Math.Min(an.Width - 28, 520), an.Bottom - iy - 102);
+        var win = new Rect(ix, iy, Math.Min(an.Width - 28, 520), Math.Min(64, an.Bottom - iy - 8));
         ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF120804)), Ui.FaceEdge, win, 2, 2);
         if (S.ResultTake is { } t)
         {
@@ -2049,6 +2103,8 @@ public sealed class StudioView : DockPanel
         _recorder = recorder;
         _console = console;
         _library = library;
+        _flow = flow;
+        _meters = meters;
         _units = [transport, flow, library, recorder, console, meters, chain];
         var left = new RackRail();
         var right = new RackRail();
@@ -2056,10 +2112,11 @@ public sealed class StudioView : DockPanel
         SetDock(right, Dock.Right);
         Children.Add(left);
         Children.Add(right);
-        // Top to bottom as the signal goes: transport, the session's flow, the channels (library,
-        // recorder or console, measuring tubes), the selected channel's chain. Taller than a small
-        // window: the rack scrolls.
-        var body = new DockPanel { Margin = new Thickness(6, 0), MinHeight = 1060 };
+        // As a DAW: the transport and its toolbar on top, the arrangement (recorder, or the console)
+        // in the middle with the browser and the meters as side panels that open and close, the
+        // selected track's device chain at the bottom; the signal routing opens under the transport.
+        // Taller than a small window: the rack scrolls.
+        var body = new DockPanel { Margin = new Thickness(6, 0), MinHeight = 900 };
         SetDock(transport, Dock.Top);
         transport.Margin = new Thickness(0, 6);
         SetDock(flow, Dock.Top);
@@ -2080,15 +2137,18 @@ public sealed class StudioView : DockPanel
         _s.Changed += Refresh;
         if (_s.Player is null) _s.Status = "núcleo nativo ausente: biblioteca sem reprodução nem análise";
         _s.ScanPlugins();   // only bundles changed since the cache are scanned again
+        Refresh();
     }
 
-    readonly StudioUnit _recorder, _console, _library;
+    readonly StudioUnit _recorder, _console, _library, _flow, _meters;
 
     void Refresh()
     {
         _recorder.IsVisible = !_s.ConsoleView;
         _console.IsVisible = _s.ConsoleView;
-        _library.IsVisible = !_s.ConsoleView;   // mixing: the console takes the library's width
+        _library.IsVisible = _s.ShowBrowser && !_s.ConsoleView;   // mixing: the console takes the library's width
+        _flow.IsVisible = _s.ShowRouting;
+        _meters.IsVisible = _s.ShowMeters;
         foreach (var u in _units) u.InvalidateVisual();
         _status.Text = _s.Status;
     }

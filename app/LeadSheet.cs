@@ -94,4 +94,38 @@ public static class LeadSheet
             if (head.EndsWith(f)) { head = head[..^f.Length]; break; }
         return head + figs[Math.Min(inversion, figs.Length - 1)] + tail;
     }
+
+    /// The harmony underneath the chords: each chord as its triad (root, major or minor; Cadd9 -> C,
+    /// D/F# -> D, Em7 -> Em), the same triads in a row joined, and a chord shorter than a second
+    /// folded into the one before it (a passing chord is not the harmony).
+    // ponytail: a fold of the detailed chords, not the LIVE harmony HMM; run ChordHmm::harmony() offline if it falls short.
+    /// Degrees in `key` (the session's, else the suggested one); none without a key.
+    public static List<(double Start, double End, string Symbol, string Roman)> Harmony(IReadOnlyList<TakeChord> chords, KeyOption? key)
+    {
+        string[] major = ["I", "♭II", "II", "♭III", "III", "IV", "♯IV", "V", "♭VI", "VI", "♭VII", "VII"];
+        string[] minorKey = ["I", "♭II", "II", "III", "♯III", "IV", "♯IV", "V", "VI", "♯VI", "VII", "♯VII"];
+        int tonic = key is null ? -1 : ((key.Fifths * 7 % 12 + 12) % 12 + (key.Minor ? 9 : 0)) % 12;
+        string Degree(int root, bool minor)
+        {
+            if (tonic < 0) return "";
+            string d = (key!.Minor ? minorKey : major)[(root - tonic + 12) % 12];
+            return minor ? d.ToLowerInvariant() : d;
+        }
+        var o = new List<(double Start, double End, string Symbol, string Roman)>();
+        foreach (var c in chords)
+        {
+            string s = c.Symbol.Split('/')[0];
+            int n = s.Length > 1 && (s[1] is '#' or 'b' or '♯' or '♭') ? 2 : 1;
+            string q = s[n..];
+            bool minor = q.StartsWith('m') && !q.StartsWith("maj") || q.StartsWith("dim");
+            string triad = s[..n] + (minor ? "m" : "");
+            int root = ("C D EF G A B".IndexOf(s[0]) + (n == 2 ? s[1] is '#' or '♯' ? 1 : -1 : 0) + 12) % 12;
+            string roman = Degree(root, minor);
+            if (o.Count > 0 && (o[^1].Symbol == triad || c.End - c.Start < 1.0)) o[^1] = (o[^1].Start, c.End, o[^1].Symbol, o[^1].Roman);
+            else o.Add((c.Start, c.End, triad, roman));
+        }
+        for (int i = o.Count - 1; i > 0; i--)   // a fold can leave two equal neighbours
+            if (o[i].Symbol == o[i - 1].Symbol) { o[i - 1] = (o[i - 1].Start, o[i].End, o[i - 1].Symbol, o[i - 1].Roman); o.RemoveAt(i); }
+        return o;
+    }
 }

@@ -211,6 +211,13 @@ Check(take.Notes[0].Sounding == new Pitch(4, 0, 3) && take.BeatsPerBar == 3 && t
 Check(B(take).Measures[0].Items.Sum(i => i.Duration) == 36, "3/4 measure");
 
 // Likely guitar shapes: the common open and barre chords.
+// STUDIO harmony map: chords folded into triads (colours, inversions and passing chords out), degrees in the key.
+TakeChord Ch(double a, double b, string sym) => new(a, b, sym, "", 0, -1, 0, 1);
+var hm = LeadSheet.Harmony([Ch(0, 4, "G"), Ch(4, 4.5, "Cadd9"), Ch(4.5, 8, "Gmaj7"), Ch(8, 12, "D/F#"), Ch(12, 15, "Em7"), Ch(15, 18, "F#m")], new KeyOption(1, false));
+string Hm(List<(double Start, double End, string Symbol, string Roman)> l) => string.Join(" ", l.Select(h => $"{h.Symbol}:{h.Roman}@{h.Start:0}-{h.End:0}"));
+Check(Hm(hm) == "G:I@0-8 D:V@8-12 Em:vi@12-15 F#m:vii@15-18", $"harmony map: {Hm(hm)}");
+Check(LeadSheet.Harmony([Ch(0, 2, "Am"), Ch(2, 4, "E7")], new KeyOption(0, true)).Select(h => h.Roman).SequenceEqual(["i", "V"]), "harmony map: degrees in a minor key");
+
 string Shape(int[] pcs, int bass) => string.Join(" ", Theory.LikelyShape(pcs, bass).Select(f => f < 0 ? "x" : f.ToString()));
 Check(Shape([0, 4, 7], 0) == "x 3 2 0 1 0", $"shape C: {Shape([0, 4, 7], 0)}");
 Check(Shape([7, 11, 2], 7) == "3 2 0 0 0 3", $"shape G: {Shape([7, 11, 2], 7)}");
