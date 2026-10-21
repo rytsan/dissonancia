@@ -11,6 +11,9 @@
 #include "player.hpp"
 #include "post.hpp"
 #include "rt.hpp"
+#if DZ_MIDI
+#include "RtMidi.h"
+#endif
 
 struct PlayerHandle {
     ma_context ctx{};
@@ -30,6 +33,9 @@ struct AnalyzerHandle {
     std::vector<ma_device_info> captures;
     dz::Engine engine;
     std::string error;
+#if DZ_MIDI
+    std::unique_ptr<RtMidiIn> midi;   // after the engine: closed first (its callback feeds the engine)
+#endif
 };
 
 namespace {
@@ -154,6 +160,73 @@ int32_t ana_set_metronome(AnalyzerHandle* h, uint8_t on, float bpm, TimeSignatur
 
 void ana_clear_clip(AnalyzerHandle* h) {
     if (h) h->engine.clear_clip();
+}
+
+// ---------------------------------------------------------------- LIVE playground
+
+int32_t ana_pad_load(AnalyzerHandle* h, int32_t slot, const char* path) {
+    return guarded(h, [&] {
+        if (!h->engine.running()) { h->error = "start LIVE first (the pads play at its rate)"; return int32_t(ANA_ERR_STATE); }
+        std::string err;
+        int32_t r = h->engine.playground().load(slot, path, h->engine.rate(), err);
+        if (r < 0) h->error = err;
+        return r;
+    });
+}
+void ana_pad_hit(AnalyzerHandle* h, int32_t pad, float velocity) { if (h && pad >= 0 && pad < ANA_PADS) h->engine.playground().hit(pad, velocity); }
+void ana_midi_send(AnalyzerHandle* h, uint8_t status, uint8_t d1, uint8_t d2) { if (h) h->engine.playground().midi_from_api(status, d1, d2); }
+void ana_playground_set(AnalyzerHandle* h, const PlaygroundConfig* c) { if (h && c) h->engine.playground().set(*c); }
+void ana_playground_status(AnalyzerHandle* h, PlaygroundStatus* out) { if (h && out) h->engine.playground().status(*out); }
+
+#if DZ_MIDI
+namespace {
+RtMidiIn* midi_probe(AnalyzerHandle* h) {
+    if (!h->midi) {
+        try { h->midi = std::make_unique<RtMidiIn>(); } catch (const RtMidiError& e) { h->error = e.getMessage(); return nullptr; }
+    }
+    return h->midi.get();
+}
+}  // namespace
+int32_t ana_midi_port_count(AnalyzerHandle* h) {
+    if (!h) return 0;
+    try { auto* m = midi_probe(h); return m ? int32_t(m->getPortCount()) : 0; } catch (...) { return 0; }
+}
+int32_t ana_midi_port_name(AnalyzerHandle* h, int32_t index, char* utf8, int32_t cap) {
+    if (!h || !utf8 || cap <= 0) return ANA_ERR_ARG;
+    try {
+        auto* m = midi_probe(h);
+        if (!m || index < 0 || unsigned(index) >= m->getPortCount()) return ANA_ERR_ARG;
+        std::snprintf(utf8, size_t(cap), "%s", m->getPortName(unsigned(index)).c_str());
+        return ANA_OK;
+    } catch (...) { return ANA_ERR_STATE; }
+}
+int32_t ana_midi_open(AnalyzerHandle* h, int32_t index) {
+    if (!h) return ANA_ERR_ARG;
+    try {
+        auto* m = midi_probe(h);
+        if (!m) return int32_t(ANA_ERR_DEVICE);
+        if (m->isPortOpen()) { m->cancelCallback(); m->closePort(); }
+        if (index < 0) return int32_t(ANA_OK);
+        if (unsigned(index) >= m->getPortCount()) return int32_t(ANA_ERR_ARG);
+        m->openPort(unsigned(index), "Dissonancia");
+        m->ignoreTypes(true, true, true);   // no sysex, timing clock, active sensing
+        m->setCallback([](double, std::vector<unsigned char>* msg, void* user) {
+            if (msg && msg->size() >= 2) static_cast<dz::Engine*>(user)->playground().midi_from_device((*msg)[0], (*msg)[1], msg->size() > 2 ? (*msg)[2] : 0);
+        }, &h->engine);
+        return int32_t(ANA_OK);
+    } catch (const RtMidiError& e) {
+        h->error = e.getMessage();
+        return int32_t(ANA_ERR_DEVICE);
+    }
+}
+#else
+int32_t ana_midi_port_count(AnalyzerHandle*) { return 0; }
+int32_t ana_midi_port_name(AnalyzerHandle*, int32_t, char*, int32_t) { return ANA_ERR_ARG; }
+int32_t ana_midi_open(AnalyzerHandle* h, int32_t index) { if (h && index >= 0) h->error = "built without MIDI input"; return index < 0 ? ANA_OK : ANA_ERR_DEVICE; }
+#endif
+int32_t ana_midi_read(AnalyzerHandle* h, uint32_t* out, int32_t cap) {
+    if (!h || !out || cap <= 0) return 0;
+    return int32_t(h->engine.playground().read_midi(out, size_t(cap)));
 }
 
 PlayerHandle* ana_player_create(void) {

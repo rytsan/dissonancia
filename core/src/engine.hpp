@@ -16,6 +16,7 @@
 #include "tempo.hpp"
 #include "cqt.hpp"
 #include "voice.hpp"
+#include "playground.hpp"
 
 namespace dz {
 
@@ -38,6 +39,8 @@ public:
     int rec_stop();
     int set_metronome(bool on, float bpm, TimeSignature meter);
     void clear_clip() { clearClip_.store(true, std::memory_order_relaxed); }
+    Playground& playground() { return play_; }
+    uint32_t rate() const { return rate_; }
 
     // Audio callback body; public for headless tests. in: interleaved captureChannels_, out: playbackChannels_ (may be null).
     void on_audio(const float* in, float* out, uint32_t frames);
@@ -47,6 +50,7 @@ public:
     const std::string& error() const { return error_; }
 
 private:
+    Playground play_;
     void analysis_loop();
     void recorder_loop();
     void process_hop(const float* x, uint32_t n);

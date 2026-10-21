@@ -136,6 +136,7 @@ int Engine::start(const SessionConfig& s, const AudioDeviceConfig& d, ma_context
     metroGen_.fetch_add(1, std::memory_order_release);
     cbMetroGen_ = ~0u;
     cbClickPos_ = ~0u;
+    play_.start(rate_);
     stopFlag_ = false;
 
     analysisThread_ = std::thread([this] { analysis_loop(); });
@@ -154,6 +155,7 @@ int Engine::stop() {
     if (!running_) return ANA_OK;
     if (encoder_.load()) rec_stop();   // flush the take while the device still runs
     if (deviceOpen_) { ma_device_uninit(&device_); deviceOpen_ = false; }
+    play_.stop();
     stopFlag_.store(true);
     wake_.fetch_add(1, std::memory_order_release);
     wake_.notify_one();
@@ -212,7 +214,10 @@ void Engine::on_audio(const float* in, float* out, uint32_t frames) {
         }
     }
 
-    if (out) mix_click(out, frames, pos);
+    if (out) {
+        mix_click(out, frames, pos);
+        play_.render(out, frames, playbackChannels_, pos, cbOrigin_, cbBeatFrames_, int(cbBeatsPerBar_));
+    }
 
     cbPos_ = pos + frames;
     cbTime_.store(now_seconds(), std::memory_order_relaxed);

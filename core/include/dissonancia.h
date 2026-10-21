@@ -444,6 +444,35 @@ struct PostStatus {
     uint8_t _pad0[3];
 };
 
+// ---------------------------------------------------------------- LIVE playground (creation)
+// 16 pads (one-shot WAVs), a sampler (one WAV on MIDI notes, repitched from its root), a 16-step
+// sequencer in sixteenths from the bar's downbeat (the metronome's grid, its click on or off), MIDI
+// input. Played through the LIVE output (the click output must be on). MIDI notes 36..51 hit the
+// pads (any channel), every other note plays the sampler; every message also reaches the app
+// (ana_midi_read) for MIDI learn.
+
+constexpr int ANA_PADS = 16;
+
+struct PlaygroundConfig {
+    uint16_t steps[ANA_PADS];          // bit k: the pad plays on step k
+    float padGainDb[ANA_PADS];
+    float padPan[ANA_PADS];            // -1 .. +1
+    float samplerGainDb;
+    float masterDb;
+    uint8_t sequencerOn;               // bool
+    uint8_t samplerRoot;               // the MIDI note the sampler's WAV sounds at
+    uint8_t _pad0[2];
+};
+
+struct PlaygroundStatus {
+    uint32_t hits[ANA_PADS + 1];       // triggers so far ([16]: sampler notes), for the pads' flash
+    float seconds[ANA_PADS + 1];       // loaded length, 0 = empty
+    float peakDb;                      // the playground's output since the last read
+    int32_t step;                      // the step playing, -1 = sequencer off
+    int32_t voices;
+    uint32_t midiMessages;             // received from the MIDI input since it was opened
+};
+
 // ---------------------------------------------------------------- functions
 
 enum AnaResult : int32_t { ANA_OK = 0, ANA_ERR_STATE = -1, ANA_ERR_DEVICE = -2, ANA_ERR_ARG = -3, ANA_ERR_IO = -4 };
@@ -475,6 +504,21 @@ ANA_API int32_t ana_rec_start(AnalyzerHandle* h, const char* wavPathUtf8);  // a
 ANA_API int32_t ana_rec_stop(AnalyzerHandle* h);     // finalizes WAV + JSON sidecar
 ANA_API int32_t ana_set_metronome(AnalyzerHandle* h, uint8_t on, float bpm, TimeSignature meter);  // refused while REC
 ANA_API void ana_clear_clip(AnalyzerHandle* h);
+
+// LIVE playground. Load needs a running engine (its rate); slot ANA_PADS = the sampler; "" empties.
+ANA_API int32_t ana_pad_load(AnalyzerHandle* h, int32_t slot, const char* wavPathUtf8);
+ANA_API void ana_pad_hit(AnalyzerHandle* h, int32_t pad, float velocity);
+// A MIDI message as if from the controller (the app's keyboard, tests).
+ANA_API void ana_midi_send(AnalyzerHandle* h, uint8_t status, uint8_t data1, uint8_t data2);
+ANA_API void ana_playground_set(AnalyzerHandle* h, const PlaygroundConfig* c);
+ANA_API void ana_playground_status(AnalyzerHandle* h, PlaygroundStatus* out);
+// MIDI input ports (RtMidi; 0 when built without it or none present). open: -1 closes.
+ANA_API int32_t ana_midi_port_count(AnalyzerHandle* h);
+ANA_API int32_t ana_midi_port_name(AnalyzerHandle* h, int32_t index, char* utf8, int32_t cap);
+ANA_API int32_t ana_midi_open(AnalyzerHandle* h, int32_t index);
+// Every message received (status | data1 << 8 | data2 << 16), oldest first, since the last read.
+ANA_API int32_t ana_midi_read(AnalyzerHandle* h, uint32_t* out, int32_t cap);
+
 
 // STUDIO player: its own audio context and output device, independent of the LIVE engine.
 ANA_API PlayerHandle* ana_player_create(void);

@@ -20,3 +20,4 @@ static_assert(sizeof(LiveSnapshot) == 18096 && offsetof(LiveSnapshot, chord) == 
 static_assert(offsetof(LiveSnapshot, beatInBar) == 96 && offsetof(LiveSnapshot, pitch) == 104);
 static_assert(offsetof(LiveSnapshot, note) == 136 && offsetof(LiveSnapshot, chroma) == 200);
 static_assert(offsetof(LiveSnapshot, cqtMagnitude) == 408 && offsetof(LiveSnapshot, waveMin) == 1712 && offsetof(LiveSnapshot, songKey) == 1672 && offsetof(LiveSnapshot, harmonySymbol) == 1688 && offsetof(LiveSnapshot, melody) == 1608);
+static_assert(sizeof(PlaygroundConfig) == 172 && sizeof(PlaygroundStatus) == 152);
