@@ -276,8 +276,62 @@ public sealed class StudioState
         if (Current is null) return;
         ApplyMix();
         StudioProject.SaveMix(Current, Mix);
+        // Units patched before an insert are rendered into it: render again (the cache keeps what did not change).
+        if (Enumerable.Range(0, Tracks).Any(t => Channel(t).Vst.Any(v => v.On))) ApplyVst();
         RefreshResult();   // the analysis tap of an edited chain is another input
         Changed?.Invoke();
+    }
+
+    // ---------------------------------------------------------------- S10 the chain as patched
+
+    /// Moves a module (unit or insert) to `index` in the chain of `track` (a cable dragged elsewhere).
+    public void MoveSlot(int track, string slot, int index)
+    {
+        var c = Channel(track);
+        var l = c.Slots();
+        int from = l.IndexOf(slot);
+        if (from < 0) l.Add(slot);   // an unpatched unit plugged back in
+        else l.RemoveAt(from);
+        l.Insert(Math.Clamp(from >= 0 && index > from ? index - 1 : index, 0, l.Count), slot);
+        c.Chain = l;
+        FixParallel(c);
+        MixChanged();
+    }
+
+    /// Pulls a built-in unit's cables: out of the chain (it stays in the drawer, settings kept).
+    public void Unpatch(int track, string unit)
+    {
+        var c = Channel(track);
+        var l = c.Slots();
+        l.Remove(unit);
+        c.Chain = l;
+        FixParallel(c);
+        MixChanged();
+    }
+
+    /// Adds a unit to the parallel path, or takes an end unit out of it; the path is always one run
+    /// of built-in units with no insert between them.
+    public void ToggleParallel(int track, string unit)
+    {
+        var c = Channel(track);
+        var l = c.Slots();
+        if (c.ParallelFirst is null) (c.ParallelFirst, c.ParallelLast) = (unit, unit);
+        else if (unit == c.ParallelFirst && unit == c.ParallelLast) (c.ParallelFirst, c.ParallelLast) = (null, null);
+        else if (unit == c.ParallelFirst) c.ParallelFirst = l[l.IndexOf(unit) + 1];
+        else if (unit == c.ParallelLast) c.ParallelLast = l[l.IndexOf(unit) - 1];
+        else if (l.IndexOf(unit) < l.IndexOf(c.ParallelFirst)) c.ParallelFirst = unit;
+        else c.ParallelLast = unit;
+        if (c.ParallelFirst is not null && c.ParallelMix <= 0) c.ParallelMix = 0.5f;
+        FixParallel(c);
+        MixChanged();
+    }
+
+    static void FixParallel(ChannelMix c)
+    {
+        var l = c.Slots();
+        int a = c.ParallelFirst is null ? -1 : l.IndexOf(c.ParallelFirst), b = c.ParallelLast is null ? -1 : l.IndexOf(c.ParallelLast);
+        bool ok = a >= 0 && b >= a && l.Skip(a).Take(b - a + 1).All(ChannelMix.Units.Contains);
+        if (!ok) (c.ParallelFirst, c.ParallelLast) = (null, null);
     }
 
     public void Bounce()
@@ -695,12 +749,26 @@ public sealed class StudioState
     string VstKey(int t)
     {
         string src = t == 0 ? "take;" + Edits.Key : "stem;" + StemsKey + ";" + NameOf(t);
-        return src + "|" + string.Join("|", Channel(t).Vst.Where(v => v.On).Select(v =>
+        var c = Channel(t);
+        var segs = c.Segments();
+        return src + "|" + string.Join("|", OnInserts(c).Select((v, i) =>
         {
             string st = StudioProject.VstStatePath(Current!, v.Id);
-            return v.Cid + ":" + (File.Exists(st) ? Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(st)))[..16] : "-")
+            return ChainHash(c, segs[i]) + ">" + v.Cid + ":" + (File.Exists(st) ? Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(st)))[..16] : "-")
                 + ":" + string.Join(",", v.Params.OrderBy(p => p.Key).Select(p => FormattableString.Invariant($"{p.Key}={p.Value:R}")));
         }));
+    }
+
+    /// The inserts that are on, in the order they are patched.
+    static List<VstInsert> OnInserts(ChannelMix c) => c.Slots().Select(c.VstOf).OfType<VstInsert>().Where(v => v.On).ToList();
+
+    /// The built-in units patched before an insert, as the render sees them ("" = none).
+    static string ChainHash(ChannelMix c, List<string> units)
+    {
+        if (units.Count == 0) return "";
+        var n = c.NativeFor(units);
+        var bytes = System.Runtime.InteropServices.MemoryMarshal.AsBytes(new ReadOnlySpan<ChannelParamsNative>(ref n)).ToArray();
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes))[..12];
     }
 
     public void AddVst(PluginHost.Plugin plugin)
@@ -745,7 +813,8 @@ public sealed class StudioState
         for (int t = 0; t < Tracks; t++)
         {
             var c = Channel(t);
-            var on = c.Vst.Where(v => v.On).ToList();
+            var on = OnInserts(c);
+            var segs = c.Segments();
             if (on.Count == 0 || !PluginHost.Present)
             {
                 if (c.VstSignature.Length > 0) { Player.SetSource(t, null); c.VstSignature = ""; changed = true; }
@@ -765,6 +834,17 @@ public sealed class StudioState
             string? err = null, cur = src;
             for (int i = 0; i < on.Count && err is null; i++)
             {
+                if (segs[i].Count > 0)
+                {   // the units patched before this insert, rendered into it
+                    string pre = $"{outPath}.c{i}.wav";
+                    VstWhat = $"cadeia antes de {on[i].Name} · canal {t + 1}";
+                    var n = c.NativeFor(segs[i]);
+                    string inFile = cur!;
+                    int rc = await Task.Run(() => MixApi.RenderChain(inFile, n, pre));
+                    if (rc != 0) { err = "não foi possível renderizar a cadeia"; break; }
+                    if (cur != src) File.Delete(cur!);
+                    cur = pre;
+                }
                 string next = i == on.Count - 1 ? outPath + ".part.wav" : $"{outPath}.{i}.wav";
                 int k = i;
                 VstWhat = $"{on[i].Name} · canal {t + 1}";
@@ -1070,6 +1150,25 @@ public abstract class StudioUnit : Control
             var m = sag == 0 ? new Point((a.X + b.X) / 2, (a.Y + b.Y) / 2) : new Point((a.X + b.X) / 2, Math.Max(a.Y, b.Y) + sag * 0.75);
             Ui.Led(ctx, m, 2.4, db > -60, LevelLed(db), Ui.GreenOff);
         }
+        // The signal travelling: pulses run along the cable from source to destination while there
+        // is signal, brighter and bigger with the level.
+        if (db <= -60) return;
+        Point P(double u)
+        {
+            if (sag == 0) return new Point(a.X + (b.X - a.X) * u, a.Y + (b.Y - a.Y) * u);
+            var c1 = new Point(a.X + (b.X - a.X) * 0.3, Math.Max(a.Y, b.Y) + sag);
+            var c2 = new Point(a.X + (b.X - a.X) * 0.7, Math.Max(a.Y, b.Y) + sag);
+            double v = 1 - u;
+            return new Point(v * v * v * a.X + 3 * v * v * u * c1.X + 3 * v * u * u * c2.X + u * u * u * b.X,
+                             v * v * v * a.Y + 3 * v * v * u * c1.Y + 3 * v * u * u * c2.Y + u * u * u * b.Y);
+        }
+        double len = Math.Max(1, Math.Abs(b.X - a.X) + Math.Abs(b.Y - a.Y) + Math.Abs(sag));
+        const double spacing = 26, speed = 70;   // px between pulses, px/s
+        double phase = Environment.TickCount64 / 1000.0 * speed % spacing;
+        float k = Math.Clamp((db + 60) / 60, 0, 1);
+        var pulse = new ImmutableSolidColorBrush(Color.FromArgb((byte)(90 + 165 * k), 255, 236, 190));
+        for (double d = phase; d < len; d += spacing)
+            ctx.DrawEllipse(pulse, null, P(d / len), thin || send ? 1.2 : 1.4 + 1.4 * k, thin || send ? 1.2 : 1.4 + 1.4 * k);
     }
 
     /// A jack socket on a panel.
@@ -1345,7 +1444,7 @@ public sealed class LibraryUnit : StudioUnit
         _rows.Clear();
         int nPlugins = S.Plugins.Count();
         Key(ctx, new Rect(r.X, r.Bottom - 76, r.Width, 30), S.PluginView ? "◀ TAKES" : $"EFEITOS VST3 · {nPlugins}", () => { S.PluginView = !S.PluginView; _scroll = 0; InvalidateVisual(); }, S.PluginView, Ui.Amber, PluginHost.Present || nPlugins > 0);
-        Key(ctx, new Rect(r.X, r.Bottom - 38, r.Width / 2 - 4, 32), "IMPORTAR", () => _ = ImportAsync(), false, null, !S.PluginView);
+        Key(ctx, new Rect(r.X, r.Bottom - 38, r.Width / 2 - 4, 32), S.PluginView ? "+ PASTA" : "IMPORTAR", () => _ = S.PluginView ? AddPluginFolderAsync() : ImportAsync(), false, null, !S.PluginView || PluginHost.Present);
         Key(ctx, new Rect(r.X + r.Width / 2 + 4, r.Bottom - 38, r.Width / 2 - 4, 32), "ATUALIZAR", () => { if (S.PluginView) S.ScanPlugins(); else S.ReloadLibrary(); InvalidateVisual(); });
         if (S.PluginView) { DrawPlugins(ctx, screen); return; }
         double y = screen.Y + 6;
@@ -1407,6 +1506,17 @@ public sealed class LibraryUnit : StudioUnit
         _scroll = Math.Clamp(_scroll - Math.Sign(e.Delta.Y), 0, Math.Max(0, S.Library.Count - 1));
         InvalidateVisual();
         e.Handled = true;
+    }
+
+    /// Your own plugins (a build folder, a .vst3 anywhere): the folder joins the search, then a scan.
+    async Task AddPluginFolderAsync()
+    {
+        if (TopLevel.GetTopLevel(this)?.StorageProvider is not { } sp) return;
+        var dirs = await sp.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Pasta com seus plugins VST3 (ou a própria .vst3)" });
+        foreach (var d in dirs)
+            if (d.TryGetLocalPath() is { } path) PluginHost.AddFolder(path);
+        if (dirs.Count > 0) S.ScanPlugins();
+        InvalidateVisual();
     }
 
     async Task ImportAsync()
@@ -1778,7 +1888,7 @@ public sealed class RecorderUnit : StudioUnit
 /// (the only unit at work before S4: the others are mounted and wait for the mixing milestone).
 public sealed class ChainUnit : StudioUnit
 {
-    public ChainUnit(StudioState s) : base(s, "DS-C", "CADEIA DO CANAL") { Height = 262; }
+    public ChainUnit(StudioState s) : base(s, "DS-C", "CADEIA DO CANAL") { Height = 290; }
 
     readonly List<(Rect R, VstInsert V)> _vstRows = [], _vstOpen = [];
 
@@ -1788,6 +1898,15 @@ public sealed class ChainUnit : StudioUnit
             if (r.Contains(p) && !S.RenderingVst) { S.ToggleVst(v); return; }
         foreach (var (r, v) in _vstOpen)
             if (r.Contains(p)) { S.OpenPanel(S.OpenVst == v ? null : v); return; }
+        // A module's top (its engraved name): pick it up to patch it elsewhere.
+        foreach (var (slot, box) in _modules)
+            if (new Rect(box.X, box.Y, box.Width, 20).Contains(p) && S.Current is not null)
+            {
+                (_dragSlot, _dragX) = (slot, p.X);
+                e.Pointer.Capture(this);
+                InvalidateVisual();
+                return;
+            }
     }
 
     /// The open insert's parameters as knobs, eight a page, where the analyser sits.
@@ -1819,6 +1938,15 @@ public sealed class ChainUnit : StudioUnit
     static string Hz(double f) => f >= 1000 ? $"{f / 1000:0.#}k" : $"{f:0}";
     static readonly IBrush BypassVeil = new ImmutableSolidColorBrush(Color.FromUInt32(0x77111214));
 
+    // Modules on screen this frame (slot id, box) and a module being dragged by its top.
+    readonly List<(string Slot, Rect Box)> _modules = [];
+    string? _dragSlot;
+    double _dragX;
+    static readonly Dictionary<string, (string Model, string Name, double W)> UnitFace = new()
+    {
+        ["trim"] = ("DS-1", "TRIM", 100), ["filter"] = ("DF-2", "FILTRO", 120), ["gate"] = ("DG-3", "GATE", 120), ["eq"] = ("DQ-4", "EQ", 184), ["comp"] = ("DC-5", "COMP", 156),
+    };
+
     protected override void DrawContent(DrawingContext ctx, Rect r)
     {
         var names = new Dictionary<string, string> { ["mix"] = "MIX", ["vocals"] = "VOZ", ["bass"] = "BAIXO", ["other"] = "OUTROS", ["drums"] = "BATERIA", ["guitar"] = "VIOLÃO", ["piano"] = "PIANO" };
@@ -1826,15 +1954,28 @@ public sealed class ChainUnit : StudioUnit
         string chName = S.Current is null ? "—" : names.GetValueOrDefault(S.NameOf(sel), S.NameOf(sel));
         Tape(ctx, r.X, r.Y, chName, -1);
         var an0 = S.AnalysersOf(sel);
-        string from = sel == 0 ? "FONTE (direto)" : $"DS-S saída {sel}";
-        Ui.Text(ctx, $"IN ◀ {from}   ·   ordem fixa de estúdio, como um pedalboard: footswitch liga / desliga (bypass)   ·   OUT ▶ fader do canal {sel + 1} no DS-M   ·   envio pré-fader ▶ {(an0.Length > 0 ? string.Join(" + ", an0) : "nenhuma análise")}",
-            r.X + 90, r.Y + 2, 9, Ui.Label, Ui.Mono);
-        double y = r.Y + 30, h = r.Height - 30;
         var c = S.Channel(sel);
-        void Changed() => S.MixChanged();
         bool has = S.Current is not null;
+        var slots = c.Slots();
+        // The drawer: units with their cables pulled; a click plugs one back in before the tap.
+        double dx = r.X + 90;
+        Ui.Text(ctx, "arraste um módulo pelo topo: muda a ordem  ·  ⏏ tira da cadeia  ·  ∥ caminho paralelo", dx, r.Y + 2, 9, Ui.Label, Ui.Mono);
+        dx += 560;
+        foreach (var u in ChannelMix.Units.Where(u => !slots.Contains(u)))
+        {
+            string label = "+ " + UnitFace[u].Name;
+            double w = label.Length * 7 + 18;
+            Key(ctx, new Rect(dx, r.Y - 2, w, 20), label, () => S.MoveSlot(sel, u, c.Slots().Count), false, Ui.Amber, has, withLed: false);
+            dx += w + 4;
+        }
+        Key(ctx, new Rect(dx, r.Y - 2, 70, 20), "+ VST3", () => { S.PluginView = true; S.ShowBrowser = true; S.Select(); }, S.PluginView, Ui.Amber, has && PluginHost.Present && c.Vst.Count < StudioState.MaxVst, withLed: false);
+        double y = r.Y + 30, h = r.Height - 30 - 30;   // room under the modules for the parallel path's dry cable
+        void Changed() => S.MixChanged();
         double ky = y + h / 2 - 6, fy = y + h - 22;   // knob row, footswitch row
-        float Lv(int stage) => S.Meters.Stage[mt, stage];
+        // Cable levels: the units after the last insert that is on play live (the player's stage
+        // peaks by position); before it everything is rendered, and its level is the source's.
+        var live = c.Segments()[^1];
+        float Lv(string? slot) => slot is null || !live.Contains(slot) ? S.Meters.Stage[mt, 0] : S.Meters.Stage[mt, live.IndexOf(slot) + 1];
 
         // IN plate.
         var inPlate = new Rect(r.X, y + h / 2 - 22, 30, 44);
@@ -1842,111 +1983,72 @@ public sealed class ChainUnit : StudioUnit
         Ui.Text(ctx, "IN", inPlate.Center.X, inPlate.Y + 3, 8, Ui.LabelBright, Ui.SansBold, Ui.Align.Center);
         Jack(ctx, new Point(inPlate.Center.X, inPlate.Center.Y + 6));
         double x = inPlate.Right + 20;
-        Rect box;
-        void Next(int stage) { Patch(ctx, new Point(box.Right, box.Center.Y), new Point(box.Right + 20, box.Center.Y), Lv(stage), 20); x = box.Right + 20; }
-
-        // DV-0 VST3: the channel's plugins before the chain, rendered offline (the IN level is after them).
-        box = new Rect(x, y, 112, h);
-        bool vstOn = c.Vst.Any(v => v.On);
-        Patch(ctx, new Point(inPlate.Center.X, inPlate.Center.Y + 6), new Point(x, y + h / 2), Lv(0), 14);
-        DrawDevice(ctx, box, "DV-0", "VST3", vstOn);
+        Rect box = new(inPlate.Center.X, inPlate.Center.Y + 6, 0, 0);
+        Point outPt = new(inPlate.Center.X, inPlate.Center.Y + 6);
+        string? prev = null;
+        _modules.Clear();
         _vstRows.Clear();
         _vstOpen.Clear();
-        double vy = box.Y + 24;
-        foreach (var v in c.Vst)
-        {
-            var row = new Rect(box.X + 8, vy, box.Width - 16, 22);
-            ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(v.On ? 0xFF24272Bu : 0xFF16181Bu)), Ui.FaceEdge, row, 2, 2);
-            Ui.Led(ctx, new Point(row.X + 8, row.Center.Y), 3, v.On, Ui.Red, Ui.RedOff);
-            Ui.Text(ctx, v.Name.Length > 13 ? v.Name[..13] : v.Name, row.X + 15, row.Y + 5, 8, v.On ? Ui.LabelBright : Ui.Label, Ui.Mono);
-            Key(ctx, new Rect(row.Right - 17, row.Y + 3, 15, 16), "✕", () => S.RemoveVst(sel, v), false, Ui.Red, !S.RenderingVst, withLed: false);
-            _vstRows.Add((new Rect(row.X, row.Y, 14, row.Height), v));   // the LED: on / bypass
-            _vstOpen.Add((new Rect(row.X + 14, row.Y, row.Width - 34, row.Height), v));   // the name: its parameters
-            if (S.OpenVst == v) ctx.DrawRectangle(null, new ImmutablePen((IImmutableBrush)Ui.Amber, 1.2), row, 2, 2);
-            vy += 26;
-        }
-        if (c.Vst.Count == 0) Ui.Text(ctx, PluginHost.Present ? "sem plugins" : "host ausente", box.Center.X, vy + 4, 8, Ui.Label, Ui.Mono, Ui.Align.Center);
-        if (S.RenderingVst)
-        {
-            int vlit = (int)Math.Round(S.VstProgress * 10);
-            for (int i = 0; i < 10; i++) Ui.Led(ctx, new Point(box.X + 12 + i * 9.5, fy - 26), 2.4, i < vlit, Ui.Amber, Ui.AmberOff);
-            Ui.Text(ctx, "RENDERIZANDO", box.Center.X, fy - 18, 7, Ui.Amber, Ui.SansBold, Ui.Align.Center);
-        }
-        Key(ctx, new Rect(box.X + 8, fy - 8, box.Width - 16, 24), "+ VST3", () => { S.PluginView = true; S.Select(); }, S.PluginView, Ui.Amber, has && PluginHost.Present && c.Vst.Count < StudioState.MaxVst);
-        Next(0);
         void Veil(bool on) { if (!on && has) { ctx.DrawRectangle(BypassVeil, null, box, 4, 4); Ui.Text(ctx, "BYPASS", box.Center.X + 22, fy - 6, 8, Ui.Amber, Ui.SansBold); } }
 
-        // DS-1 TRIM
-        box = new Rect(x, y, 80, h);
-        DrawDevice(ctx, box, "DS-1", "TRIM", has);
-        Knob(ctx, new Point(box.Center.X, ky), 18, "GANHO", $"{c.Trim:+0.0;-0.0} dB", LinNorm(c.Trim, -24, 24), n => { c.Trim = (float)Math.Round(FromLin(n, -24, 24), 1); Changed(); });
-        float pk = Lv(1);
-        for (int i = 0; i < 10; i++) Ui.Led(ctx, new Point(box.X + 10 + i * 6.4, fy + 4), 2.6, pk > -50 + i * 5.5, i > 7 ? Ui.Red : i > 5 ? Ui.Amber : Ui.Green, Ui.GreenOff);
-        Ui.Text(ctx, "NÍVEL", box.Center.X, fy + 10, 7, Ui.Label, Ui.SansBold, Ui.Align.Center);
-        Next(1);
-
-        // DF-2 FILTRO (HP and LP each switch on their own)
-        box = new Rect(x, y, 120, h);
-        DrawDevice(ctx, box, "DF-2", "FILTRO", c.HpOn || c.LpOn);
-        Key(ctx, new Rect(box.X + 8, box.Y + 24, 34, 20), "HP", () => { c.HpOn = !c.HpOn; Changed(); }, c.HpOn, Ui.Green, has);
-        Key(ctx, new Rect(box.X + 45, box.Y + 24, 34, 20), "LP", () => { c.LpOn = !c.LpOn; Changed(); }, c.LpOn, Ui.Green, has);
-        Key(ctx, new Rect(box.X + 82, box.Y + 24, 32, 20), c.Steep ? "24" : "12", () => { c.Steep = !c.Steep; Changed(); }, c.Steep, Ui.Amber, has);
-        Knob(ctx, new Point(box.X + 32, ky + 10), 16, "HP", Hz(c.Hp), LogNorm(c.Hp, 20, 1000), n => { c.Hp = (float)Math.Round(FromLog(n, 20, 1000)); Changed(); }, c.HpOn);
-        Knob(ctx, new Point(box.X + 88, ky + 10), 16, "LP", Hz(c.Lp), LogNorm(c.Lp, 1000, 20000), n => { c.Lp = (float)Math.Round(FromLog(n, 1000, 20000), -1); Changed(); }, c.LpOn);
-        if (!(c.HpOn || c.LpOn) && has) Ui.Text(ctx, "BYPASS", box.Center.X, fy, 8, Ui.Amber, Ui.SansBold, Ui.Align.Center);
-        Next(2);
-
-        // DG-3 GATE
-        box = new Rect(x, y, 120, h);
-        DrawDevice(ctx, box, "DG-3", "GATE", c.GateOn);
-        Ui.Led(ctx, new Point(box.X + 18, box.Y + 32), 3.5, c.GateOn && S.Meters.GateOpen[mt], Ui.Green, Ui.GreenOff);
-        Ui.Text(ctx, "ABERTO", box.X + 26, box.Y + 26, 7, Ui.Label, Ui.SansBold);
-        Knob(ctx, new Point(box.X + 24, ky + 4), 14, "LIMIAR", $"{c.GateThreshold:0}", LinNorm(c.GateThreshold, -80, 0), n => { c.GateThreshold = (float)Math.Round(FromLin(n, -80, 0)); Changed(); }, c.GateOn);
-        Knob(ctx, new Point(box.X + 60, ky + 4), 14, "SOLTURA", $"{c.GateRelease:0} ms", LogNorm(c.GateRelease, 5, 1000), n => { c.GateRelease = (float)Math.Round(FromLog(n, 5, 1000)); Changed(); }, c.GateOn);
-        Knob(ctx, new Point(box.X + 96, ky + 4), 14, "FAIXA", $"{c.GateRange:0} dB", LinNorm(c.GateRange, 0, 80), n => { c.GateRange = (float)Math.Round(FromLin(n, 0, 80)); Changed(); }, c.GateOn);
-        Veil(c.GateOn);
-        Footswitch(ctx, new Point(box.Center.X, fy), c.GateOn, () => { c.GateOn = !c.GateOn; Changed(); }, has);
-        Next(3);
-
-        // DQ-4 EQ (4 bands: low shelf, two bells, high shelf; frequency and gain per band)
-        box = new Rect(x, y, 184, h);
-        DrawDevice(ctx, box, "DQ-4", "EQ", c.EqOn);
-        string[] bandNames = ["GRAVE", "MÉDIO-G", "MÉDIO-A", "AGUDO"];
-        for (int b = 0; b < Math.Min(4, c.Bands.Length); b++)
+        foreach (var slot in slots)
         {
-            var band = c.Bands[b];
-            double bx = box.X + 24 + b * 45;
-            Knob(ctx, new Point(bx, y + 44), 12, bandNames[b], Hz(band.Freq), LogNorm(band.Freq, 20, 20000), n => { band.Freq = (float)Math.Round(FromLog(n, 20, 20000)); Changed(); }, c.EqOn);
-            Knob(ctx, new Point(bx, y + 100), 12, "GANHO", $"{band.Gain:+0;-0}", LinNorm(band.Gain, -15, 15), n => { band.Gain = (float)Math.Round(FromLin(n, -15, 15), 1); Changed(); }, c.EqOn);
+            var v = c.VstOf(slot);
+            double w = v is not null ? 120 : UnitFace[slot].W;
+            box = new Rect(x, y, w, h);
+            Patch(ctx, outPt, new Point(box.X, box.Center.Y), Lv(prev), 14);
+            if (v is not null) DrawInsert(ctx, box, sel, v, fy);
+            else DrawUnit(ctx, box, slot, c, mt, ky, fy, has, Changed, Veil, Lv(slot));
+            // The module's own keys on its top: the parallel path and pulling its cables.
+            if (v is null && has)
+            {
+                bool inPar = InParallel(c, slots, slot);
+                Key(ctx, new Rect(box.Right - 50, box.Y + 4, 18, 15), "∥", () => S.ToggleParallel(sel, slot), inPar, Ui.Amber, true, withLed: false);
+                Key(ctx, new Rect(box.Right - 30, box.Y + 4, 18, 15), "⏏", () => S.Unpatch(sel, slot), false, null, true, withLed: false);
+            }
+            _modules.Add((slot, box));
+            outPt = new Point(box.Right, box.Center.Y);
+            prev = slot;
+            x = box.Right + 20;
         }
-        Veil(c.EqOn);
-        Footswitch(ctx, new Point(box.Center.X, fy), c.EqOn, () => { c.EqOn = !c.EqOn; Changed(); }, has);
-        Next(4);
+        if (slots.Count == 0) Ui.Text(ctx, "cadeia vazia: o sinal passa direto", x, y + h / 2 - 6, 9, Ui.Label, Ui.Mono);
 
-        // DC-5 COMP
-        box = new Rect(x, y, 156, h);
-        DrawDevice(ctx, box, "DC-5", "COMP", c.CompOn);
-        float gr = S.Meters.Gr[mt];
-        for (int i = 0; i < 8; i++) Ui.Led(ctx, new Point(box.X + 16 + i * 10, box.Y + 32), 3, c.CompOn && gr > 1 + i * 1.5, Ui.Amber, Ui.AmberOff);
-        Ui.Text(ctx, "REDUÇÃO", box.X + 100, box.Y + 26, 7, Ui.Label, Ui.SansBold);
-        Knob(ctx, new Point(box.X + 24, ky + 4), 13, "LIMIAR", $"{c.CompThreshold:0}", LinNorm(c.CompThreshold, -50, 0), n => { c.CompThreshold = (float)Math.Round(FromLin(n, -50, 0)); Changed(); }, c.CompOn);
-        Knob(ctx, new Point(box.X + 59, ky + 4), 13, "RAZÃO", $"{c.CompRatio:0.#}:1", LogNorm(c.CompRatio, 1, 20), n => { c.CompRatio = (float)Math.Round(FromLog(n, 1, 20), 1); Changed(); }, c.CompOn);
-        Knob(ctx, new Point(box.X + 94, ky + 4), 13, "ATAQUE", $"{c.CompAttack:0.#}", LogNorm(c.CompAttack, 0.1, 100), n => { c.CompAttack = (float)Math.Round(FromLog(n, 0.1, 100), 1); Changed(); }, c.CompOn);
-        Knob(ctx, new Point(box.X + 129, ky + 4), 13, "GANHO", $"{c.CompMakeup:+0}", LinNorm(c.CompMakeup, 0, 24), n => { c.CompMakeup = (float)Math.Round(FromLin(n, 0, 24)); Changed(); }, c.CompOn);
-        Veil(c.CompOn);
-        Footswitch(ctx, new Point(box.Center.X, fy), c.CompOn, () => { c.CompOn = !c.CompOn; Changed(); }, has);
+        // The parallel path: the dry signal on its own cable under the units it goes round, back in
+        // at the end of the run with the processed one at the mix knob.
+        if (c.ParallelFirst is not null && _modules.FirstOrDefault(m => m.Slot == c.ParallelFirst) is { Slot: not null } pa
+            && _modules.FirstOrDefault(m => m.Slot == c.ParallelLast) is { Slot: not null } pb)
+        {
+            double py = y + h + 14;
+            var a = new Point(pa.Box.X - 8, pa.Box.Center.Y);
+            var b = new Point(pb.Box.Right + 6, pb.Box.Center.Y);
+            ctx.DrawEllipse(Ui.Amber, null, a, 3.5, 3.5);
+            ctx.DrawEllipse(Ui.Amber, null, b, 3.5, 3.5);
+            Patch(ctx, a, new Point(a.X, py), Lv(slots.ElementAtOrDefault(slots.IndexOf(pa.Slot) - 1)), 0, led: false);
+            Patch(ctx, new Point(a.X, py), new Point(b.X, py), Lv(slots.ElementAtOrDefault(slots.IndexOf(pa.Slot) - 1)), 0, thin: true);
+            Patch(ctx, new Point(b.X, py), b, Lv(pb.Slot), 0, led: false);
+            double kx = (a.X + b.X) / 2;
+            Knob(ctx, new Point(kx, py - 2), 8, "", "", c.ParallelMix, n => { c.ParallelMix = (float)Math.Round(n, 2); Changed(); }, true);
+            Ui.Text(ctx, $"∥ PARALELO · seco + {c.ParallelMix * 100:0} % processado", kx + 14, py - 16, 8, Ui.Amber, Ui.SansBold);
+        }
+        // A module being dragged: where it would go.
+        if (_dragSlot is not null)
+        {
+            int at = DropIndex(_dragX);
+            double gx = at < _modules.Count ? _modules[at].Box.X - 10 : (_modules.Count > 0 ? _modules[^1].Box.Right + 10 : inPlate.Right + 10);
+            ctx.DrawLine(new ImmutablePen((IImmutableBrush)Ui.Amber, 3), new Point(gx, y - 4), new Point(gx, y + h + 4));
+        }
 
         // The tap: the signal splits — OUT to the channel's fader, a send to the analyser.
-        var tap = new Point(box.Right + 14, box.Center.Y);
-        Patch(ctx, new Point(box.Right, box.Center.Y), tap, Lv(5), 0, led: false);
+        var tap = new Point(outPt.X + 14, outPt.Y);
+        Patch(ctx, outPt, tap, Lv(prev), 0, led: false);
         ctx.DrawEllipse(Ui.Amber, null, tap, 4, 4);
         Ui.Text(ctx, "TAP", tap.X, tap.Y + 8, 7, Ui.Amber, Ui.SansBold, Ui.Align.Center);
-        Patch(ctx, tap, new Point(tap.X, y - 8), Lv(5), 0, led: false);
-        Patch(ctx, new Point(tap.X, y - 8), new Point(r.Right - 96, y - 8), Lv(5), 0, thin: true);
+        Patch(ctx, tap, new Point(tap.X, y - 8), Lv(prev), 0, led: false);
+        Patch(ctx, new Point(tap.X, y - 8), new Point(r.Right - 96, y - 8), Lv(prev), 0, thin: true);
         Ui.Text(ctx, $"OUT ▶ FADER {sel + 1} · DS-M", r.Right, y - 14, 8, Ui.LabelBright, Ui.SansBold, Ui.Align.Right);
-        x = box.Right + 28;
-        if (an0.Length > 0) Patch(ctx, tap, new Point(x, box.Center.Y), Lv(5), 0, send: true);
-
+        x = tap.X + 14;
+        if (an0.Length > 0) Patch(ctx, tap, new Point(x, tap.Y), Lv(prev), 0, send: true);
+        x = Math.Min(x, r.Right - 200);
         var an = new Rect(x, y, r.Right - x, h);
         if (S.OpenVst is { } ov && c.Vst.Contains(ov)) { DrawParams(ctx, an, ov); return; }
         DrawDevice(ctx, an, an0.Length > 0 ? string.Join(" ", an0) : "DA", an0.Length > 0 ? "ANALISADOR · ENVIO PRÉ-FADER" : "ANALISADOR · canal sem análise", an0.Length > 0);
@@ -1967,6 +2069,118 @@ public sealed class ChainUnit : StudioUnit
             Plasma.Text(ctx, how.Length > fit ? how[..fit] : how, win.X + 84, win.Y + 24, 9, false);
         }
         else Plasma.Text(ctx, S.Separating ? $"SEPARANDO {S.SepProgress * 100:0} %" : S.Running ? $"{S.Progress * 100:0} %" : "—", win.X + 12, win.Y + 12, 16, S.Running || S.Separating);
+    }
+
+    static bool InParallel(ChannelMix c, List<string> slots, string slot)
+    {
+        int a = c.ParallelFirst is null ? -1 : slots.IndexOf(c.ParallelFirst), b = c.ParallelLast is null ? -1 : slots.IndexOf(c.ParallelLast), i = slots.IndexOf(slot);
+        return a >= 0 && i >= a && i <= b;
+    }
+
+    /// Where a dragged module would land: before the first module whose centre is right of x.
+    int DropIndex(double x)
+    {
+        for (int i = 0; i < _modules.Count; i++) if (x < _modules[i].Box.Center.X) return i;
+        return _modules.Count;
+    }
+
+    protected override void OnPointerMoved(PointerEventArgs e)
+    {
+        if (_dragSlot is null) { base.OnPointerMoved(e); return; }
+        _dragX = e.GetPosition(this).X;
+        InvalidateVisual();
+    }
+
+    protected override void OnPointerReleased(PointerReleasedEventArgs e)
+    {
+        if (_dragSlot is null) { base.OnPointerReleased(e); return; }
+        int at = DropIndex(_dragX);
+        string slot = _dragSlot;
+        _dragSlot = null;
+        e.Pointer.Capture(null);
+        if (_modules.FindIndex(m => m.Slot == slot) is var from && at != from && at != from + 1) S.MoveSlot(S.Selected, slot, at);
+        InvalidateVisual();
+    }
+
+    /// A VST3 insert as its own module: power, name (opens its parameters), remove.
+    void DrawInsert(DrawingContext ctx, Rect box, int sel, VstInsert v, double fy)
+    {
+        DrawDevice(ctx, box, "DV", "VST3", v.On);
+        var name = new Rect(box.X + 8, box.Y + 26, box.Width - 16, 40);
+        ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF120804)), Ui.FaceEdge, name, 2, 2);
+        Plasma.Text(ctx, v.Name.Length > 12 ? v.Name[..12] : v.Name, name.X + 6, name.Y + 4, 10, v.On);
+        Ui.Text(ctx, v.Vendor.Length > 16 ? v.Vendor[..16] : v.Vendor, name.X + 6, name.Y + 22, 7, Ui.Label, Ui.Mono);
+        if (S.OpenVst == v) ctx.DrawRectangle(null, new ImmutablePen((IImmutableBrush)Ui.Amber, 1.2), name, 2, 2);
+        _vstOpen.Add((name, v));
+        Key(ctx, new Rect(box.X + 8, box.Y + 74, box.Width - 16, 22), "PARÂMETROS", () => S.OpenPanel(S.OpenVst == v ? null : v), S.OpenVst == v, Ui.Amber, true);
+        Key(ctx, new Rect(box.Right - 26, box.Y + 3, 18, 14), "✕", () => S.RemoveVst(sel, v), false, Ui.Red, !S.RenderingVst, withLed: false);
+        if (S.RenderingVst)
+        {
+            int vlit = (int)Math.Round(S.VstProgress * 10);
+            for (int i = 0; i < 10; i++) Ui.Led(ctx, new Point(box.X + 14 + i * 9.5, fy - 26), 2.4, i < vlit, Ui.Amber, Ui.AmberOff);
+            Ui.Text(ctx, "RENDERIZANDO", box.Center.X, fy - 18, 7, Ui.Amber, Ui.SansBold, Ui.Align.Center);
+        }
+        if (!v.On) ctx.DrawRectangle(BypassVeil, null, box, 4, 4);
+        Footswitch(ctx, new Point(box.Center.X, fy), v.On, () => { if (!S.RenderingVst) S.ToggleVst(v); }, true);
+    }
+
+    /// One built-in unit at `box`, its controls as on the console (S4).
+    void DrawUnit(DrawingContext ctx, Rect box, string unit, ChannelMix c, int mt, double ky, double fy, bool has, Action Changed, Action<bool> Veil, float level)
+    {
+        double y = box.Y;
+        switch (unit)
+        {
+            case "trim":
+                DrawDevice(ctx, box, "DS-1", "TRIM", has);
+                Knob(ctx, new Point(box.Center.X, ky), 18, "GANHO", $"{c.Trim:+0.0;-0.0} dB", LinNorm(c.Trim, -24, 24), n => { c.Trim = (float)Math.Round(FromLin(n, -24, 24), 1); Changed(); });
+                for (int i = 0; i < 10; i++) Ui.Led(ctx, new Point(box.X + 10 + i * 6.4, fy + 4), 2.6, level > -50 + i * 5.5, i > 7 ? Ui.Red : i > 5 ? Ui.Amber : Ui.Green, Ui.GreenOff);
+                Ui.Text(ctx, "NÍVEL", box.Center.X, fy + 10, 7, Ui.Label, Ui.SansBold, Ui.Align.Center);
+                break;
+            case "filter":
+                DrawDevice(ctx, box, "DF-2", "FILTRO", c.HpOn || c.LpOn);
+                Key(ctx, new Rect(box.X + 8, box.Y + 24, 34, 20), "HP", () => { c.HpOn = !c.HpOn; Changed(); }, c.HpOn, Ui.Green, has);
+                Key(ctx, new Rect(box.X + 45, box.Y + 24, 34, 20), "LP", () => { c.LpOn = !c.LpOn; Changed(); }, c.LpOn, Ui.Green, has);
+                Key(ctx, new Rect(box.X + 82, box.Y + 24, 32, 20), c.Steep ? "24" : "12", () => { c.Steep = !c.Steep; Changed(); }, c.Steep, Ui.Amber, has);
+                Knob(ctx, new Point(box.X + 32, ky + 10), 16, "HP", Hz(c.Hp), LogNorm(c.Hp, 20, 1000), n => { c.Hp = (float)Math.Round(FromLog(n, 20, 1000)); Changed(); }, c.HpOn);
+                Knob(ctx, new Point(box.X + 88, ky + 10), 16, "LP", Hz(c.Lp), LogNorm(c.Lp, 1000, 20000), n => { c.Lp = (float)Math.Round(FromLog(n, 1000, 20000), -1); Changed(); }, c.LpOn);
+                if (!(c.HpOn || c.LpOn) && has) Ui.Text(ctx, "BYPASS", box.Center.X, fy, 8, Ui.Amber, Ui.SansBold, Ui.Align.Center);
+                break;
+            case "gate":
+                DrawDevice(ctx, box, "DG-3", "GATE", c.GateOn);
+                Ui.Led(ctx, new Point(box.X + 18, box.Y + 32), 3.5, c.GateOn && S.Meters.GateOpen[mt], Ui.Green, Ui.GreenOff);
+                Ui.Text(ctx, "ABERTO", box.X + 26, box.Y + 26, 7, Ui.Label, Ui.SansBold);
+                Knob(ctx, new Point(box.X + 24, ky + 4), 14, "LIMIAR", $"{c.GateThreshold:0}", LinNorm(c.GateThreshold, -80, 0), n => { c.GateThreshold = (float)Math.Round(FromLin(n, -80, 0)); Changed(); }, c.GateOn);
+                Knob(ctx, new Point(box.X + 60, ky + 4), 14, "SOLTURA", $"{c.GateRelease:0} ms", LogNorm(c.GateRelease, 5, 1000), n => { c.GateRelease = (float)Math.Round(FromLog(n, 5, 1000)); Changed(); }, c.GateOn);
+                Knob(ctx, new Point(box.X + 96, ky + 4), 14, "FAIXA", $"{c.GateRange:0} dB", LinNorm(c.GateRange, 0, 80), n => { c.GateRange = (float)Math.Round(FromLin(n, 0, 80)); Changed(); }, c.GateOn);
+                Veil(c.GateOn);
+                Footswitch(ctx, new Point(box.Center.X, fy), c.GateOn, () => { c.GateOn = !c.GateOn; Changed(); }, has);
+                break;
+            case "eq":
+                DrawDevice(ctx, box, "DQ-4", "EQ", c.EqOn);
+                string[] bandNames = ["GRAVE", "MÉDIO-G", "MÉDIO-A", "AGUDO"];
+                for (int b = 0; b < Math.Min(4, c.Bands.Length); b++)
+                {
+                    var band = c.Bands[b];
+                    double bx = box.X + 24 + b * 45;
+                    Knob(ctx, new Point(bx, y + 44), 12, bandNames[b], Hz(band.Freq), LogNorm(band.Freq, 20, 20000), n => { band.Freq = (float)Math.Round(FromLog(n, 20, 20000)); Changed(); }, c.EqOn);
+                    Knob(ctx, new Point(bx, y + 100), 12, "GANHO", $"{band.Gain:+0;-0}", LinNorm(band.Gain, -15, 15), n => { band.Gain = (float)Math.Round(FromLin(n, -15, 15), 1); Changed(); }, c.EqOn);
+                }
+                Veil(c.EqOn);
+                Footswitch(ctx, new Point(box.Center.X, fy), c.EqOn, () => { c.EqOn = !c.EqOn; Changed(); }, has);
+                break;
+            case "comp":
+                DrawDevice(ctx, box, "DC-5", "COMP", c.CompOn);
+                float gr = S.Meters.Gr[mt];
+                for (int i = 0; i < 8; i++) Ui.Led(ctx, new Point(box.X + 16 + i * 10, box.Y + 32), 3, c.CompOn && gr > 1 + i * 1.5, Ui.Amber, Ui.AmberOff);
+                Ui.Text(ctx, "REDUÇÃO", box.X + 100, box.Y + 26, 7, Ui.Label, Ui.SansBold);
+                Knob(ctx, new Point(box.X + 24, ky + 4), 13, "LIMIAR", $"{c.CompThreshold:0}", LinNorm(c.CompThreshold, -50, 0), n => { c.CompThreshold = (float)Math.Round(FromLin(n, -50, 0)); Changed(); }, c.CompOn);
+                Knob(ctx, new Point(box.X + 59, ky + 4), 13, "RAZÃO", $"{c.CompRatio:0.#}:1", LogNorm(c.CompRatio, 1, 20), n => { c.CompRatio = (float)Math.Round(FromLog(n, 1, 20), 1); Changed(); }, c.CompOn);
+                Knob(ctx, new Point(box.X + 94, ky + 4), 13, "ATAQUE", $"{c.CompAttack:0.#}", LogNorm(c.CompAttack, 0.1, 100), n => { c.CompAttack = (float)Math.Round(FromLog(n, 0.1, 100), 1); Changed(); }, c.CompOn);
+                Knob(ctx, new Point(box.X + 129, ky + 4), 13, "GANHO", $"{c.CompMakeup:+0}", LinNorm(c.CompMakeup, 0, 24), n => { c.CompMakeup = (float)Math.Round(FromLin(n, 0, 24)); Changed(); }, c.CompOn);
+                Veil(c.CompOn);
+                Footswitch(ctx, new Point(box.Center.X, fy), c.CompOn, () => { c.CompOn = !c.CompOn; Changed(); }, has);
+                break;
+        }
     }
 
     void DrawDevice(DrawingContext ctx, Rect box, string model, string name, bool on)
@@ -2182,6 +2396,14 @@ public sealed class StudioView : DockPanel
     public void AddFirstPlugin() { if (_s.Plugins.FirstOrDefault() is { } p) _s.AddVst(p); Refresh(); }
     public void OpenFirstInsert() { if (_s.Channel(_s.Selected).Vst.FirstOrDefault() is { } v) _s.OpenPanel(v); Refresh(); }
     public void SelectChannel(int track) { _s.Selected = Math.Clamp(track, 0, _s.Tracks - 1); Refresh(); }
+    /// Screenshot tool: a patched chain on screen only (nothing saved to the take): EQ first, the
+    /// filter pulled out, gate and compressor in parallel.
+    public void PatchDemo()
+    {
+        var c = _s.Channel(_s.Selected);
+        (c.Chain, c.ParallelFirst, c.ParallelLast, c.ParallelMix) = (["eq", "trim", "gate", "comp"], "gate", "comp", 0.6f);
+        Refresh();
+    }
 
     public void TogglePlay() => _s.TogglePlay();
     public void OpenFirst() { if (_s.Library.Count > 0) _s.Open(_s.Library[0].Path); Refresh(); }

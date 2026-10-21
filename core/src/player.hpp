@@ -105,4 +105,7 @@ private:
     std::string error_;
 };
 
+// A file through a channel chain up to its tap, stereo, at the file's rate (ana_render_chain).
+int render_chain(const char* in, const ChannelParams& params, const char* out);
+
 }  // namespace dz

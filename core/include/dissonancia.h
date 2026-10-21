@@ -369,6 +369,14 @@ struct ChannelParams {
     EqBand eq[ANA_EQ_BANDS];
     float compThresholdDb, compRatio, compAttackMs, compReleaseMs, compMakeupDb;
     float faderDb, pan;                // pan -1 (left) .. +1 (right), constant power
+    // The chain as patched: units in processing order (1 trim, 2 filter, 3 gate, 4 EQ, 5 compressor),
+    // 0 ends it (a unit left out is not in the chain), any other id is a plain wire; all 0 = console order. The units at positions
+    // [parallelFrom, parallelTo) also form a parallel path: the dry signal goes round them and the
+    // processed one is added to it at parallelMix (0 = no parallel path, the units are in series).
+    uint8_t order[5];
+    uint8_t parallelFrom, parallelTo;
+    uint8_t _pad0;
+    float parallelMix;
 };
 
 struct MasterParams {
@@ -473,6 +481,9 @@ ANA_API void ana_player_meters(PlayerHandle* p, MixMeters* out);
 // mono float32 WAV) — what the transcription reads; tracks: a bitmask summed at their taps (e.g.
 // the harmony = other + bass); and the bounce of the whole mix through faders and master (stereo).
 ANA_API int32_t ana_player_render_tap(PlayerHandle* p, uint32_t trackMask, const char* pathUtf8);
+// A file through a channel chain up to its tap (stereo float32 WAV at the file's rate): the units
+// patched before a VST3 insert, rendered so the insert can read them.
+ANA_API int32_t ana_render_chain(const char* inUtf8, const ChannelParams* params, const char* outUtf8);
 ANA_API int32_t ana_player_bounce(PlayerHandle* p, const char* pathUtf8);
 // min/max of the mono mix per column over [startFrame, endFrame), from a peak mipmap (any zoom).
 // The latest output for the scopes (stereo, interleaved, oldest first): source 0 = the master, 1 =

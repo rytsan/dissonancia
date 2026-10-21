@@ -232,3 +232,34 @@ TEST_CASE("mix: a track's pre-chain source (VST3 render) replaces its audio unti
     std::remove("dz_src_a.wav");
     std::remove("dz_src_b.wav");
 }
+
+TEST_CASE("mix: the chain as patched — order, units left out, a parallel path; a file through a chain") {
+    Player p;
+    REQUIRE(p.load(wav("dz_mix_order.wav", sine(1000, 0.25)).c_str()) == ANA_OK);
+    auto c = defaults();
+    c.trimDb = 12;
+    c.compOn = 1; c.compThresholdDb = -20; c.compRatio = 20; c.compMakeupDb = 0;
+    // Trim before the compressor: +12 dB into it, squashed. Compressor first: -12 dBFS barely touched, then +12.
+    p.set_channel(0, c);
+    const double trimFirst = peak_db(play(p), 9600);
+    c.order[0] = 5; c.order[1] = 1; c.order[2] = 2; c.order[3] = 3; c.order[4] = 4;
+    p.set_channel(0, c);
+    const double compFirst = peak_db(play(p), 9600);
+    CHECK(compFirst > trimFirst + 3);
+    // Left out: only the trim in the chain, the compressor's switch on but unpatched.
+    uint8_t onlyTrim[5] = {1, 0, 0, 0, 0};
+    std::copy(onlyTrim, onlyTrim + 5, c.order);
+    p.set_channel(0, c);
+    CHECK(peak_db(play(p), 9600) == Approx(20 * std::log10(0.25) + 12).margin(0.1));
+    // Parallel: the trim (+12 dB, x3.98) in parallel at mix 0.5 -> dry + 0.5 * wet = x2.99.
+    c.parallelFrom = 0; c.parallelTo = 1; c.parallelMix = 0.5f;
+    p.set_channel(0, c);
+    CHECK(peak_db(play(p), 9600) == Approx(20 * std::log10(0.25 * (1 + 0.5 * 3.981))).margin(0.1));
+    // A file through the chain (the units before a VST3 insert): same gain, stereo out.
+    REQUIRE(render_chain("dz_mix_order.wav", c, "dz_mix_chain.wav") == ANA_OK);
+    Player q;
+    REQUIRE(q.load("dz_mix_chain.wav") == ANA_OK);
+    CHECK(peak_db(play(q), 9600) == Approx(20 * std::log10(0.25 * (1 + 0.5 * 3.981))).margin(0.1));
+    std::remove("dz_mix_order.wav");
+    std::remove("dz_mix_chain.wav");
+}

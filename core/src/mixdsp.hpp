@@ -129,6 +129,10 @@ struct Strip {
     Compressor comp;
     void set(const ChannelParams& np, double fs) {
         p = np;
+        bool patched = false;
+        for (uint8_t u : p.order) patched |= u != 0;
+        static constexpr uint8_t kConsole[5] = {1, 2, 3, 4, 5};
+        std::copy(patched ? p.order : kConsole, (patched ? p.order : kConsole) + 5, order);
         trim = db_to_lin(p.trimDb);
         hp.set(p.hpOn, true, p.hpHz, p.steep, fs);
         lp.set(p.lpOn, false, p.lpHz, p.steep, fs);
@@ -139,22 +143,29 @@ struct Strip {
         const double a = (std::clamp(p.pan, -1.f, 1.f) + 1) * kPi / 4;   // constant power
         panL = float(std::cos(a)); panR = float(std::sin(a));
     }
-    // Up to the analysis tap: trim, filters, gate, EQ, compressor. `stage` (kStages floats) holds
-    // the peak after each unit — the levels on the patch cables between them.
-    static constexpr int kStages = ANA_CHAIN_STAGES;   // in, trim, filter, gate, EQ, compressor
+    // Up to the analysis tap: the units in the patched order (console order: trim, filters, gate,
+    // EQ, compressor), with the parallel path if any. `stage` (kStages floats) holds the peak at the
+    // input and after each position — the levels on the patch cables between them.
+    static constexpr int kStages = ANA_CHAIN_STAGES;   // in, then after each of up to 5 positions
+    uint8_t order[5] = {1, 2, 3, 4, 5};
     void tap(float& l, float& r, float* stage = nullptr) {
         auto at = [&](int k) { if (stage) stage[k] = std::max(stage[k], std::max(std::fabs(l), std::fabs(r))); };
         at(0);
-        l *= trim; r *= trim;
-        at(1);
-        l = lp.run(hp.run(l, 0), 0); r = lp.run(hp.run(r, 1), 1);
-        at(2);
-        gate.run(l, r);
-        at(3);
-        l = eq.run(l, 0); r = eq.run(r, 1);
-        at(4);
-        comp.run(l, r);
-        at(5);
+        const bool par = p.parallelMix > 0 && p.parallelTo > p.parallelFrom;
+        float dl = 0, dr = 0;
+        for (int k = 0; k < 5 && order[k]; k++) {
+            if (par && k == p.parallelFrom) dl = l, dr = r;
+            switch (order[k]) {
+                case 1: l *= trim; r *= trim; break;
+                case 2: l = lp.run(hp.run(l, 0), 0); r = lp.run(hp.run(r, 1), 1); break;
+                case 3: gate.run(l, r); break;
+                case 4: l = eq.run(l, 0); r = eq.run(r, 1); break;
+                case 5: comp.run(l, r); break;
+                default: break;
+            }
+            if (par && k + 1 == p.parallelTo) l = dl + p.parallelMix * l, r = dr + p.parallelMix * r;
+            at(k + 1);
+        }
     }
     void out(float& l, float& r) const { l *= fader * panL * 1.4142f; r *= fader * panR * 1.4142f; }   // centre = unity
 };
@@ -181,6 +192,7 @@ inline void channel_defaults(ChannelParams& c) {
     const float f[ANA_EQ_BANDS] = {120, 500, 2000, 8000};
     for (int i = 0; i < ANA_EQ_BANDS; i++) c.eq[i] = {f[i], 0, 1.0f, i == 0 ? EqType::LowShelf : i == 3 ? EqType::HighShelf : EqType::Peak, 1, {}};
     c.compThresholdDb = -18; c.compRatio = 3; c.compAttackMs = 10; c.compReleaseMs = 120; c.compMakeupDb = 0;
+    for (uint8_t i = 0; i < 5; i++) c.order[i] = uint8_t(i + 1);
 }
 
 inline void master_defaults(MasterParams& m) {

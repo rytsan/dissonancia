@@ -412,6 +412,21 @@ int Player::render_tap(uint32_t mask, const char* path) const {
     return write_wav(path, y, 1, rate_);
 }
 
+int render_chain(const char* in, const ChannelParams& params, const char* out) {
+    ma_decoder dec;
+    ma_decoder_config cfg = ma_decoder_config_init(ma_format_f32, 2, 0);   // stereo, the file's own rate
+    if (ma_decoder_init_file(in, &cfg, &dec) != MA_SUCCESS) return ANA_ERR_IO;
+    const uint32_t rate = dec.outputSampleRate;
+    std::vector<float> x;
+    float buf[8192];
+    for (ma_uint64 got = 0; ma_decoder_read_pcm_frames(&dec, buf, 4096, &got) == MA_SUCCESS && got > 0;) x.insert(x.end(), buf, buf + got * 2);
+    ma_decoder_uninit(&dec);
+    mix::Strip s;
+    s.set(params, rate);
+    for (size_t i = 0; i + 1 < x.size(); i += 2) s.tap(x[i], x[i + 1]);
+    return write_wav(out, x, 2, rate);
+}
+
 int Player::bounce(const char* path) const {
     const uint64_t n = frames();
     const int nt = tracks();

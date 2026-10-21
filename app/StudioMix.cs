@@ -11,7 +11,7 @@ namespace Dissonancia;
 struct EqBandNative { public float FreqHz, GainDb, Q; public byte Type, On; ushort _pad0; }
 
 [StructLayout(LayoutKind.Sequential)]
-struct ChannelParamsNative
+unsafe struct ChannelParamsNative
 {
     public float TrimDb, HpHz, LpHz;
     public byte HpOn, LpOn, Steep, GateOn;
@@ -20,6 +20,9 @@ struct ChannelParamsNative
     public EqBandNative Eq0, Eq1, Eq2, Eq3;
     public float CompThresholdDb, CompRatio, CompAttackMs, CompReleaseMs, CompMakeupDb;
     public float FaderDb, Pan;
+    public fixed byte Order[5];
+    public byte ParallelFrom, ParallelTo, _pad0;
+    public float ParallelMix;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -62,6 +65,7 @@ static partial class MixApi
     [LibraryImport(Lib, EntryPoint = "ana_player_pull")] public static partial void Pull(nint p, int frames);
     [LibraryImport(Lib, EntryPoint = "ana_player_render_tap", StringMarshalling = StringMarshalling.Utf8)] public static partial int RenderTap(nint p, uint mask, string path);
     [LibraryImport(Lib, EntryPoint = "ana_player_bounce", StringMarshalling = StringMarshalling.Utf8)] public static partial int Bounce(nint p, string path);
+    [LibraryImport(Lib, EntryPoint = "ana_render_chain", StringMarshalling = StringMarshalling.Utf8)] public static partial int RenderChain(string input, in ChannelParamsNative c, string output);
 }
 
 /// One EQ band (type 0 bell, 1 low shelf, 2 high shelf).
@@ -117,6 +121,54 @@ public sealed class ChannelMix
         return m;
     }
 
+    // ---- The chain as patched (the DS-C cables): built-in units and VST3 inserts in any order.
+
+    public static readonly string[] Units = ["trim", "filter", "gate", "eq", "comp"];
+    /// Slot ids in signal order ("trim", "filter", "gate", "eq", "comp", "vst:<id>"); a built-in
+    /// unit missing is unpatched. Empty: the console order with the inserts first (as before S10).
+    public List<string> Chain { get; set; } = [];
+    /// A parallel path over built-in units: first .. last (slot ids), added to the dry signal at ParallelMix.
+    public string? ParallelFirst { get; set; }
+    public string? ParallelLast { get; set; }
+    public float ParallelMix { get; set; }
+
+    public static string SlotOf(VstInsert v) => "vst:" + v.Id;
+    public VstInsert? VstOf(string slot) => Vst.FirstOrDefault(v => SlotOf(v) == slot);
+
+    /// The chain in signal order: the stored one, minus inserts that are gone, plus new ones first.
+    public List<string> Slots()
+    {
+        var ids = Vst.Select(SlotOf).ToList();
+        if (Chain.Count == 0) return [.. ids, .. Units];
+        var l = Chain.Where(s => Units.Contains(s) || ids.Contains(s)).Distinct().ToList();
+        for (int i = ids.Count - 1; i >= 0; i--) if (!l.Contains(ids[i])) l.Insert(0, ids[i]);
+        return l;
+    }
+
+    /// The built-in units between the inserts that are on: one run before each insert (rendered
+    /// offline into it), and the last run after them, which plays in real time.
+    public List<List<string>> Segments()
+    {
+        var segs = new List<List<string>> { new() };
+        foreach (var s in Slots())
+            if (Units.Contains(s)) segs[^1].Add(s);
+            else if (VstOf(s) is { On: true }) segs.Add([]);
+        return segs;
+    }
+
+    /// The units patched after the last insert that is on: what the player runs.
+    internal ChannelParamsNative Realtime => NativeFor(Segments()[^1]);
+
+    internal unsafe ChannelParamsNative NativeFor(List<string> units)
+    {
+        var n = Native;
+        for (int i = 0; i < 5; i++) n.Order[i] = (byte)(i < units.Count ? Array.IndexOf(Units, units[i]) + 1 : 0);
+        int a = ParallelFirst is null ? -1 : units.IndexOf(ParallelFirst), b = ParallelLast is null ? -1 : units.IndexOf(ParallelLast);
+        if (a >= 0 && b >= a && ParallelMix > 0) (n.ParallelFrom, n.ParallelTo, n.ParallelMix) = ((byte)a, (byte)(b + 1), ParallelMix);
+        if (units.Count == 0) n.Order[0] = 6;   // nothing patched: a plain wire (any other id; all 0 would be the console order)
+        return n;
+    }
+
     internal ChannelParamsNative Native => new()
     {
         TrimDb = Trim, HpHz = Hp, LpHz = Lp, HpOn = B(HpOn), LpOn = B(LpOn), Steep = B(Steep), GateOn = B(GateOn),
@@ -130,7 +182,7 @@ public sealed class ChannelMix
     static byte B(bool v) => (byte)(v ? 1 : 0);
 
     /// What changes the audio at the analysis tap (fader, pan, mute, solo do not): the cache key.
-    public string TapKey => JsonSerializer.Serialize(new { Trim, HpOn, Hp, LpOn, Lp, Steep, GateOn, GateThreshold, GateAttack, GateRelease, GateRange, EqOn, Bands, CompOn, CompThreshold, CompRatio, CompAttack, CompRelease, CompMakeup, VstSignature });
+    public string TapKey => JsonSerializer.Serialize(new { Trim, HpOn, Hp, LpOn, Lp, Steep, GateOn, GateThreshold, GateAttack, GateRelease, GateRange, EqOn, Bands, CompOn, CompThreshold, CompRatio, CompAttack, CompRelease, CompMakeup, VstSignature, Chain = Slots(), ParallelFirst, ParallelLast, ParallelMix });
 }
 
 /// One VST3 effect on a channel, before its chain; its state lives next to the take project.

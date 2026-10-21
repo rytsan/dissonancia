@@ -32,9 +32,31 @@ public static class PluginHost
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return 0; }
     }
 
+    /// Folders the user added (their own plugins, a build folder): searched besides the standard
+    /// VST3 folders. A picked .vst3 bundle adds the folder it is in.
+    static string FoldersPath => Path.Combine(Path.GetDirectoryName(CachePath)!, "vst3-folders.json");
+    public static List<string> Folders()
+    {
+        try { return JsonSerializer.Deserialize<List<string>>(File.ReadAllText(FoldersPath)) ?? []; }
+        catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException) { return []; }
+    }
+    public static void AddFolder(string path)
+    {
+        string dir = path.TrimEnd('/', '\\');
+        if (dir.EndsWith(".vst3", StringComparison.OrdinalIgnoreCase)) dir = Path.GetDirectoryName(dir) ?? dir;
+        var l = Folders();
+        if (l.Contains(dir)) return;
+        l.Add(dir);
+        Directory.CreateDirectory(Path.GetDirectoryName(FoldersPath)!);
+        File.WriteAllText(FoldersPath, JsonSerializer.Serialize(l));
+    }
+
     static async Task<(int Code, string Out, string Err)> Run(CancellationToken ct, params string[] args)
     {
         var psi = new ProcessStartInfo(Helper) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
+        var extra = Folders();
+        if (Environment.GetEnvironmentVariable("DISSONANCIA_VST3_PATH") is { Length: > 0 } env) extra.Add(env);
+        if (extra.Count > 0) psi.Environment["DISSONANCIA_VST3_PATH"] = string.Join(OperatingSystem.IsWindows() ? ";" : ":", extra);
         foreach (var a in args) psi.ArgumentList.Add(a);
         using var p = Process.Start(psi)!;
         var stdout = p.StandardOutput.ReadToEndAsync(ct);

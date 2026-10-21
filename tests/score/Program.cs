@@ -218,6 +218,30 @@ string Hm(List<(double Start, double End, string Symbol, string Roman)> l) => st
 Check(Hm(hm) == "G:I@0-8 D:V@8-12 Em:vi@12-15 F#m:vii@15-18", $"harmony map: {Hm(hm)}");
 Check(LeadSheet.Harmony([Ch(0, 2, "Am"), Ch(2, 4, "E7")], new KeyOption(0, true)).Select(h => h.Roman).SequenceEqual(["i", "V"]), "harmony map: degrees in a minor key");
 
+// STUDIO chain as patched (S10): slots, the runs between the inserts that are on, the order sent to the core.
+{
+    var cm = new ChannelMix();
+    Check(string.Join(",", cm.Slots()) == "trim,filter,gate,eq,comp", "chain: console order by default");
+    var v1 = new VstInsert { Id = "a" };
+    var v2 = new VstInsert { Id = "b", On = false };
+    cm.Vst.AddRange([v1, v2]);
+    Check(string.Join(",", cm.Slots()) == "vst:a,vst:b,trim,filter,gate,eq,comp", "chain: inserts first when never patched");
+    cm.Chain = ["trim", "eq", "vst:a", "comp", "vst:b"];   // filter and gate unpatched
+    var segs = cm.Segments();
+    Check(segs.Count == 2 && string.Join(",", segs[0]) == "trim,eq" && string.Join(",", segs[1]) == "comp", "chain: the run before the insert that is on is rendered, the rest is live (an insert off is a wire)");
+    unsafe
+    {
+        var rt = cm.Realtime;
+        Check(rt.Order[0] == 5 && rt.Order[1] == 0, "chain: the player runs only the compressor");
+        cm.ParallelFirst = "trim"; cm.ParallelLast = "eq"; cm.ParallelMix = 0.5f;
+        var pre = cm.NativeFor(segs[0]);
+        Check(pre.Order[0] == 1 && pre.Order[1] == 4 && pre.ParallelFrom == 0 && pre.ParallelTo == 2 && pre.ParallelMix == 0.5f, "chain: the parallel path is sent with its run");
+        var none = cm.NativeFor([]);
+        Check(System.Runtime.CompilerServices.Unsafe.SizeOf<ChannelParamsNative>() == 140, "chain: ChannelParams mirror is the core's 140 bytes");
+        Check(none.Order[0] == 6, "chain: nothing patched is a wire, not the console order");
+    }
+}
+
 string Shape(int[] pcs, int bass) => string.Join(" ", Theory.LikelyShape(pcs, bass).Select(f => f < 0 ? "x" : f.ToString()));
 Check(Shape([0, 4, 7], 0) == "x 3 2 0 1 0", $"shape C: {Shape([0, 4, 7], 0)}");
 Check(Shape([7, 11, 2], 7) == "3 2 0 0 0 3", $"shape G: {Shape([7, 11, 2], 7)}");

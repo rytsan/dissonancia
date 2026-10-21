@@ -235,6 +235,10 @@ int32_t ana_player_render_tap(PlayerHandle* p, uint32_t mask, const char* path) 
     if (r < 0) p->error = std::string("cannot write ") + path;
     return r;
 }
+int32_t ana_render_chain(const char* in, const ChannelParams* params, const char* out) {
+    if (!in || !params || !out) return ANA_ERR_ARG;
+    return dz::render_chain(in, *params, out);
+}
 int32_t ana_player_bounce(PlayerHandle* p, const char* path) {
     if (!p || !path) return ANA_ERR_ARG;
     int32_t r = p->player.bounce(path);
