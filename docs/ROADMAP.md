@@ -1,75 +1,90 @@
 # Roadmap
 
-Written 2026-10-21, after the requirements audit in [`IMPLEMENTATION.md`](IMPLEMENTATION.md).
-Nothing here is decided yet: each track lists its options, and the order is to be chosen
-together.
+Plan for [`REQUIREMENTS.md`](REQUIREMENTS.md), decided 2026-10-21. LIVE comes first.
+- Each phase ends with numbers, measured on the R5 corpus.
+- A phase may start before the one above it closes, but nothing ships without its measurement.
 
-## Where the project stands
+## Phase 0 — Ruler (first, short)
 
-Dissonância does much more than its spec asked. LIVE analysis, STUDIO (an analysis DAW), SCORE
-and a playground for making songs are all built, and every part has tests and measurements on
-synthetic material. Three things are thin:
+The targets are on real music, so the measurement has to exist before the tuning does.
 
-- **Proof outside the dev machine.** It has run on one Linux machine under WSL2 only. There is
-  no CI, no Windows build, no installer and no reference machine.
-- **Proof on real music.** The real-music numbers are GuitarSet (69 % LIVE, 71 % STUDIO) and the
-  user's ear (about 80 %). There is no corpus of real recordings with their chords written down.
-- **Focus.** Every week added a surface (LIVE modes, native ML, the lunchbox, the playground).
-  Each new surface widens what a release has to carry.
+1. `tools/eval/`: one command that prints, per corpus and per mode:
+   - harmony and chord on screen (scored from 0.5 s after each change);
+   - delay to the screen (median, p90);
+   - change ratio;
+   - backdated labels.
 
-## Track A — Foundation (recommended first)
+   The scripts in `tools/loopback` (guitarset.py, latency.py, the sweep) fold into it.
+2. Fetch scripts for GuitarSet, RWC (audio and annotations, licence checked), vocadito and
+   Dagstuhl ChoirSet: pinned, checksummed, cached outside the repo.
+3. CI on Linux: build, `dz_tests`, `tests/score`, and a short eval on a fixed subset that fails on a
+   regression.
+4. **Baseline**: every R1 figure today, written into IMPLEMENTATION.md.
 
-1. **CI on Linux:** build the core, run `dz_tests` and `tests/score` on every push.
-   - This alone would have caught the 2026-10-21 break.
-   - Cost: a small GitHub Actions workflow. Pinned downloads already make builds reproducible.
-2. **Windows build and run.** The spec names Windows as the primary platform.
-   - Build the core with MSVC and run the app.
-   - Check WASAPI shared and exclusive latency, DirectML and the Win32 VST3 editor.
-   - Then add a Windows CI job.
-3. **Packaging:** a self-contained `dotnet publish` with the core library and its helpers
-   (`dz_separate`, `dz_plugin`, Verovio). Setup already fetches the rest on first start, and
-   nothing is hosted: users build from source or a release is built by CI from tags. The hosting
-   rule needs a decision for release binaries.
-4. **Reference machine:** pick one and take the CPU and latency figures again on it.
+Exit: one command gives the R1 table, and CI runs on every push.
 
-## Track B — Accuracy on real music
+## Phase 1 — Psychoacoustic hearing (R1)
 
-1. **A small real corpus.** Twenty songs the user knows, each with its chords written down as a
-   `.lab` file (start, end, chord). Score LIVE harmony, chord played and STUDIO against it with
-   `chordscore.py`. This turns "about 80 %" into a number that a change can move.
-2. **Drums in a mix** (the weak spot):
-   - In LIVE, a harmonic / percussive split (a median filter over the STFT the notes front end
-     already computes) before the notes are picked.
-   - In STUDIO, the Demucs stems already remove the drums.
-3. **Funk** (54 %): short, muted chords. They need checking against the corpus before any tuning.
-4. **Voice through a microphone:** legato repeated notes need an attack detector.
+Each step is a separate change, measured against the baseline and kept only if it helps.
 
-## Track C — Making music
+1. **Equal loudness at playing level** (ISO 226, ~70–80 phon) instead of A-weighting. A-weighting
+   costs a G2 −19 dB; a listener at that level hears the bass well.
+2. **Bass by virtual pitch.** A low root is heard through its harmonics, so the bass register is
+   searched apart and does not compete with the treble for the note slots.
+3. **More notes per hop** (6 for a full strum), with the bass slot reserved.
+4. **Temporal masking**: forward masking after an attack, for picking and damped strings.
+5. **Harmonic / percussive split** (median filter over the STFT already computed) before the
+   notes, for songs with drums (RWC).
+6. **Temporal integration of loudness** (~200 ms) feeding the HMM's memory, instead of a fixed
+   decay. This is closer to what a listener "sums up" as the harmony.
+7. **Retune** lag, memory and dwell on the corpus (the sweep from 2026-10-21) after each step above.
 
-- Playground:
-  - a note editor for sampler notes;
-  - time-stretched loops when the tempo changes;
-  - pedals checked on a real input with monitoring latency.
-- STUDIO S11:
-  - phase 4, VST3 played live with plugin delay compensation;
-  - phase 5, oversampled dynamics and a true-peak limiter.
-- Editor: split, copy / paste, gain envelope.
+Exit: R1.1–R1.3 on RWC and GuitarSet. If a classical model stalls well below 90 %, weigh a small
+neural model in LIVE, as Melodia already runs Basic Pitch.
 
-## Track D — New ideas worth weighing
+## Phase 2 — Coach metrics and session JSON (R2, R3)
 
-- **Play along:** STUDIO analyses a song, then LIVE follows it. LIVE shows the next chord ahead
-  of time and marks where the user's chord differs. This joins the two halves of the app and uses
-  only parts that already exist (lead sheet, LIVE harmony, metronome grid).
-- **Guitar tablature** from the likely shapes and the STUDIO notes.
-- **Solfège display** (scale degrees, movable do) over the existing theory layer.
-- **One UI language.** Labels mix Portuguese and English today. Choose one, or add PT-BR / EN as
-  the spec asked.
+1. Timing and tempo (R2.1–R2.3) from onsets and beats, live and per take.
+2. Intonation and tuning (R2.4, R2.5) from the YIN track.
+3. Harmony execution, dynamics and form (R2.6–R2.8).
+4. `dissonancia-session/1`, written after every REC, with a schema test. It grows from today's
+   sidecar.
+5. DS-X shows the metrics live. After REC, a session report shows them and marks them on the
+   timeline.
 
-## Questions to decide together
+Exit: each metric validated on a corpus where the truth is known. Timing uses synthetic offsets
+and GuitarSet beats; intonation uses vocadito and Dagstuhl.
 
-1. Release first (A), or accuracy first (B)? A and B can run side by side. C should wait for
-   one of them.
-2. Should the release be binaries built by CI, or source only? "We host nothing" covers models
-   and data; it does not yet say what happens to the app itself.
-3. Which twenty songs make the real corpus, and who writes their chord files?
-4. Freeze new surfaces (playground, lunchbox) until A is done?
+## Phase 3 — AI feedback (R4)
+
+1. Decide on a local or an API model (open decision below).
+2. A prompt contract: the JSON in, feedback that cites the metrics out, in Portuguese.
+3. A test with fixed JSON files: every claim cites a value in the JSON; a low-confidence value is
+   never stated as fact.
+4. A COACH unit in LIVE: after REC (or on request), the feedback with its exercises.
+
+Exit: on ten real sessions of the user's, the user judges the feedback right and useful.
+
+## Phase 4 — Release (R6)
+
+1. A Windows build in CI and a run on a Windows machine: WASAPI latency, DirectML.
+2. Packages per OS; Setup fetches the components on first start.
+3. Reference machine figures.
+
+## Frozen
+
+STUDIO mixing, lunchbox and VST3; the choir; the playground beyond bug fixes. These come back
+when they serve the coach. Likely first:
+- the playground as the practice groove;
+- STUDIO as the session's exact pass.
+
+## Open decisions
+
+1. **AI model.** Local (llama.cpp, GGUF from upstream; private and offline, needs a few GB and a
+   decent CPU / GPU) or an API with the user's key (better feedback, needs a network)?
+   Recommendation: design the contract for both; start with the API to settle the prompt, then
+   test a local model against the same JSON.
+2. **RWC licence.** Its audio is CC BY-NC 4.0: fine for evaluation, never redistributed. The
+   annotations' licence is still to be checked.
+3. **What "≥ 90 %" covers.** Harmony on a full band (RWC Pop) and on a solo guitar (GuitarSet)
+   are different problems. Should the target hold on both, or on the full band first?

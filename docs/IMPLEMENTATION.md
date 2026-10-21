@@ -6,8 +6,8 @@ The original specification (`docs/spec.md` V2.3, `docs/spec.v2.1.md`) and the ST
 (`docs/studio-plan.md`) were removed on 2026-10-21. They live in git history (last version at
 commit `4d1fca3`; code comments that cite `§n` or `studio-plan Sn` refer to that version). This
 file replaces them: every requirement they set is listed below with
-what was built, what changed by a later decision and what is still open. The future work is in
-[`ROADMAP.md`](ROADMAP.md).
+what was built, what changed by a later decision and what is still open. The current requirements are
+[`REQUIREMENTS.md`](REQUIREMENTS.md) and the plan is [`ROADMAP.md`](ROADMAP.md).
 
 Status on 2026-10-21:
 - Core: 71 Catch2 cases, 5952 assertions, all pass (`core/build/dz_tests`).

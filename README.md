@@ -1,5 +1,9 @@
 # Dissonância
 
+A music coach that needs no reference: play or sing, and LIVE hears the harmony, the chord, the
+melody, the rhythm and the tuning as a trained musician would, measures them, and writes a session
+JSON that an AI turns into feedback (the coach is the plan in [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md)).
+
 Offline music analyzer for the desktop. Play or sing: LIVE shows the note, the
 chord and the harmony as you play, spelled for the key (D♭ is not C♯). STUDIO
 takes the recording through a studio session (editing, separation, mixing,
@@ -127,7 +131,7 @@ Python is dev-side only (exports, prototypes, evaluation). Users never need it.
 
 Built and tested on synthetic material and GuitarSet; see
 [`docs/IMPLEMENTATION.md`](docs/IMPLEMENTATION.md) for each requirement against the build and
-[`docs/ROADMAP.md`](docs/ROADMAP.md) for what comes next. There is no CI, no installer and no
+[`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) and [`docs/ROADMAP.md`](docs/ROADMAP.md) for where it is going. There is no CI, no installer and no
 Windows or macOS build yet.
 
 ## Build
@@ -172,7 +176,7 @@ core/   C++ engine: include/dissonancia.h (C ABI), src/ (notes.cpp: perceived no
 app/    C# Avalonia app: LIVE rack, STUDIO stages, Score, Accel (GPU setup), YourMt3, BasicPitch
 tests/  score/: runnable checks for the SCORE layer, rack presets, fretboard shapes
 tools/  loopback/: evaluation scripts · yourmt3/: ONNX export (dev) · shot/: headless screenshots
-docs/   IMPLEMENTATION.md (requirements vs build, measurements, open items), ROADMAP.md
+docs/   REQUIREMENTS.md (the coach), ROADMAP.md (the plan), IMPLEMENTATION.md (old spec vs build, measurements)
 ```
 
 ## License
