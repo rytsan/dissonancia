@@ -34,9 +34,13 @@ prior. Two readings run side by side:
 - **Chord played**: every quality (7, maj7, m7, sus, add9, dim, 5), the line
   under it. Inversions (D/F♯) are an option in START.
 
+The display shows both side by side: **HARMONIA** (the harmonic field) and **ACORDE** (the chord
+played, with sevenths, ninths, sus2 / sus4, add9). A **melody lane** scrolls the melody line as a
+piano roll, each note named where it starts.
+
 Latency, from a change to the screen (`tools/loopback/latency.py`): first
-pitch 30 ms, stable note 50 ms, bass settled 220 ms, chord played ~0.5 s,
-harmony ~1 s. CPU about 1 %.
+pitch 30 ms, stable note 50 ms, bass settled 220 ms, chord played ~0.36 s,
+harmony ~0.55 s. CPU about 1 %.
 
 **Playground** (PLAYGROUND above the rack), a place to make a song while LIVE listens:
 

@@ -14,7 +14,8 @@ var mode = Enum.Parse<LiveMode>(args[2]);
 w.SetMode(mode, mode == LiveMode.Acoustic ? Clef.Treble8vb : mode is LiveMode.Melody or LiveMode.AcousticVoice ? null : Clef.Treble);   // melody lines: Auto
 w.Show();
 w.SelectTab(int.Parse(args[1]));
-for (int i = 0; i < 40; i++)   // 2 s of frames so meters, scope and waterfall fill
+int frames = int.TryParse(Environment.GetEnvironmentVariable("SHOT_FRAMES"), out var nf) ? nf : 40;   // more: a lane that scrolls fills up
+for (int i = 0; i < frames; i++)   // 2 s of frames so meters, scope and waterfall fill
 {
     t += 0.05;
     w.Step(t);

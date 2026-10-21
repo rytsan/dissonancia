@@ -334,7 +334,8 @@ public sealed class LcdModule : RackModule
         bool chords = Session.IsChordMode && Session.Live != LiveMode.Melody;   // Melodia: the whole display is the line
         double split = chords ? inner.Y + inner.Height * 0.54 : inner.Y;
 
-        if (chords)
+        if (chords && f.Harmony.Length > 0) DrawTwoChords(ctx, inner, split, f);
+        else if (chords)
         {
             // Chord symbol: 7 dot-matrix cells, unlit dots visible like a real gas-plasma panel.
             double rx = inner.Right, status = 150;
@@ -406,6 +407,35 @@ public sealed class LcdModule : RackModule
         if (Session.GrandStaff) DrawGrandStaff(ctx, new Rect(inner.Right - 170, y + 2, 170, Math.Max(80, inner.Bottom - y - 4)), f.Bass, valid);
         else if (voiceStaff) DrawStaff(ctx, new Rect(inner.Right - 160, y + 10, 160, 56), Session.DisplayClef, f.Melody.WithOctaveShift(Session.DisplayClef.OctaveShift()), f.MelodyValid);
         else DrawStaff(ctx, new Rect(inner.Right - 160, y + 10, 160, 56), Session.DisplayClef, written, valid);
+    }
+
+    /// Two readouts side by side: HARMONIA, the harmonic field a listener sums up (triads, steady),
+    /// and ACORDE, the chord played now with its colours (7, maj7, 9, sus2 / sus4, add9, dim, 5)
+    /// and, when START asks, its inversion. Each with its own delay to the screen.
+    void DrawTwoChords(DrawingContext ctx, Rect inner, double split, LiveFrame f)
+    {
+        double top = split - 6 - inner.Y, gap = 18;
+        double leftW = (inner.Width - gap) * 0.38, rightX = inner.X + leftW + gap, rightW = inner.Right - rightX;
+        double Fit(double w, int cells) => Math.Min(w / (cells * 6 * 1.3), (top - 46) / (7 * 1.3));
+        bool steady = f.DisplayChord.Length > 0 && f.DisplayChord != f.CandidateChord;
+
+        double dl = Fit(leftW, 4), dr = Fit(rightW, 7), dot = Math.Min(dl, dr * 1.25);
+        Plasma.Text(ctx, "HARMONIA", inner.X, inner.Y, 10, false, Ui.SansBold);
+        Plasma.Text(ctx, Ui.Ms(f.HarmonyLatencyMs), inner.X + leftW, inner.Y, 11, true, Ui.Mono, Ui.Align.Right);
+        Plasma.DotText(ctx, f.Harmony, inner.X, inner.Y + 16, dot, cells: 4);
+
+        Plasma.Text(ctx, "ACORDE", rightX, inner.Y, 10, false, Ui.SansBold);
+        Plasma.Text(ctx, Ui.Ms(f.ChordLatencyMs), inner.Right, inner.Y, 11, true, Ui.Mono, Ui.Align.Right);
+        Plasma.DotText(ctx, f.DisplayChord, rightX, inner.Y + 16, Math.Min(dr, dot), cells: 7, dim: !steady);
+        ctx.DrawLine(Plasma.LineDim, new Point(rightX - gap / 2, inner.Y + 4), new Point(rightX - gap / 2, split - 12));
+
+        double y = inner.Y + 16 + dot * 1.3 * 7 + 8;
+        if (f.DisplayRoman.Length > 0) Plasma.Text(ctx, f.DisplayRoman, inner.X, y, 15, steady, Ui.Mono);
+        for (int i = 0; i < 10; i++) Plasma.Lamp(ctx, new Point(rightX + 4 + i * 12, y + 9), 3.4, i < f.ChordConfidence * 10);
+        if (f.CandidateChord.Length > 0 && steady) Plasma.Text(ctx, $"→ {f.CandidateChord}?", inner.Right, y, 13, true, Ui.Mono, Ui.Align.Right);
+        else if (f.ChordReason.Length > 0) Plasma.Text(ctx, f.ChordReason, inner.Right, y, 11, false, Ui.Mono, Ui.Align.Right);
+        if (f.Cadence.Length > 0) Plasma.Text(ctx, f.Cadence, inner.X, y + 18, 11, false, Ui.Mono);
+        ctx.DrawLine(Plasma.LineDim, new Point(inner.X, split - 6), new Point(inner.Right, split - 6));
     }
 
     /// Mono modes and Melodia: the whole display is the note — big spelled name, staff, full-width cents

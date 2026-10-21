@@ -70,7 +70,7 @@ listed under "Decisions that changed the spec"), **Partial**, **Open** (not buil
 | Loopback latency calibration | Open | The reported capture + playback latency is used |
 | Reference machine fixed, CPU budgets measured on it | Open | All figures are from the dev machine |
 | Capture ≤ 20 ms; first pitch ≤ 80 ms; stable ≤ 150 ms | Done (dev machine) | 15 ms reported capture; 30 / 50 ms |
-| Chord confirmation 0.4–1 s | Changed | Chord played ~0.5 s, harmony ~1 s from a change to the screen |
+| Chord confirmation 0.4–1 s | Changed | Chord played ~0.36 s, harmony ~0.55 s from a change to the screen |
 | CPU ≤ 15 % Balanced; 0 xruns in 10 min | Done (dev machine, WSLg) | ≈ 1–2.5 %; 0 xruns in loopback runs |
 
 ### LIVE analysis (§5–§16)
@@ -734,6 +734,15 @@ notes, a sung melody with passing and neighbour tones, kick/snare/hi-hat),
 - The old chroma path stays for its tests and for `dz_wav`.
 - Latency is measured from a change to the screen (`tools/loopback/latency.py`), because the
   backdated events hid the wait.
+- 2026-10-21, latency: the delay was the HMM's memory of the notes, not its lag. The harmony now
+  keeps 0.3 s of memory (was 1 s) and a 0.8 s dwell before another root (a new third on the same
+  root shows at once); the chord played changes freely (stay 0.97, lag 0.2 s, no hold) with a 0.4 s
+  dwell. GuitarSet on screen: harmony 47.6 → 52.5 % at 1.08 → 0.55 s, chord played 50.2 → 50.6 %
+  at 0.56 → 0.36 s; take labels (backdated) 69.1 → 67.5 %; the harmony changes 1.89× per real
+  change (was 1.66×).
+- The analyzer shows HARMONIA and ACORDE side by side, each with its own delay. The MELODY LANE
+  module scrolls the melody line (chord modes: the predominant line; mono modes: the note) over
+  8 s as a piano roll, sampled every display frame whether drawn or not.
 
 ### LIVE playground (2026-10-21, `core/src/playground.cpp`, `app/Playground*.cs`)
 - Rendered in the LIVE duplex callback after the click, on the metronome grid, sample-accurate;
@@ -803,7 +812,7 @@ item).
 | STUDIO S9 choir by section (EXPERIMENTAL), synthetic | 3 chorales × 8 chords: S 18, A 18, T 21, B 19 of 24; `choir.py` (two singers per section, vowels, breath, room, 16 chords): S 15, A 12, T 12, B 11 of 16 (78 %), 91 notes for 64 sung; 0.85 s for 17 s of audio |
 | STUDIO S8 VST3 | DZ Test Gain: +6.00 dB sample-exact, state round trip identical, 64-sample latency compensated (aligned), editor under Xvfb: edit → state |
 | GuitarSet comping (180 takes, MIREX majmin) | LIVE 34 → 69 % (chroma templates → notes + HMM), STUDIO 39 → 71 %; per style (STUDIO) singer-songwriter 86, rock 77, bossa nova 71, jazz 62, funk 54 %. On screen (not backdated) LIVE 49.5 % |
-| LIVE latency, change → screen (`latency.py`) | first pitch 30 ms, stable note 50 ms, bass settled 220 ms, chord played ~0.5 s, harmony ~1 s |
+| LIVE latency, change → screen (`latency.py`) | first pitch 30 ms, stable note 50 ms, bass settled 220 ms, chord played ~0.36 s, harmony ~0.55 s (was ~0.56 / ~1.08) |
 | Chords from notes, synthetic | fingerpicking 93–97 %, band mix 93 %, guitar + voice 92.5 % |
 | YourMT3+ (13 s take) | 32/32 notes vs the authors' Python; CPU ~8 s, CUDA ~2.2 s, DirectML ~6 s |
 | STUDIO metering | 1 kHz at −23 dBFS → −23.0 LUFS integrated; gated −36/−23/−36 → −23 ±0.2; 20 s −20 + 20 s −30 → LRA 10 ±1; fs/4 at 45° → true peak −6.0 dBTP (sample peak −9.0) |
@@ -858,6 +867,8 @@ Grouped by what they block. [`ROADMAP.md`](ROADMAP.md) orders them.
 **LIVE**
 - Weak spots: funk (54 % STUDIO), mixes with loud drums.
 - Legato repeated notes need an attack detector in the voice pipeline.
+- The notes front end misses a low root under a full strum (G2 in a six-string G): the fifth is
+  heard as the lowest note. The slash-bass vote asks 75 % for a fifth to cover it.
 - Guitar tuning, capo and A4 have no START controls.
 - RealtimeSanitizer, rtkit, page-fault counter, metronome on another output device, loopback
   latency calibration.

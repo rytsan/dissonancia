@@ -49,6 +49,7 @@ public sealed class MainWindow : Window
     readonly string _coreError;
     readonly TextBlock _startStatus = new() { Foreground = Ui.Label, TextWrapping = TextWrapping.Wrap };
     readonly RackModule[] _modules;
+    readonly MelodyLaneModule _lane = new();   // sampled every frame, drawn or not
     readonly Dictionary<string, Action> _actions;
     readonly Dictionary<Key, string> _keys = new()
     {
@@ -90,7 +91,7 @@ public sealed class MainWindow : Window
         {
             [ModuleKind.Input] = new InputModule(), [ModuleKind.Scope] = new ScopeModule(), [ModuleKind.Analyzer] = new LcdModule(),
             [ModuleKind.Tuner] = new TunerModule(), [ModuleKind.Fretboard] = new FretboardModule(), [ModuleKind.Keyboard] = new KeyboardModule(),
-            [ModuleKind.Waterfall] = new WaterfallModule(), [ModuleKind.Timeline] = new TimelineModule(),
+            [ModuleKind.Waterfall] = new WaterfallModule(), [ModuleKind.Timeline] = new TimelineModule(), [ModuleKind.MelodyLane] = _lane,
             [ModuleKind.Transport] = transport, [ModuleKind.Status] = new StatusModule(),
             [ModuleKind.Metrics] = new MetricsModule(), [ModuleKind.Pads] = new PadsModule(), [ModuleKind.Sequencer] = new SequencerModule(), [ModuleKind.Midi] = new MidiModule(), [ModuleKind.Song] = new SongModule(), [ModuleKind.Pedals] = new PedalboardModule(),
         };
@@ -193,6 +194,7 @@ public sealed class MainWindow : Window
         if (_lastFrame > 0) _frame.DisplayMs = (float)((now - _lastFrame) * 1000);   // measured frame interval
         _lastFrame = now;
         _source.Read(_frame, now);
+        _lane.Sample();
         Playground.Current.Bpm = _frame.Bpm;
         Playground.Current.Poll();
         SyncRack();
@@ -292,6 +294,7 @@ public sealed class MainWindow : Window
     public void Step(double now)
     {
         _source.Read(_frame, now);
+        _lane.Sample();
         Playground.Current.Bpm = _frame.Bpm;
         Playground.Current.Poll();
         SyncRack();

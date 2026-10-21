@@ -234,3 +234,98 @@ public sealed class TunerModule : RackModule
             r.Right - 14, r.Y + 42, 13, false, Ui.Mono, Ui.Align.Right);
     }
 }
+
+/// Melody lane: the melody line as a scrolling piano roll (the last 8 s, newest at the right) on a
+/// phosphor screen, each note named where it starts, bar lines from the metronome. Chord modes read
+/// the predominant line (the voice or lead over the chords), mono modes the note sung or played; a
+/// note that has not settled yet is drawn dim.
+public sealed class MelodyLaneModule : RackModule
+{
+    const double Span = 8;
+    const int Cap = 1024;   // > 8 s of display frames at 120 Hz
+    readonly double[] _t = new double[Cap];
+    readonly Pitch[] _p = new Pitch[Cap];
+    readonly bool[] _on = new bool[Cap], _settled = new bool[Cap];
+    int _head, _count;
+    double _last = double.NegativeInfinity;
+    static readonly IPen Grid = new ImmutablePen(new ImmutableSolidColorBrush(Color.FromUInt32(0x22FFFFFF)), 1);
+    static readonly IPen BarLine = new ImmutablePen(new ImmutableSolidColorBrush(Color.FromUInt32(0x5539FF9A)), 1);
+
+    public MelodyLaneModule() { Title = "MELODY LANE"; }
+
+    /// Every display frame, drawn or not (a lane scrolled out of view keeps its history).
+    public void Sample()
+    {
+        if (Frame is not { } f) return;
+        bool chords = Session.IsChordMode;
+        double now = f.AnalyzedSeconds;
+        if (now < _last) _count = 0;   // a new session: the clock started again
+        if (now > _last)
+        {
+            _last = now;
+            int i = (_head + _count) % Cap;
+            if (_count == Cap) _head = (_head + 1) % Cap; else _count++;
+            _t[i] = now;
+            _on[i] = chords ? f.MelodyValid : f.NoteValid;
+            _p[i] = (chords ? f.Melody : f.Note).WithOctaveShift(Session.DisplayClef.OctaveShift());
+            _settled[i] = !chords || f.MelodySettled;
+        }
+        while (_count > 0 && _t[_head] < now - Span) { _head = (_head + 1) % Cap; _count--; }
+    }
+
+    protected override void DrawContent(DrawingContext ctx, Rect r)
+    {
+        var f = Frame!;
+        double now = _last;
+
+        ctx.DrawRectangle(Ui.Scope, Ui.LcdEdge, r, 3, 3);
+        var inner = r.Deflate(4);
+        // pitch range: what was heard, at least an octave, centred
+        int lo = 127, hi = 0;
+        for (int k = 0; k < _count; k++)
+        {
+            int j = (_head + k) % Cap;
+            if (_on[j]) { lo = Math.Min(lo, _p[j].Midi); hi = Math.Max(hi, _p[j].Midi); }
+        }
+        if (lo > hi) (lo, hi) = (60, 72);
+        int mid = (lo + hi) / 2, half = Math.Max(6, (hi - lo) / 2 + 2);
+        lo = mid - half; hi = mid + half;
+        double rowH = inner.Height / (hi - lo + 1);
+        double X(double t) => inner.Right - (now - t) / Span * inner.Width;
+        double Y(int midi) => inner.Bottom - (midi - lo + 1) * rowH;
+
+        for (int m = lo; m <= hi; m++)
+            if (m % 12 == 0)
+            {
+                ctx.DrawLine(Grid, new Point(inner.X, Y(m) + rowH), new Point(inner.Right, Y(m) + rowH));
+                Ui.Text(ctx, $"C{m / 12 - 1}", inner.Right - 3, Y(m) + rowH - 13, 9, Ui.LcdDim, Ui.Mono, Ui.Align.Right);
+            }
+        if (f.Bpm > 0 && f.BeatInBar > 0)
+        {
+            double bar = 60.0 / f.Bpm * Session.BeatsPerBar;
+            for (double b = now - f.BarPhase * bar; b > now - Span; b -= bar)
+                ctx.DrawLine(BarLine, new Point(X(b), inner.Y), new Point(X(b), inner.Bottom));
+        }
+
+        // notes: runs of the same pitch, named where they start
+        int start = -1;
+        for (int k = 0; k <= _count; k++)
+        {
+            int j = (_head + k) % Cap, s = start < 0 ? -1 : (_head + start) % Cap;
+            bool cont = k < _count && start >= 0 && _on[j] && _p[j].Midi == _p[s].Midi;
+            if (cont) continue;
+            if (start >= 0)
+            {
+                int e = (_head + k - 1) % Cap;
+                double x0 = X(_t[s]), x1 = Math.Max(X(_t[e]), x0 + 2);
+                var bar = new Rect(x0, Y(_p[s].Midi) + 1, x1 - x0, Math.Max(2, rowH - 2));
+                bool lit = _settled[e];
+                ctx.DrawRectangle(lit ? Ui.Green : Ui.LcdDim, null, bar, 2, 2);
+                if (x1 - x0 > 14) Ui.Text(ctx, _p[s].Name, x0 + 2, bar.Y - 13, 10, lit ? Ui.LcdText : Ui.LcdDim, Ui.Mono);
+            }
+            start = k < _count && _on[j] ? k : -1;
+        }
+        Ui.Text(ctx, $"{Span:0} s", inner.X + 3, inner.Bottom - 13, 9, Ui.LcdDim, Ui.Mono);
+        Ui.Text(ctx, "now", inner.Right - 3, inner.Bottom - 13, 9, Ui.LcdDim, Ui.Mono, Ui.Align.Right);
+    }
+}
