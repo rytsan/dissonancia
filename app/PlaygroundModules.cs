@@ -199,6 +199,8 @@ public sealed class PadsModule : KeyedModule
         Ui.Text(ctx, sn.Length > 28 ? sn[..28] : sn, sb.X + 8, sb.Y + 19, 11, Ui.LcdText, Ui.Mono);
         Key(ctx, new Rect(sb.X, sb.Y + 48, 92, 22), "CARREGAR", () => Pick(16), withLed: false);
         Key(ctx, new Rect(sb.X + 98, sb.Y + 48, 60, 22), "TOCAR", () => { P.Note(s.SamplerRoot, true); }, withLed: false);
+        Key(ctx, new Rect(sb.X + 164, sb.Y + 48, 96, 22), "INSTR. ▸", P.NextInstrument, withLed: false);
+        Key(ctx, new Rect(sb.X + 164, sb.Y + 74, 96, 22), "KIT VCSL", () => P.LoadKit(), SampleBank.Installed, Ui.Green);
         string[] names = ["C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"];
         double ky = sb.Y + 98;
         if (ky + 30 < r.Bottom)

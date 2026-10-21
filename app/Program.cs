@@ -586,7 +586,8 @@ public sealed class MainWindow : Window
             parts.Text = string.Join("   ·   ",
                 $"Basic Pitch {(BasicPitch.Available ? "present" : "missing")}",
                 $"Demucs separation {(!DemucsModel.HelperPresent ? "not in this build" : DemucsModel.Installed(DemucsModel.FourStems) && DemucsModel.Installed(DemucsModel.SixStems) ? "present" : "weights missing")}",
-                $"YourMT3+ {(YourMt3.Installed ? "present" : !YourMt3.Shipped ? "not in this build" : "weights not built yet")}");
+                $"YourMT3+ {(YourMt3.Installed ? "present" : !YourMt3.Shipped ? "not in this build" : "weights not built yet")}",
+                $"Playground sounds (VCSL, CC0) {(SampleBank.Installed ? "present" : "missing")}");
             var (needed, bytes) = Setup.Pending();
             install.IsVisible = Setup.Running || needed;
             install.Content = Setup.Running ? "CANCEL" : $"INSTALL  ({Mb(bytes)})";

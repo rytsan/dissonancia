@@ -51,6 +51,10 @@ harmony ~1 s. CPU about 1 %.
   block for block; any .mid comes in quantized to the sixteenth.
 - **Pedalboard**: drive, octave, chorus, tempo delay, reverb, filter as stompboxes, patched with
   cables between ENTRADA (the input), PADS, SAÍDA (the output) and GRAVAR (what REC records).
+- **Sounds**: an open bank we do not host, the Versilian Community Sample Library (VCSL, CC0):
+  a drum and percussion kit for the pads and four instruments for the sampler (upright piano,
+  FM piano, vibraphone, kalimba), ~13 MB, fetched by the installer from VCSL's repository at a
+  pinned commit, each file checked by SHA-256.
 - **MIDI controller** with MIDI learn. Everything plays through the LIVE output on the metronome's
   grid, sample-accurate with the click and the input; MIDI input is RtMidi (ALSA / WinMM / CoreMIDI).
 
@@ -109,6 +113,7 @@ size and SHA-256, and builds its own artifacts:
 - **YourMT3+**: the app ships the ONNX graphs without weights; the weights are
   rebuilt locally from the authors' checkpoint and checked against a recipe.
 - **Demucs**: ggml weights downloaded on demand.
+- **Playground sounds**: VCSL (CC0) WAVs from its GitHub repository at a pinned commit.
 
 Python is dev-side only (exports, prototypes, evaluation). Users never need it.
 

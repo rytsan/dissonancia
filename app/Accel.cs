@@ -348,8 +348,8 @@ public static class Setup
     public static (bool Needed, long Bytes) Pending()
     {
         var p = Accel.Machine;
-        long bytes = (GpuPending(p) ? p.DownloadBytes : 0) + MissingDemucs().Sum(v => v.Size) + (Mt3Pending ? YourMt3.Recipe().CheckpointSize : 0);
-        return (GpuPending(p) || MissingDemucs().Any() || Mt3Pending, bytes);
+        long bytes = (GpuPending(p) ? p.DownloadBytes : 0) + MissingDemucs().Sum(v => v.Size) + (Mt3Pending ? YourMt3.Recipe().CheckpointSize : 0) + SampleBank.Missing;
+        return (GpuPending(p) || MissingDemucs().Any() || Mt3Pending || !SampleBank.Installed, bytes);
     }
 
     /// At startup: runs unless turned off or a previous run failed or was cancelled.
@@ -375,6 +375,7 @@ public static class Setup
                 if (await DemucsModel.InstallAsync(v, f => Progress = f, ct) is { } d) errors.Add($"Demucs {v.Stems} stems: {d}");
             }
             if (Mt3Pending && !ct.IsCancellationRequested && await YourMt3.Build((s, f) => (Stage, Progress) = (s, f), ct) is { } m) errors.Add("YourMT3+: " + m);
+            if (!SampleBank.Installed && !ct.IsCancellationRequested && await SampleBank.InstallAsync((s, f) => (Stage, Progress) = (s, f), ct) is { } sb) errors.Add("sons VCSL: " + sb);
             Error = ct.IsCancellationRequested ? "cancelled" : errors.Count > 0 ? string.Join("; ", errors) : null;
             if (Error is not null) { Directory.CreateDirectory(Accel.Root); File.WriteAllText(SkipFile, Error); }
             Running = false;

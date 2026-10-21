@@ -226,6 +226,12 @@ public sealed class Playground
         Status = output ? "" : "a saída do LIVE está desligada (START: saída de clique): os pads não soam";
         try
         {
+            if (SampleBank.Installed && S.Pads.All(p => p.Path.Length == 0) && S.SamplerPath.Length == 0)
+            {   // nothing loaded yet: the open bank's kit and piano
+                for (int k = 0; k < 16; k++) S.Pads[k].Path = SampleBank.Kit[k].File;
+                (S.SamplerPath, S.SamplerRoot) = (SampleBank.Instruments[0].File, SampleBank.Instruments[0].Root);
+                Save();
+            }
             for (int k = 0; k < 16; k++) if (S.Pads[k].Path.Length > 0) LoadSlot(k, S.Pads[k].Path, save: false);
             if (S.SamplerPath.Length > 0) LoadSlot(16, S.SamplerPath, save: false);
             Apply();
@@ -240,6 +246,29 @@ public sealed class Playground
     }
 
     public void Detach() => _h = 0;
+
+    // ---------------------------------------------------------------- the open sound bank (SampleBank)
+
+    /// The VCSL kit on the 16 pads (false: not installed yet; Setup fetches it).
+    public bool LoadKit()
+    {
+        if (!SampleBank.Installed) { Status = Setup.Running ? "baixando os sons…" : "sons VCSL: instalando (START → SYSTEM)"; if (!Setup.Running) Setup.Start(); return false; }
+        for (int k = 0; k < 16; k++) LoadSlot(k, SampleBank.Kit[k].File, save: false);
+        Save();
+        Status = "kit VCSL nos pads (CC0)";
+        return true;
+    }
+    /// The next VCSL instrument on the sampler, at its root.
+    public void NextInstrument()
+    {
+        if (!SampleBank.Installed) { LoadKit(); return; }
+        var list = SampleBank.Instruments;
+        int i = (Array.FindIndex(list, x => x.File == S.SamplerPath) + 1) % list.Length;
+        S.SamplerRoot = list[i].Root;
+        LoadSlot(16, list[i].File);
+        Apply();
+        Status = $"sampler: {list[i].Name} (VCSL)";
+    }
 
     public unsafe void ScanPorts()
     {
