@@ -724,6 +724,14 @@ public sealed class StudioState
     }
 
     public void ToggleVst(VstInsert v) { if (Current is null) return; v.On = !v.On; StudioProject.SaveMix(Current, Mix); ApplyVst(); }
+    /// A track header's FX power: every insert of the track on or bypassed at once.
+    public void SetVstOn(int track, bool on)
+    {
+        if (Current is null) return;
+        foreach (var v in Channel(track).Vst) v.On = on;
+        StudioProject.SaveMix(Current, Mix);
+        ApplyVst();
+    }
 
     /// Puts every channel's VST3 render in the player: from the cache, or rendered now (in order,
     /// insert by insert, each reading the previous one's output).
@@ -1470,48 +1478,28 @@ public sealed class RecorderUnit : StudioUnit
         else if (S.ResultTake is not null && kx + 150 < r.Right)
             Key(ctx, new Rect(kx, ky, 110, 28), S.Doubts > 0 ? $"DÚVIDAS {S.Doubts}" : "DÚVIDAS", S.NextDoubt, false, Ui.Amber, S.Doubts > 0);
 
-        // Channel card + screen.
+        // Arrangement, as Reaper or Live: a header per track (name, number, mute, solo, FX and its
+        // power, level) beside its lane on the time axis; the audio tracks are short, the lanes of the
+        // analysis under them as a DAW's chord and MIDI tracks: the harmony (triads with their
+        // degrees), the chords in detail, the notes. What is left below stays empty.
         var area = new Rect(r.X, r.Y + 38, r.Width, r.Height - 38);
-        var card = new Rect(area.X, area.Y, 170, area.Height);
-        ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF24272B)), new ImmutablePen(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF0B0C0D)), 1), card, 3, 3);
-        Ui.Text(ctx, "CANAIS", card.X + 8, card.Y + 4, 8, Ui.Label, Ui.SansBold);
-        // Lanes under the tracks, as a DAW's chord and MIDI tracks: the harmony (triads, with their
-        // degrees), the chords in detail, the notes.
-        bool noteLane = S.ResultTake is { } lt && (lt.Notes.Count > 0 || lt.IsChoir);
-        const double harmonyH = 40, chordH = 32, notesH = 44;
+        var card = new Rect(area.X, area.Y, 210, area.Height);
+        ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF1C1E22)), new ImmutablePen(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF0B0C0D)), 1), card, 3, 3);
+        Ui.Text(ctx, "FAIXAS", card.X + 8, card.Y + 4, 8, Ui.Label, Ui.SansBold);
+        bool noteLane = NoteLane;
         double laneH = harmonyH + chordH + (noteLane ? notesH : 0);
-        double stemH = S.Stems.Count == 0 ? 0 : Math.Clamp((area.Height - 30 - laneH) * 0.55 / S.Stems.Count, 26, 60);
-        double trackH = Math.Max(60, area.Height - 30 - laneH - stemH * S.Stems.Count);
         _cards.Clear();
-        var selPen = new ImmutablePen((IImmutableBrush)Ui.Amber, 1.5);
-        var mixRow = new Rect(card.X + 3, card.Y + 18, card.Width - 6, trackH + 4);
-        _cards.Add((mixRow, 0));
-        if (S.Selected == 0 && S.Current is not null) ctx.DrawRectangle(null, selPen, mixRow, 3, 3);
-        Tape(ctx, card.X + 10, card.Y + 26, S.Current is null ? "—" : "MIX");
-        if (S.Current is not null) CardControls(ctx, 0, card.X + 10, card.Y + 78, card.Width - 20);
-        Plasma.DotText(ctx, "1", card.Right - 22, card.Y + 26, 2.4, 1);
-        Ui.Led(ctx, new Point(card.X + 16, card.Y + 64), 3.5, S.Player?.Playing == true, Ui.Green, Ui.GreenOff);
-        Ui.Text(ctx, "PLAY", card.X + 24, card.Y + 58, 8, Ui.Label, Ui.SansBold);
-        Ui.Led(ctx, new Point(card.X + 70, card.Y + 64), 3.5, !S.Edits.IsEmpty, Ui.Amber, Ui.AmberOff);
-        Ui.Text(ctx, "EDITADO", card.X + 78, card.Y + 58, 8, Ui.Label, Ui.SansBold);
         var stemNames = new Dictionary<string, string> { ["vocals"] = "VOZ", ["bass"] = "BAIXO", ["other"] = "OUTROS", ["drums"] = "BATERIA", ["guitar"] = "VIOLÃO", ["piano"] = "PIANO" };
+        double rowY = area.Y + 22;
+        TrackHeader(ctx, new Rect(card.X + 3, rowY, card.Width - 6, trackH - 2), 0, S.Current is null ? "—" : "MIX");
         for (int i = 0; i < S.Stems.Count; i++)
-        {
-            double sy = area.Y + 22 + trackH + i * stemH;
-            var row = new Rect(card.X + 3, sy, card.Width - 6, stemH);
-            _cards.Add((row, i + 1));
-            if (S.Selected == i + 1) ctx.DrawRectangle(null, selPen, row, 3, 3);
-            Tape(ctx, card.X + 10, sy + stemH / 2 - 10, stemNames.GetValueOrDefault(S.Stems[i].Name, S.Stems[i].Name.ToUpperInvariant()), i % 2 == 0 ? 1.2 : -1.2);
-            Plasma.DotText(ctx, $"{i + 2}", card.Right - 22, sy + stemH / 2 - 8, 2.2, 1);
-            CardControls(ctx, i + 1, card.Right - 82, sy + stemH / 2 - 9, 52, compact: true);
-        }
-        double laneY = area.Y + 22 + trackH + stemH * S.Stems.Count + 4;
+            TrackHeader(ctx, new Rect(card.X + 3, rowY + trackH + i * stemH, card.Width - 6, stemH - 2), i + 1, stemNames.GetValueOrDefault(S.Stems[i].Name, S.Stems[i].Name.ToUpperInvariant()));
+        double laneY = rowY + trackH + stemH * S.Stems.Count + 4;
         var laneInk = S.ResultTake is null ? Ui.Label : Ui.Amber;
-        Ui.Text(ctx, "↳ HARMONIA", card.X + 16, laneY + 6, 10, laneInk, Ui.SansBold);
         var degreesIn = S.Session.KeySet ? S.Session.Key : S.Suggestion?.Key;
-        Ui.Text(ctx, degreesIn is null ? "sem tom: sem graus" : $"graus em {degreesIn.Tonic}{(degreesIn.Minor ? "m" : "")}{(S.Session.KeySet ? "" : " (sugerido)")}", card.X + 28, laneY + 20, 8, Ui.Label, Ui.Sans);
-        Ui.Text(ctx, "↳ ACORDES", card.X + 16, laneY + harmonyH + 8, 10, laneInk, Ui.SansBold);
-        if (noteLane) Ui.Text(ctx, S.Choir ? "↳ CORO SATB" : "↳ NOTAS", card.X + 16, laneY + harmonyH + chordH + 14, 10, laneInk, Ui.SansBold);
+        LaneHeader(ctx, new Rect(card.X + 3, laneY, card.Width - 6, harmonyH - 2), "HARMONIA", degreesIn is null ? "sem tom: sem graus" : $"graus em {degreesIn.Tonic}{(degreesIn.Minor ? "m" : "")}{(S.Session.KeySet ? "" : " (sugerido)")}", laneInk);
+        LaneHeader(ctx, new Rect(card.X + 3, laneY + harmonyH, card.Width - 6, chordH - 2), "ACORDES", "detalhe", laneInk);
+        if (noteLane) LaneHeader(ctx, new Rect(card.X + 3, laneY + harmonyH + chordH, card.Width - 6, notesH - 2), S.Choir ? "CORO SATB" : "NOTAS", "melodia", laneInk);
 
         var bezel = new Rect(card.Right + 8, area.Y, area.Right - card.Right - 8, area.Height);
         ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF0B0C0D)), null, bezel, 5, 5);
@@ -1692,18 +1680,47 @@ public sealed class RecorderUnit : StudioUnit
         for (double y = bezel.Y + 6; y < bezel.Bottom - 6; y += 3) ctx.DrawLine(new ImmutablePen(new ImmutableSolidColorBrush(Color.FromUInt32(0x22000000)), 1), new Point(bezel.X + 5, y), new Point(bezel.Right - 5, y));
     }
 
-    /// Mute / solo keys and the level of a channel on its card.
-    void CardControls(DrawingContext ctx, int track, double x, double y, double w, bool compact = false)
+    const double harmonyH = 40, chordH = 32, notesH = 44, trackH = 76, stemH = 52;
+    bool NoteLane => S.ResultTake is { } t && (t.Notes.Count > 0 || t.IsChoir);
+    /// The height every track and lane needs (the unit is never shorter: the rack scrolls).
+    public double Needed => 20 + 38 + 22 + trackH + stemH * S.Stems.Count + 4 + harmonyH + chordH + (NoteLane ? notesH : 0) + 24;
+
+    static readonly IBrush HeaderFace = new ImmutableSolidColorBrush(Color.FromUInt32(0xFF2A2D32));
+
+    /// A track's header: tape name and number, then mute, solo, FX (the inserts: opens the chain,
+    /// or the effect browser when there is none) and the FX power (bypass every insert), and the
+    /// level as a row of LEDs. A click elsewhere on it selects the track (the chain below shows it).
+    void TrackHeader(DrawingContext ctx, Rect row, int track, string name)
     {
+        ctx.DrawRectangle(HeaderFace, S.Selected == track && S.Current is not null ? new ImmutablePen((IImmutableBrush)Ui.Amber, 1.5) : Ui.FaceEdge, row, 3, 3);
+        _cards.Add((row, track));
+        Tape(ctx, row.X + 8, row.Y + 5, name, track % 2 == 0 ? -1.2 : 1.2);
+        Plasma.DotText(ctx, $"{track + 1}", row.Right - 18, row.Y + 6, 2, 1);
+        if (track == 0) Ui.Led(ctx, new Point(row.Right - 30, row.Y + 11), 3, !S.Edits.IsEmpty, Ui.Amber, Ui.AmberOff);
+        if (S.Current is null) return;
         var c = S.Channel(track);
-        double kw = compact ? 24 : 30;
-        Key(ctx, new Rect(x, y, kw, 18), "M", () => { c.Mute = !c.Mute; S.MixChanged(); }, c.Mute, Ui.Amber);
-        Key(ctx, new Rect(x + kw + 4, y, kw, 18), "S", () => { c.Solo = !c.Solo; S.MixChanged(); }, c.Solo, Ui.Green);
+        double ky = row.Bottom - 24, kx = row.X + 8;
+        Key(ctx, new Rect(kx, ky, 26, 19), "M", () => { c.Mute = !c.Mute; S.MixChanged(); }, c.Mute, Ui.Amber);
+        Key(ctx, new Rect(kx + 30, ky, 26, 19), "S", () => { c.Solo = !c.Solo; S.MixChanged(); }, c.Solo, Ui.Green);
+        bool anyOn = c.Vst.Any(v => v.On);
+        Key(ctx, new Rect(kx + 60, ky, 46, 19), c.Vst.Count > 0 ? $"FX {c.Vst.Count}" : "FX", () =>
+        {
+            S.Selected = track;
+            if (c.Vst.Count == 0) (S.PluginView, S.ShowBrowser) = (true, true);
+            S.Select();
+        }, anyOn, Ui.Green, PluginHost.Present || c.Vst.Count > 0);
+        Key(ctx, new Rect(kx + 110, ky, 26, 19), "⏻", () => S.SetVstOn(track, !anyOn), anyOn, Ui.Red, c.Vst.Count > 0);
         float pk = S.Meters.Peak[Math.Min(track, 7)];
-        int n = compact ? 6 : 12;
-        double lx = compact ? x : x + 2 * kw + 14, ly = compact ? y + 23 : y + 9, step = compact ? (2 * kw + 4) / n : (w - 2 * kw - 14) / n;
-        for (int i = 0; i < n; i++)
-            Ui.Led(ctx, new Point(lx + step * (i + 0.5), ly), compact ? 1.5 : 2.2, pk > -54 + i * 54.0 / n, i >= n - 1 ? Ui.Red : i >= n - 3 ? Ui.Amber : Ui.Green, Ui.GreenOff);
+        for (int i = 0; i < 10; i++)
+            Ui.Led(ctx, new Point(row.Right - 10, row.Bottom - 6 - i * 4.2), 1.6, pk > -54 + i * 5.4, i >= 9 ? Ui.Red : i >= 7 ? Ui.Amber : Ui.Green, Ui.GreenOff);
+    }
+
+    void LaneHeader(DrawingContext ctx, Rect row, string name, string detail, IBrush ink)
+    {
+        ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF232529)), Ui.FaceEdge, row, 3, 3);
+        Ui.Text(ctx, "↳ " + name, row.X + 8, row.Y + 3, 10, ink, Ui.SansBold);
+        if (row.Height > 30) Ui.Text(ctx, detail, row.X + 20, row.Y + 18, 8, Ui.Label, Ui.Sans);
+        else Ui.Text(ctx, detail, row.Right - 8, row.Y + 5, 8, Ui.Label, Ui.Sans, Ui.Align.Right);
     }
 
     protected override void Pressed(PointerPressedEventArgs e, Point p)
@@ -2116,7 +2133,7 @@ public sealed class StudioView : DockPanel
         // in the middle with the browser and the meters as side panels that open and close, the
         // selected track's device chain at the bottom; the signal routing opens under the transport.
         // Taller than a small window: the rack scrolls.
-        var body = new DockPanel { Margin = new Thickness(6, 0), MinHeight = 900 };
+        var body = new DockPanel { Margin = new Thickness(6, 0) };
         SetDock(transport, Dock.Top);
         transport.Margin = new Thickness(0, 6);
         SetDock(flow, Dock.Top);
@@ -2140,11 +2157,13 @@ public sealed class StudioView : DockPanel
         Refresh();
     }
 
-    readonly StudioUnit _recorder, _console, _library, _flow, _meters;
+    readonly RecorderUnit _recorder;
+    readonly StudioUnit _console, _library, _flow, _meters;
 
     void Refresh()
     {
         _recorder.IsVisible = !_s.ConsoleView;
+        _recorder.MinHeight = _recorder.Needed;
         _console.IsVisible = _s.ConsoleView;
         _library.IsVisible = _s.ShowBrowser && !_s.ConsoleView;   // mixing: the console takes the library's width
         _flow.IsVisible = _s.ShowRouting;
@@ -2166,6 +2185,8 @@ public sealed class StudioView : DockPanel
 
     public void TogglePlay() => _s.TogglePlay();
     public void OpenFirst() { if (_s.Library.Count > 0) _s.Open(_s.Library[0].Path); Refresh(); }
+    /// Screenshot tool: the newest take already separated (its stems as tracks).
+    public void OpenSeparated() { if (_s.Library.FirstOrDefault(i => Directory.Exists(StudioProject.StemsDir(i.Path))) is { } it) _s.Open(it.Path); Refresh(); }
     public void AnalyzeCurrent() => _s.Analyze();
     public void SeparateCurrent() => _s.Separate();
     public void ScoreCurrent() => _s.OpenScore();

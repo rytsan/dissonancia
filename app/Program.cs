@@ -110,6 +110,7 @@ public sealed class MainWindow : Window
             ["Score"] = () => ShowScore(),
             ["Studio"] = () => _tabs.SelectedItem = _studioTab,
             ["StudioOpenFirst"] = () => _studio.OpenFirst(),
+            ["StudioOpenSeparated"] = () => _studio.OpenSeparated(),
             ["StudioAnalyze"] = () => _studio.AnalyzeCurrent(),
             ["StudioSeparate"] = () => _studio.SeparateCurrent(),
             ["StudioTick"] = () => _studio.Tick(),
