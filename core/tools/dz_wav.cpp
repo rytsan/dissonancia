@@ -45,6 +45,7 @@ static bool read_wav(const char* path, std::vector<float>& x, uint32_t& rate) {
                     const unsigned char* s = &b[p + 8 + (i * ch + size_t(c)) * (bits / 8)];
                     float v;
                     if (fmt == 3 || bits == 32) std::memcpy(&v, s, 4);
+                    else if (bits == 24) v = float(int32_t(uint32_t(s[0]) << 8 | uint32_t(s[1]) << 16 | uint32_t(s[2]) << 24)) / 2147483648.f;
                     else { int16_t i16; std::memcpy(&i16, s, 2); v = i16 / 32768.f; }
                     x[i] += v / ch;
                 }
@@ -70,7 +71,7 @@ int main(int argc, char** argv) {
     s.mode = mode == "piano" ? AnalysisMode::PianoChords : mode == "general" ? AnalysisMode::GeneralChords : mode == "voice" ? AnalysisMode::VoiceMono : AnalysisMode::GuitarChords;
     s.quality = q == "low" ? AudioQuality::LowLatency : q == "high" ? AudioQuality::HighPrecision : AudioQuality::Balanced;
     s.referenceA4 = 440;
-    s.keySet = 1;
+    s.keySet = 0;   // as LIVE starts: no key (the heard key is the prior); before 2026-10-21 this ran in C major
     s.meter = {4, 4};
     s.bpm = 120;
     if (s.mode == AnalysisMode::VoiceMono) {   // notes: the live pipeline, or the whole-take decoder

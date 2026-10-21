@@ -1,0 +1,26 @@
+# Build and test on every push (docs/ROADMAP.md phase 0). The optional parts that only STUDIO uses
+# (Verovio, Demucs, VST3) and MIDI input are left out to keep it quick; the LIVE ruler runs on the
+# synthetic corpus and fails on a regression against tools/eval/baseline.json.
+name: ci
+on: [push, pull_request]
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: "10.0.x" }
+      - run: sudo apt-get update && sudo apt-get install -y ninja-build python3-numpy
+      - name: core
+        run: |
+          cmake -S core -B core/build -G Ninja -DDZ_WITH_VEROVIO=OFF -DDZ_WITH_DEMUCS=OFF -DDZ_WITH_VST3=OFF -DDZ_WITH_MIDI=OFF
+          cmake --build core/build
+      - name: core tests
+        run: core/build/dz_tests
+      - name: score checks
+        run: dotnet run --project tests/score
+      - name: app builds
+        run: dotnet build app
+      - name: LIVE ruler (synthetic)
+        env: { DZ_EVAL_DATA: "${{ runner.temp }}/eval" }
+        run: python3 tools/eval/eval.py synthetic --check tools/eval/baseline.json
