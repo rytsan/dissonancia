@@ -341,12 +341,18 @@ struct EditSegment {
     uint8_t _pad0[4];
 };
 
-// ---------------------------------------------------------------- STUDIO mixing (studio-plan S4)
-// One channel strip in the order of a real console: trim -> high-pass / low-pass -> gate -> EQ ->
-// compressor -> [analysis tap] -> fader -> pan. The master: EQ -> bus compressor -> limiter -> fader.
+// ---------------------------------------------------------------- STUDIO mixing (studio-plan S4, S11)
+// A console as a graph. Every track is a strip: its source (polarity) at SAI -> [inserts, patched]
+// -> VOLTA -> fader -> pan -> mute / solo -> the master, with AUX (a copy after the fader, a send).
+// The inserts are units (trim, filter, gate, EQ, compressor) joined by cables between jacks: a track
+// whose SAI has no cable is normalled to its VOLTA; cables into one input sum (a bus), one output on
+// several cables is copied (a parallel path, a send), each cable with its own gain. The master: EQ
+// -> bus compressor -> fader -> limiter. Rendered ahead of the device in blocks (quality first: 64-bit
+// sums and filters, smoothed gains); a change re-renders what has not been played yet.
 
 constexpr int ANA_MAX_TRACKS = 8;       // track 0 = the edited take, 1.. = separated stems
-constexpr int ANA_CHAIN_STAGES = 6;     // signal-flow taps of a channel strip (see MixMeters)
+constexpr int ANA_MAX_UNITS = 32;       // units in the mixer graph (the lunchbox's modules)
+constexpr int ANA_MAX_CABLES = 96;
 constexpr int ANA_SCOPE_FRAMES = 8192;  // stereo frames kept for the STUDIO scopes
 constexpr int ANA_EQ_BANDS = 4;
 
@@ -359,24 +365,38 @@ struct EqBand {
     uint8_t _pad0[2];
 };
 
-struct ChannelParams {
+enum class UnitKind : uint8_t { Wire, Trim, Filter, Gate, Eq, Comp };
+
+// One unit of the graph; only its kind's fields are read.
+struct UnitParams {
+    uint16_t id;                       // the same while the module exists: it keeps its state (filter memory, envelopes) across changes
+    UnitKind kind;
+    uint8_t on;                        // bool; off = bypassed, a wire
     float trimDb;
     float hpHz, lpHz;
     uint8_t hpOn, lpOn, steep;         // bool; steep: 24 dB/oct filters (else 12)
-    uint8_t gateOn;
+    uint8_t _pad0;
     float gateThresholdDb, gateAttackMs, gateReleaseMs, gateRangeDb;
-    uint8_t eqOn, compOn, mute, solo;  // bool
     EqBand eq[ANA_EQ_BANDS];
     float compThresholdDb, compRatio, compAttackMs, compReleaseMs, compMakeupDb;
+};
+
+// A jack: a track's SAI (out: its source), AUX (out: after its fader), VOLTA (in: its insert
+// return, into its fader); a unit's IN / OUT; the master's input. `from` / `to` index the tracks or
+// the units.
+enum class JackKind : uint8_t { TrackOut, TrackAux, TrackReturn, UnitIn, UnitOut, Master };
+struct Cable {
+    JackKind fromKind;                 // TrackOut, TrackAux or UnitOut
+    uint8_t from;
+    JackKind toKind;                   // TrackReturn, UnitIn or Master
+    uint8_t to;
+    float gain;                        // linear
+};
+
+struct TrackParams {
     float faderDb, pan;                // pan -1 (left) .. +1 (right), constant power
-    // The chain as patched: units in processing order (1 trim, 2 filter, 3 gate, 4 EQ, 5 compressor),
-    // 0 ends it (a unit left out is not in the chain), any other id is a plain wire; all 0 = console order. The units at positions
-    // [parallelFrom, parallelTo) also form a parallel path: the dry signal goes round them and the
-    // processed one is added to it at parallelMix (0 = no parallel path, the units are in series).
-    uint8_t order[5];
-    uint8_t parallelFrom, parallelTo;
-    uint8_t sendTo;                    // 0: to the master; k: into track k-1, before its fader (a patchbay return)
-    float parallelMix;
+    uint8_t mute, solo, polarity;      // bool; polarity: inverted at the source
+    uint8_t _pad0;
 };
 
 struct MasterParams {
@@ -388,17 +408,26 @@ struct MasterParams {
     float faderDb;
 };
 
+// The whole mix. Cables that close a loop are left out (what they feed is silent).
+struct MixGraph {
+    TrackParams track[ANA_MAX_TRACKS];
+    UnitParams unit[ANA_MAX_UNITS];
+    Cable cable[ANA_MAX_CABLES];
+    int32_t units, cables;
+    MasterParams master;
+};
+
 struct MixMeters {
-    float peakDb[ANA_MAX_TRACKS];      // post-fader, held peak of the last block
+    float peakDb[ANA_MAX_TRACKS];      // post-fader, peak of the block playing
     float rmsDb[ANA_MAX_TRACKS];
-    float compGrDb[ANA_MAX_TRACKS];    // compressor gain reduction (>= 0)
-    uint8_t gateOpen[ANA_MAX_TRACKS];  // bool
+    float inDb[ANA_MAX_TRACKS];        // at SAI: the track's source
+    float returnDb[ANA_MAX_TRACKS];    // at VOLTA: after its inserts (the analysis tap)
+    float unitDb[ANA_MAX_UNITS];       // each unit's output
+    float unitGrDb[ANA_MAX_UNITS];     // >= 0: a compressor's gain reduction, a gate's attenuation (0 = open)
     float masterPeakDb[2], masterRmsDb[2];
     float masterCompGrDb, limiterGrDb;
     int32_t tracks;
-    uint8_t _pad0[4];
-    // Signal flow: the peak after each unit of the chain (in, trim, filter, gate, EQ, compressor).
-    float stagePeakDb[ANA_MAX_TRACKS][ANA_CHAIN_STAGES];
+    uint32_t underruns;                // device periods that came before their audio was rendered
     // Master loudness (BS.1770-4 / EBU R128) since the take was loaded or the meter reset; the
     // momentary and short-term read silent while stopped, integrated and range hold.
     float lufsMomentary, lufsShortTerm, lufsIntegrated, loudnessRange;
@@ -472,18 +501,19 @@ ANA_API void ana_player_clear_tracks(PlayerHandle* p);
 // the host helper (offline), decoded to the take's length; NULL or "" restores the original. Load,
 // edits and clear_tracks drop every source (they were rendered from other audio).
 ANA_API int32_t ana_player_set_source(PlayerHandle* p, int32_t track, const char* pathUtf8);
-ANA_API void ana_channel_defaults(ChannelParams* out);
+ANA_API void ana_unit_defaults(UnitParams* out);     // every field's default, a wire
 ANA_API void ana_master_defaults(MasterParams* out);
-ANA_API int32_t ana_player_set_channel(PlayerHandle* p, int32_t track, const ChannelParams* params);
-ANA_API void ana_player_set_master(PlayerHandle* p, const MasterParams* params);
+// The whole mix (copied): heard from the first block not yet played, ~50 ms (the rendered audio
+// after it is rendered again). ANA_ERR_ARG: a count or index out of range.
+ANA_API int32_t ana_player_set_mix(PlayerHandle* p, const MixGraph* mix);
 ANA_API void ana_player_meters(PlayerHandle* p, MixMeters* out);
-// Offline renders with the current settings: a track at its analysis tap (post-inserts, pre-fader,
-// mono float32 WAV) — what the transcription reads; tracks: a bitmask summed at their taps (e.g.
-// the harmony = other + bass); and the bounce of the whole mix through faders and master (stereo).
+// Offline renders with the current mix: tracks at their analysis tap (VOLTA: after the inserts,
+// before the fader; mono float32 WAV), a bitmask summed — what the transcription reads (e.g. the
+// harmony = other + bass); and the bounce of the whole mix through faders and master (stereo).
 ANA_API int32_t ana_player_render_tap(PlayerHandle* p, uint32_t trackMask, const char* pathUtf8);
-// A file through a channel chain up to its tap (stereo float32 WAV at the file's rate): the units
-// patched before a VST3 insert, rendered so the insert can read them.
-ANA_API int32_t ana_render_chain(const char* inUtf8, const ChannelParams* params, const char* outUtf8);
+// A file through units in series (stereo float32 WAV at the file's rate): the units patched before
+// a VST3 insert, rendered so the insert can read them.
+ANA_API int32_t ana_render_chain(const char* inUtf8, const UnitParams* units, int32_t count, const char* outUtf8);
 ANA_API int32_t ana_player_bounce(PlayerHandle* p, const char* pathUtf8);
 // min/max of the mono mix per column over [startFrame, endFrame), from a peak mipmap (any zoom).
 // The latest output for the scopes (stereo, interleaved, oldest first): source 0 = the master, 1 =

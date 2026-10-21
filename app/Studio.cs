@@ -81,19 +81,19 @@ public sealed class StudioPlayer : IDisposable
     public int AddTrack(string path) => MixApi.AddTrack(_p, path);
     public void ClearTracks() => MixApi.ClearTracks(_p);
     public string? SetSource(int track, string? path) => MixApi.SetSource(_p, track, path) == 0 ? null : Marshal.PtrToStringUTF8(PlayerApi.LastError(_p)) ?? "set_source failed";
-    public void SetChannel(int track, ChannelMix c) => MixApi.SetChannel(_p, track, c.Realtime);
-    public void SetMaster(MasterMix m) => MixApi.SetMaster(_p, m.Native);
+    internal void SetMix(in MixGraphNative g) => MixApi.SetMix(_p, g);
     public bool RenderTap(uint mask, string path) => MixApi.RenderTap(_p, mask, path) == 0;
     public bool Bounce(string path) => MixApi.Bounce(_p, path) == 0;
     public unsafe void ReadMeters(MixMeters m)
     {
         MixApi.Meters(_p, out var n);
         m.Tracks = n.Tracks;
-        for (int i = 0; i < 8; i++) { m.Peak[i] = n.PeakDb[i]; m.Rms[i] = n.RmsDb[i]; m.Gr[i] = n.CompGrDb[i]; m.GateOpen[i] = n.GateOpen[i] != 0; }
+        for (int i = 0; i < 8; i++) { m.Peak[i] = n.PeakDb[i]; m.Rms[i] = n.RmsDb[i]; m.In[i] = n.InDb[i]; m.Return[i] = n.ReturnDb[i]; }
+        for (int u = 0; u < 32; u++) { m.Unit[u] = n.UnitDb[u]; m.UnitGr[u] = n.UnitGrDb[u]; }
         for (int c = 0; c < 2; c++) { m.MasterPeak[c] = n.MasterPeakDb[c]; m.MasterRms[c] = n.MasterRmsDb[c]; }
         m.MasterGr = n.MasterCompGrDb;
         m.LimiterGr = n.LimiterGrDb;
-        for (int i = 0; i < 8; i++) for (int k = 0; k < MixMeters.Stages; k++) m.Stage[i, k] = n.StagePeakDb[i * MixMeters.Stages + k];
+        m.Underruns = n.Underruns;
         (m.LufsM, m.LufsS, m.LufsI, m.Lra) = (n.LufsMomentary, n.LufsShortTerm, n.LufsIntegrated, n.LoudnessRange);
         m.TruePeak = Math.Max(n.TruePeakDb[0], n.TruePeakDb[1]);
     }

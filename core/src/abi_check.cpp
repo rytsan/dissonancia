@@ -14,7 +14,8 @@ static_assert(sizeof(ChordCandidate) == 108 && sizeof(ChordRecognitionResult) ==
 static_assert(sizeof(BassEstimate) == 32);
 static_assert(sizeof(ContextEstimate) == 16);
 static_assert(sizeof(PlayerInfo) == 24 && sizeof(PostStatus) == 8 && sizeof(EditSegment) == 24);
-static_assert(sizeof(EqBand) == 16 && sizeof(ChannelParams) == 140 && sizeof(MasterParams) == 100 && sizeof(MixMeters) == 352);
+static_assert(sizeof(EqBand) == 16 && sizeof(UnitParams) == 120 && sizeof(Cable) == 8 && sizeof(TrackParams) == 12 && sizeof(MasterParams) == 100);
+static_assert(sizeof(MixGraph) == 4812 && offsetof(MixGraph, master) == 4712 && sizeof(MixMeters) == 440);
 static_assert(sizeof(LiveSnapshot) == 18096 && offsetof(LiveSnapshot, chord) == 1048 && offsetof(LiveSnapshot, bass) == 1576);
 static_assert(offsetof(LiveSnapshot, beatInBar) == 96 && offsetof(LiveSnapshot, pitch) == 104);
 static_assert(offsetof(LiveSnapshot, note) == 136 && offsetof(LiveSnapshot, chroma) == 200);

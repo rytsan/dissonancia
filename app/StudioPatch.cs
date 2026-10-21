@@ -61,8 +61,8 @@ public sealed class FlowUnit : StudioUnit
         Ui.Text(ctx, stems ? $"DEMUCS · {S.Stems.Count} saídas" : S.Separating ? $"separando {S.SepProgress * 100:0} %" : DemucsModel.HelperPresent ? "fora do caminho" : "ausente", sep.X + 7, sep.Y + 17, 9, stems ? Ui.LabelBright : Ui.Label, Ui.Mono);
         Jack(ctx, new Point(sep.X, sep.Center.Y));
         Jack(ctx, new Point(sep.Right, sep.Center.Y));
-        float stemsIn = Enumerable.Range(1, Math.Min(7, S.Stems.Count)).Select(t => m.Stage[t, 0]).DefaultIfEmpty(-120f).Max();
-        if (stems) Patch(ctx, new Point(src.Right, src.Center.Y), new Point(sep.X, sep.Center.Y), m.Stage[0, 0], 6);
+        float stemsIn = Enumerable.Range(1, Math.Min(7, S.Stems.Count)).Select(t => m.In[t]).DefaultIfEmpty(-120f).Max();
+        if (stems) Patch(ctx, new Point(src.Right, src.Center.Y), new Point(sep.X, sep.Center.Y), m.In[0], 6);
 
         // Channels.
         int n = S.Tracks;
@@ -80,7 +80,7 @@ public sealed class FlowUnit : StudioUnit
             float pk = m.Peak[Math.Min(t, 7)];
             for (int i = 0; i < 6; i++) Ui.Led(ctx, new Point(b.Right - 30 + i * 4.5, b.Bottom - 6), 1.6, pk > -48 + i * 8, i > 4 ? Ui.Red : i > 3 ? Ui.Amber : Ui.Green, Ui.GreenOff);
             // In: the MIX straight from the source; a stem from the separator's split bus.
-            float tin = m.Stage[Math.Min(t, 7), 0];
+            float tin = m.In[Math.Min(t, 7)];
             if (t == 0) { Line(ctx, new Point(src.Right - 20, src.Y), new Point(src.Right - 20, yDirect), tin); Line(ctx, new Point(src.Right - 20, yDirect), new Point(b.Center.X, yDirect), tin); Line(ctx, new Point(b.Center.X, yDirect), new Point(b.Center.X, b.Y), tin); }
             else { Line(ctx, new Point(b.Center.X, ySplit), new Point(b.Center.X, b.Y), tin); }
             // Out: into the sum bus, broken while it does not sound.
@@ -91,7 +91,7 @@ public sealed class FlowUnit : StudioUnit
             var an = S.AnalysersOf(t);
             if (an.Length > 0)
             {
-                Patch(ctx, new Point(b.Center.X + 10, b.Bottom), new Point(b.Center.X + 10, ySend), m.Stage[Math.Min(t, 7), 5], 0, send: true);
+                Patch(ctx, new Point(b.Center.X + 10, b.Bottom), new Point(b.Center.X + 10, ySend), m.Return[Math.Min(t, 7)], 0, send: true);
                 Ui.Text(ctx, string.Join(" ", an), b.Center.X + 14, ySend - 12, 7, Ui.Amber, Ui.SansBold);
             }
         }

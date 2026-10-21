@@ -3,26 +3,44 @@ using System.Text.Json;
 
 namespace Dissonancia;
 
-// STUDIO S4 — mixing (docs/studio-plan.md): the C# side of the core's mixing engine. A channel's
-// settings in console order (trim, filters, gate, EQ, compressor, fader, pan, mute, solo), the
-// master's, per take in <takes>/studio/<name>.mix.json, and the native mirrors.
+// STUDIO S4 / S11 — mixing (docs/studio-plan.md): the C# side of the core's mixer graph. A track's
+// strip (fader, pan, mute, solo, polarity), the lunchbox's modules and cables, the master; per take
+// in <takes>/studio/<name>.mix.json; and the native mirrors (MixGraph).
 
 [StructLayout(LayoutKind.Sequential)]
 struct EqBandNative { public float FreqHz, GainDb, Q; public byte Type, On; ushort _pad0; }
 
 [StructLayout(LayoutKind.Sequential)]
-unsafe struct ChannelParamsNative
+struct UnitParamsNative
 {
+    public ushort Id;
+    public byte Kind, On;   // kind: 0 wire, 1 trim, 2 filter, 3 gate, 4 EQ, 5 compressor
     public float TrimDb, HpHz, LpHz;
-    public byte HpOn, LpOn, Steep, GateOn;
+    public byte HpOn, LpOn, Steep, _pad0;
     public float GateThresholdDb, GateAttackMs, GateReleaseMs, GateRangeDb;
-    public byte EqOn, CompOn, Mute, Solo;
     public EqBandNative Eq0, Eq1, Eq2, Eq3;
     public float CompThresholdDb, CompRatio, CompAttackMs, CompReleaseMs, CompMakeupDb;
-    public float FaderDb, Pan;
-    public fixed byte Order[5];
-    public byte ParallelFrom, ParallelTo, SendTo;
-    public float ParallelMix;
+}
+
+/// Jack kinds: 0 a track's SAI, 1 its AUX, 2 its VOLTA, 3 a unit's IN, 4 its OUT, 5 the master.
+[StructLayout(LayoutKind.Sequential)]
+struct CableNative { public byte FromKind, From, ToKind, To; public float Gain; }
+
+[StructLayout(LayoutKind.Sequential)]
+struct TrackParamsNative { public float FaderDb, Pan; public byte Mute, Solo, Polarity, _pad0; }
+
+[System.Runtime.CompilerServices.InlineArray(8)] struct TrackArray8 { TrackParamsNative _e; }
+[System.Runtime.CompilerServices.InlineArray(32)] struct UnitArray32 { UnitParamsNative _e; }
+[System.Runtime.CompilerServices.InlineArray(96)] struct CableArray96 { CableNative _e; }
+
+[StructLayout(LayoutKind.Sequential)]
+struct MixGraphNative
+{
+    public TrackArray8 Track;
+    public UnitArray32 Unit;
+    public CableArray96 Cable;
+    public int Units, Cables;
+    public MasterParamsNative Master;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -37,13 +55,11 @@ struct MasterParamsNative
 [StructLayout(LayoutKind.Sequential)]
 unsafe struct MixMetersNative
 {
-    public fixed float PeakDb[8], RmsDb[8], CompGrDb[8];
-    public fixed byte GateOpen[8];
+    public fixed float PeakDb[8], RmsDb[8], InDb[8], ReturnDb[8], UnitDb[32], UnitGrDb[32];
     public fixed float MasterPeakDb[2], MasterRmsDb[2];
     public float MasterCompGrDb, LimiterGrDb;
     public int Tracks;
-    uint _pad0;
-    public fixed float StagePeakDb[8 * 6];   // [track][in, trim, filter, gate, EQ, compressor]
+    public uint Underruns;
     public float LufsMomentary, LufsShortTerm, LufsIntegrated, LoudnessRange;
     public fixed float TruePeakDb[2];
 }
@@ -54,10 +70,9 @@ static partial class MixApi
     [LibraryImport(Lib, EntryPoint = "ana_player_add_track", StringMarshalling = StringMarshalling.Utf8)] public static partial int AddTrack(nint p, string path);
     [LibraryImport(Lib, EntryPoint = "ana_player_clear_tracks")] public static partial void ClearTracks(nint p);
     [LibraryImport(Lib, EntryPoint = "ana_player_set_source", StringMarshalling = StringMarshalling.Utf8)] public static partial int SetSource(nint p, int track, string? path);
-    [LibraryImport(Lib, EntryPoint = "ana_channel_defaults")] public static partial void ChannelDefaults(out ChannelParamsNative c);
+    [LibraryImport(Lib, EntryPoint = "ana_unit_defaults")] public static partial void UnitDefaults(out UnitParamsNative u);
     [LibraryImport(Lib, EntryPoint = "ana_master_defaults")] public static partial void MasterDefaults(out MasterParamsNative m);
-    [LibraryImport(Lib, EntryPoint = "ana_player_set_channel")] public static partial int SetChannel(nint p, int track, in ChannelParamsNative c);
-    [LibraryImport(Lib, EntryPoint = "ana_player_set_master")] public static partial void SetMaster(nint p, in MasterParamsNative m);
+    [LibraryImport(Lib, EntryPoint = "ana_player_set_mix")] public static partial int SetMix(nint p, in MixGraphNative g);
     [LibraryImport(Lib, EntryPoint = "ana_player_meters")] public static partial void Meters(nint p, out MixMetersNative m);
     [LibraryImport(Lib, EntryPoint = "ana_player_scope")] public static unsafe partial int Scope(nint p, int source, float* stereo, int frames);
     [LibraryImport(Lib, EntryPoint = "ana_player_set_monitor")] public static partial void SetMonitor(nint p, int track);
@@ -65,7 +80,7 @@ static partial class MixApi
     [LibraryImport(Lib, EntryPoint = "ana_player_pull")] public static partial void Pull(nint p, int frames);
     [LibraryImport(Lib, EntryPoint = "ana_player_render_tap", StringMarshalling = StringMarshalling.Utf8)] public static partial int RenderTap(nint p, uint mask, string path);
     [LibraryImport(Lib, EntryPoint = "ana_player_bounce", StringMarshalling = StringMarshalling.Utf8)] public static partial int Bounce(nint p, string path);
-    [LibraryImport(Lib, EntryPoint = "ana_render_chain", StringMarshalling = StringMarshalling.Utf8)] public static partial int RenderChain(string input, in ChannelParamsNative c, string output);
+    [LibraryImport(Lib, EntryPoint = "ana_render_chain", StringMarshalling = StringMarshalling.Utf8)] public static unsafe partial int RenderChain(string input, UnitParamsNative* units, int count, string output);
 }
 
 /// One EQ band (type 0 bell, 1 low shelf, 2 high shelf).
@@ -80,7 +95,8 @@ public sealed class Band
     internal static Band From(EqBandNative b) => new() { Freq = b.FreqHz, Gain = b.GainDb, Q = b.Q, Type = b.Type, On = b.On != 0 };
 }
 
-/// A channel strip's settings, in console order.
+/// A track's strip (fader, pan, mute, solo, polarity); also a module's settings (BoxModule.P: only its
+/// own unit's fields are read).
 public sealed class ChannelMix
 {
     public float Trim { get; set; }
@@ -106,42 +122,34 @@ public sealed class ChannelMix
     public float Pan { get; set; }
     public bool Mute { get; set; }
     public bool Solo { get; set; }
-    /// S8: VST3 effects before the chain (rendered offline by the host helper), in order.
+    /// The VST3 inserts the track's signal goes through (set from the lunchbox); in a take from
+    /// before it, its inserts.
     public List<VstInsert> Vst { get; set; } = [];
     /// What the rendered VST3 source is (set when it is in the player): part of the tap's key.
     [System.Text.Json.Serialization.JsonIgnore] public string VstSignature { get; set; } = "";
 
+    /// The source inverted (Ø), before SAI.
+    public bool Polarity { get; set; }
+
     public static ChannelMix Default()
     {
-        ChannelParamsNative c = default;
-        try { MixApi.ChannelDefaults(out c); } catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException) { }
+        UnitParamsNative c = default;
+        try { MixApi.UnitDefaults(out c); } catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException) { }
         var m = new ChannelMix { Hp = c.HpHz, Lp = c.LpHz, GateThreshold = c.GateThresholdDb, GateAttack = c.GateAttackMs, GateRelease = c.GateReleaseMs, GateRange = c.GateRangeDb,
             CompThreshold = c.CompThresholdDb, CompRatio = c.CompRatio, CompAttack = c.CompAttackMs, CompRelease = c.CompReleaseMs, CompMakeup = c.CompMakeupDb };
         m.Bands = [Band.From(c.Eq0), Band.From(c.Eq1), Band.From(c.Eq2), Band.From(c.Eq3)];
         return m;
     }
 
-    // ---- The chain as patched (the DS-C cables): built-in units and VST3 inserts in any order.
-
     public static readonly string[] Units = ["trim", "filter", "gate", "eq", "comp"];
-    /// Slot ids in signal order ("trim", "filter", "gate", "eq", "comp", "vst:<id>"); a built-in
-    /// unit missing is unpatched. Empty: the console order with the inserts first (as before S10).
+    /// The chain before the lunchbox (S10), kept to bring an old take into the box: slot ids in
+    /// signal order ("trim", "filter", "gate", "eq", "comp", "vst:<id>"); empty: console order, inserts first.
     public List<string> Chain { get; set; } = [];
-    /// A parallel path over built-in units: first .. last (slot ids), added to the dry signal at ParallelMix.
-    public string? ParallelFirst { get; set; }
-    public string? ParallelLast { get; set; }
-    public float ParallelMix { get; set; }
-
-    /// Why the patch makes no path for this track right now (the chain stays as it was, the track is
-    /// silent), null when it does. Set from the lunchbox (StudioState.SyncBox).
-    [System.Text.Json.Serialization.JsonIgnore] public string? RouteError { get; set; }
-    /// Where the track goes: 0 the master, k into track k-1 (its patch ends at that track's return).
-    [System.Text.Json.Serialization.JsonIgnore] public int SendTo { get; set; }
 
     public static string SlotOf(VstInsert v) => "vst:" + v.Id;
     public VstInsert? VstOf(string slot) => Vst.FirstOrDefault(v => SlotOf(v) == slot);
 
-    /// The chain in signal order: the stored one, minus inserts that are gone, plus new ones first.
+    /// The old chain in signal order: the stored one, minus inserts that are gone, plus new ones first.
     public List<string> Slots()
     {
         var ids = Vst.Select(SlotOf).ToList();
@@ -151,52 +159,33 @@ public sealed class ChannelMix
         return l;
     }
 
-    /// The built-in units between the inserts that are on: one run before each insert (rendered
-    /// offline into it), and the last run after them, which plays in real time.
-    public List<List<string>> Segments()
-    {
-        var segs = new List<List<string>> { new() };
-        foreach (var s in Slots())
-            if (Units.Contains(s)) segs[^1].Add(s);
-            else if (VstOf(s) is { On: true }) segs.Add([]);
-        return segs;
-    }
+    /// Whether a unit of this type does anything with these settings.
+    public bool IsOn(string type) => type switch { "trim" => true, "filter" => HpOn || LpOn, "gate" => GateOn, "eq" => EqOn, "comp" => CompOn, _ => false };
 
-    /// The units patched after the last insert that is on: what the player runs.
-    internal ChannelParamsNative Realtime
+    /// These settings as one unit of the mixer graph (a wire: a VST3 insert, or units already rendered into the track's source).
+    internal UnitParamsNative UnitNative(string type, ushort id, bool wire) => new()
     {
-        get
-        {
-            var n = NativeFor(Segments()[^1]);
-            if (RouteError is not null) n.Mute = 1;   // a cable pulled out of the path: no sound until it is back
-            return n;
-        }
-    }
-
-    internal unsafe ChannelParamsNative NativeFor(List<string> units)
-    {
-        var n = Native;
-        for (int i = 0; i < 5; i++) n.Order[i] = (byte)(i < units.Count ? Array.IndexOf(Units, units[i]) + 1 : 0);
-        int a = ParallelFirst is null ? -1 : units.IndexOf(ParallelFirst), b = ParallelLast is null ? -1 : units.IndexOf(ParallelLast);
-        if (a >= 0 && b >= a && ParallelMix > 0) (n.ParallelFrom, n.ParallelTo, n.ParallelMix) = ((byte)a, (byte)(b + 1), ParallelMix);
-        if (units.Count == 0) n.Order[0] = 6;   // nothing patched: a plain wire (any other id; all 0 would be the console order)
-        return n;
-    }
-
-    internal ChannelParamsNative Native => new()
-    {
-        TrimDb = Trim, HpHz = Hp, LpHz = Lp, HpOn = B(HpOn), LpOn = B(LpOn), Steep = B(Steep), GateOn = B(GateOn),
+        Id = id, Kind = (byte)(wire ? 0 : Array.IndexOf(Units, type) + 1), On = B(!wire && IsOn(type)),
+        TrimDb = Trim, HpHz = Hp, LpHz = Lp, HpOn = B(HpOn), LpOn = B(LpOn), Steep = B(Steep),
         GateThresholdDb = GateThreshold, GateAttackMs = GateAttack, GateReleaseMs = GateRelease, GateRangeDb = GateRange,
-        EqOn = B(EqOn), CompOn = B(CompOn), Mute = B(Mute), Solo = B(Solo),
         Eq0 = Bands.ElementAtOrDefault(0)?.Native ?? default, Eq1 = Bands.ElementAtOrDefault(1)?.Native ?? default,
         Eq2 = Bands.ElementAtOrDefault(2)?.Native ?? default, Eq3 = Bands.ElementAtOrDefault(3)?.Native ?? default,
         CompThresholdDb = CompThreshold, CompRatio = CompRatio, CompAttackMs = CompAttack, CompReleaseMs = CompRelease, CompMakeupDb = CompMakeup,
-        FaderDb = Fader, Pan = Pan, SendTo = (byte)SendTo,
     };
+
+    internal TrackParamsNative TrackNative => new() { FaderDb = Fader, Pan = Pan, Mute = B(Mute), Solo = B(Solo), Polarity = B(Polarity) };
     static byte B(bool v) => (byte)(v ? 1 : 0);
 
-    /// What changes the audio at the analysis tap (fader, pan, mute, solo do not): the cache key.
-    public string TapKey => JsonSerializer.Serialize(new { Trim, HpOn, Hp, LpOn, Lp, Steep, GateOn, GateThreshold, GateAttack, GateRelease, GateRange, EqOn, Bands, CompOn, CompThreshold, CompRatio, CompAttack, CompRelease, CompMakeup, VstSignature, Chain = Slots(), ParallelFirst, ParallelLast, ParallelMix });
+    /// A unit's own settings, as the tap key and the render cache see them.
+    public string UnitKey(string type) => type switch
+    {
+        "trim" => JsonSerializer.Serialize(new { Trim }),
+        "filter" => JsonSerializer.Serialize(new { HpOn, Hp, LpOn, Lp, Steep }),
+        "gate" => JsonSerializer.Serialize(new { GateOn, GateThreshold, GateAttack, GateRelease, GateRange }),
+        "eq" => JsonSerializer.Serialize(new { EqOn, Bands }),
+        "comp" => JsonSerializer.Serialize(new { CompOn, CompThreshold, CompRatio, CompAttack, CompRelease, CompMakeup }),
+        _ => "",
+    };
 }
 
 /// A module in the session's lunchbox (DS-C): a built-in unit (its settings in P, only its own
@@ -210,90 +199,83 @@ public sealed class BoxModule
     public VstInsert? Vst { get; set; }
 }
 
-/// The lunchbox's patch: which track goes through which modules, read from the cables. A track's
-/// patchbay has an output (SAI, "<track>.sai:out") and a return (VOLTA, "<track>.volta:in"); a
-/// module's jacks are "<id>:in" and "<id>:out". Normalled: a track whose SAI has no cable goes
-/// straight to its own return.
+/// The lunchbox's patch. Jacks: a track's SAI ("<track>.sai:out", its source), AUX ("<track>.aux:out",
+/// after its fader: a send) and VOLTA ("<track>.volta:in", its insert return, into its fader); a
+/// module's "<id>:in" / "<id>:out"; the master's input ("master:in"). Cables into one input are summed,
+/// one output on several cables is copied. Normalled: a track whose SAI has no cable goes straight
+/// to its own VOLTA. The core plays the graph as patched (MixGraph); this reads it for the UI.
 public static class Patchbay
 {
+    public const string Master = "master:in";
     public static string Sai(string track) => track + ".sai:out";
+    public static string Aux(string track) => track + ".aux:out";
     public static string Volta(string track) => track + ".volta:in";
     public static string Node(string jack) => jack[..jack.LastIndexOf(':')];
 
-    public sealed record TrackRoute(List<string> Modules, string? First, string? Last, string? SendTo, string? Error);
-
-    /// Every track's route. A module used by two tracks, two modules of one kind on a track, or an
-    /// insert in a parallel path are not possible yet: that track has no route and says why.
-    public static Dictionary<string, TrackRoute> Route(IReadOnlyList<CableLink> cables, IReadOnlyList<BoxModule> box, IReadOnlyList<string> tracks, Func<string, string> name)
+    /// Every node reached from `starts` along the cables, in signal order (by the longest way in:
+    /// a node comes after everything that feeds it from there).
+    public static List<string> Reach(IReadOnlyList<CableLink> cables, params string[] starts)
     {
-        var routes = new Dictionary<string, TrackRoute>();
-        var type = box.ToDictionary(m => m.Id, m => m.Type);
-        foreach (var t in tracks)
-        {
-            if (!cables.Any(k => k.From == Sai(t))) { routes[t] = new([], null, null, null, null); continue; }   // normalled
-            var (order, a, b, end, err) = Walk(cables, t + ".sai", n => n.EndsWith(".volta"), name);
-            if (err is null && (a is not null) && order!.Skip(order.IndexOf(a)).Take(order.IndexOf(b!) - order.IndexOf(a) + 1).Any(m => type.GetValueOrDefault(m) is "vst" or null))
-                err = "o caminho paralelo leva só módulos da casa, sem VST3";
-            if (err is null && order!.GroupBy(m => type.GetValueOrDefault(m)).FirstOrDefault(g => g.Count() > 1 && g.Key != "vst") is { } dup)
-                err = $"dois {name(dup.First()).Split(' ')[0]} na mesma faixa: ainda não";
-            if (err is null && order!.Any(m => !type.ContainsKey(m))) err = "um cabo vai para outra faixa no meio do caminho";
-            string? to = end is null ? null : end[..^".volta".Length];
-            routes[t] = err is null ? new(order!, a, b, to == t ? null : to, null) : new([], null, null, null, err);
-        }
-        foreach (var g in routes.Where(r => r.Value.Error is null).SelectMany(r => r.Value.Modules.Select(m => (m, r.Key))).GroupBy(x => x.m).Where(g => g.Count() > 1))
-            foreach (var (_, t) in g) routes[t] = new([], null, null, null, $"{name(g.Key)} está em duas faixas: ainda não");
-        foreach (var (t, r) in routes.Where(r => r.Value.SendTo is { } to && tracks.Contains(to) && routes[to].SendTo is not null).ToList())
-            routes[t] = r with { SendTo = null, Error = "volta numa faixa que também vai para outra: ainda não" };
-        return routes;
+        var outs = cables.ToLookup(c => Node(c.From), c => Node(c.To));
+        var seen = new List<string>();
+        var queue = new Queue<string>(starts);
+        while (queue.Count > 0)
+            foreach (var n in outs[queue.Dequeue()])
+                if (!seen.Contains(n)) { seen.Add(n); queue.Enqueue(n); }
+        var depth = starts.ToDictionary(n => n, _ => 0);
+        for (int pass = 0; pass <= seen.Count; pass++)   // bounded: a loop does not run away
+            foreach (var c in cables)
+                if (depth.TryGetValue(Node(c.From), out int d) && depth.GetValueOrDefault(Node(c.To), -1) < d + 1) depth[Node(c.To)] = d + 1;
+        return seen.OrderBy(n => depth.GetValueOrDefault(n)).ToList();
     }
 
-    /// From `start`, cable by cable, to a node where `isEnd`. One output may feed two cables once: a
-    /// run of modules on one, straight to where the run comes back on the other (the parallel path).
-    public static (List<string>? Order, string? First, string? Last, string? End, string? Error) Walk(IReadOnlyList<CableLink> cables, string start, Func<string, bool> isEnd, Func<string, string> name)
+    /// Every node that feeds `node`, however far back.
+    public static List<string> Feeders(IReadOnlyList<CableLink> cables, string node)
     {
-        var outs = new Dictionary<string, List<string>>();
-        var ins = new Dictionary<string, int>();
-        foreach (var c in cables)
+        var ins = cables.ToLookup(c => Node(c.To), c => Node(c.From));
+        var seen = new List<string>();
+        var queue = new Queue<string>([node]);
+        while (queue.Count > 0)
         {
-            string f = Node(c.From), t = Node(c.To);
-            if (!outs.TryGetValue(f, out var l)) outs[f] = l = [];
-            l.Add(t);
-            ins[t] = ins.GetValueOrDefault(t) + 1;
+            var n = queue.Dequeue();
+            foreach (var f in ins[n].Concat(n.EndsWith(".aux") ? [n[..^4] + ".volta"] : []))   // a track's AUX comes after its VOLTA
+                if (!seen.Contains(f)) { seen.Add(f); queue.Enqueue(f); }
         }
-        var order = new List<string>();
-        string? first = null, last = null;
-        string node = start;
-        var seen = new HashSet<string> { start };
+        return seen;
+    }
+
+    /// The run of modules straight from a track's SAI: each the only cable on, fed by nothing else.
+    public static List<string> Head(IReadOnlyList<CableLink> cables, string track)
+    {
+        var run = new List<string>();
+        string node = track + ".sai";
         while (true)
         {
-            var o = outs.GetValueOrDefault(node) ?? [];
-            if (o.Count == 0) return (null, null, null, null, node == start ? "a saída não está ligada" : $"a saída do {name(node)} não está ligada");
-            if (o.Count > 2) return (null, null, null, null, "uma saída alimenta mais de dois cabos");
-            string next;
-            if (o.Count == 1) next = o[0];
-            else
-            {
-                if (first is not null) return (null, null, null, null, "só um caminho paralelo por faixa");
-                List<string>? run = null;
-                string merge = "";
-                foreach (var (dry, wet) in new[] { (o[0], o[1]), (o[1], o[0]) })
-                {
-                    var r = new List<string>();
-                    string n = wet;
-                    while (n != dry && !isEnd(n) && r.Count < 12 && (outs.GetValueOrDefault(n)?.Count ?? 0) == 1) { r.Add(n); n = outs[n][0]; }
-                    if (n == dry && r.Count > 0) { run = r; merge = dry; break; }
-                }
-                if (run is null || ins.GetValueOrDefault(merge) != 2) return (null, null, null, null, "o caminho dividido não volta a se juntar");
-                foreach (var u in run) if (!seen.Add(u)) return (null, null, null, null, "um cabo faz o sinal voltar (laço)");
-                order.AddRange(run);
-                (first, last) = (run[0], run[^1]);
-                next = merge;
-            }
-            if (isEnd(next)) return (order, first, last, next, null);
-            if (!seen.Add(next)) return (null, null, null, null, "um cabo faz o sinal voltar (laço)");
-            order.Add(next);
+            var o = cables.Where(c => Node(c.From) == node).ToList();
+            if (o.Count != 1) return run;
+            string next = Node(o[0].To);
+            if (next.Contains('.') || next == "master" || run.Contains(next) || cables.Count(c => Node(c.To) == next) != 1) return run;
+            run.Add(next);
             node = next;
         }
+    }
+
+    /// The nodes on a loop (the core leaves them silent, and what they feed).
+    public static HashSet<string> Loops(IReadOnlyList<CableLink> cables)
+    {
+        var edges = cables.Select(c => (Node(c.From), Node(c.To))).ToList();
+        foreach (var a in edges.Select(e => e.Item1).Concat(edges.Select(e => e.Item2)).Where(n => n.EndsWith(".aux") || n.EndsWith(".volta")).Distinct().ToList())
+            edges.Add((a[..a.LastIndexOf('.')] + ".volta", a[..a.LastIndexOf('.')] + ".aux"));   // through the strip
+        var nodes = edges.SelectMany(e => new[] { e.Item1, e.Item2 }).ToHashSet();
+        var indeg = nodes.ToDictionary(n => n, n => edges.Count(e => e.Item2 == n));
+        var queue = new Queue<string>(nodes.Where(n => indeg[n] == 0));
+        while (queue.Count > 0)
+        {
+            var n = queue.Dequeue();
+            nodes.Remove(n);
+            foreach (var e in edges.Where(e => e.Item1 == n)) if (--indeg[e.Item2] == 0) queue.Enqueue(e.Item2);
+        }
+        return nodes;
     }
 
     /// A unit's own settings from one strip to another (a module's into the track it is on).
@@ -317,6 +299,8 @@ public sealed class CableLink
     public string To { get; set; } = "";
     /// Which of the box's cables it is (its colour), kept while it is replugged.
     public int Colour { get; set; } = -1;
+    /// Its level (linear): an attenuator in line, for a send or one of several paths into a jack.
+    public float Gain { get; set; } = 1;
 }
 
 /// One VST3 effect on a channel, before its chain; its state lives next to the take project.
@@ -392,12 +376,11 @@ public sealed class TakeMix
 /// Meters as the UI reads them.
 public sealed class MixMeters
 {
-    public float[] Peak = new float[8], Rms = new float[8], Gr = new float[8];
-    public bool[] GateOpen = new bool[8];
+    public float[] Peak = new float[8], Rms = new float[8], In = new float[8], Return = new float[8];
+    public float[] Unit = new float[32], UnitGr = new float[32];   // by the unit's place in the graph (StudioState.MeterOf)
     public float[] MasterPeak = new float[2], MasterRms = new float[2];
     public float MasterGr, LimiterGr;
     public int Tracks;
-    public const int Stages = 6;                   // in, trim, filter, gate, EQ, compressor
-    public float[,] Stage = new float[8, Stages];  // peak after each unit: the cable levels
+    public uint Underruns;
     public float LufsM = -120, LufsS = -120, LufsI = -120, Lra, TruePeak = -120;
 }

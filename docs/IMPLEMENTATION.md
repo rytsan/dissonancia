@@ -383,6 +383,27 @@ notes, a sung melody with passing and neighbour tones, kick/snare/hi-hat),
 - The recorder draws the bass line on the bass row and the beats on the
   drums row.
 
+### STUDIO S11 — the mixer graph, rendered ahead
+- Core (`mixdsp.hpp` Engine, `player.cpp`): `MixGraph` = per track a strip (fader, pan, mute,
+  solo, polarity), up to 32 units (wire, trim, filter, gate, EQ, compressor, each with an id
+  that keeps its state across changes), up to 96 cables between jacks (track SAI / AUX / VOLTA,
+  unit IN / OUT, master) with a gain each, the master. Nodes run in a topological order (Kahn);
+  cables on a loop are dropped. VOLTA is normalled to SAI while SAI has no cable. Solo in place
+  includes every strip a soloed track reaches. Filters, sums and envelopes in double; fader,
+  pan, mute, trim and cable gains glide (10 ms).
+- Playback: a worker renders 512-frame blocks about a second ahead into a 128-block ring, each
+  block with a copy of the engine before it, its meters and the monitored track's VOLTA. The
+  callback copies blocks out, runs loudness and the scopes, publishes the meters of the block
+  it plays. A change (mix, loop, monitor) cuts the ring 2 + 2·period blocks after the one
+  playing and renders again from the state saved there; a seek starts a new epoch (older
+  blocks are skipped). Without a device the callback renders ahead itself (tests, screenshots).
+- App: the lunchbox's patch is the graph (`StudioState.Graph`); a module's meters are by its
+  place in it; a track's analysis key covers everything that feeds its VOLTA.
+- Tests: order, parallel at a cable's gain, two of a kind, a bus, a post-fader send (muted with
+  its track), a return into another track, solo reaching downstream, a loop silent, refused
+  indices; bounce = playback sample for sample; a change heard after the guard, without a
+  click; the null backend's device thread plays the ring, a change heard within 250 ms.
+
 ### STUDIO S4 — mixing
 - Core (`player.cpp`, `mixdsp.hpp`): tracks = the edited take + the stems
   (resampled to its rate and length); each through a strip in console

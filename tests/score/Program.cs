@@ -218,49 +218,33 @@ string Hm(List<(double Start, double End, string Symbol, string Roman)> l) => st
 Check(Hm(hm) == "G:I@0-8 D:V@8-12 Em:vi@12-15 F#m:vii@15-18", $"harmony map: {Hm(hm)}");
 Check(LeadSheet.Harmony([Ch(0, 2, "Am"), Ch(2, 4, "E7")], new KeyOption(0, true)).Select(h => h.Roman).SequenceEqual(["i", "V"]), "harmony map: degrees in a minor key");
 
-// STUDIO chain as patched (S10): slots, the runs between the inserts that are on, the order sent to the core.
+// STUDIO mixer graph (S11): the native mirrors are the core's sizes; a take from before the lunchbox keeps its order.
 {
+    Check(System.Runtime.CompilerServices.Unsafe.SizeOf<UnitParamsNative>() == 120 && System.Runtime.CompilerServices.Unsafe.SizeOf<CableNative>() == 8
+          && System.Runtime.CompilerServices.Unsafe.SizeOf<MixGraphNative>() == 4812, "mix graph: UnitParams 120, Cable 8, MixGraph 4812 bytes, as the core");
     var cm = new ChannelMix();
-    Check(string.Join(",", cm.Slots()) == "trim,filter,gate,eq,comp", "chain: console order by default");
-    var v1 = new VstInsert { Id = "a" };
-    var v2 = new VstInsert { Id = "b", On = false };
-    cm.Vst.AddRange([v1, v2]);
-    Check(string.Join(",", cm.Slots()) == "vst:a,vst:b,trim,filter,gate,eq,comp", "chain: inserts first when never patched");
-    cm.Chain = ["trim", "eq", "vst:a", "comp", "vst:b"];   // filter and gate unpatched
-    var segs = cm.Segments();
-    Check(segs.Count == 2 && string.Join(",", segs[0]) == "trim,eq" && string.Join(",", segs[1]) == "comp", "chain: the run before the insert that is on is rendered, the rest is live (an insert off is a wire)");
-    unsafe
-    {
-        var rt = cm.Realtime;
-        Check(rt.Order[0] == 5 && rt.Order[1] == 0, "chain: the player runs only the compressor");
-        cm.ParallelFirst = "trim"; cm.ParallelLast = "eq"; cm.ParallelMix = 0.5f;
-        var pre = cm.NativeFor(segs[0]);
-        Check(pre.Order[0] == 1 && pre.Order[1] == 4 && pre.ParallelFrom == 0 && pre.ParallelTo == 2 && pre.ParallelMix == 0.5f, "chain: the parallel path is sent with its run");
-        var none = cm.NativeFor([]);
-        Check(System.Runtime.CompilerServices.Unsafe.SizeOf<ChannelParamsNative>() == 140, "chain: ChannelParams mirror is the core's 140 bytes");
-        Check(none.Order[0] == 6, "chain: nothing patched is a wire, not the console order");
-    }
+    Check(string.Join(",", cm.Slots()) == "trim,filter,gate,eq,comp", "old chain: console order by default");
+    cm.Vst.AddRange([new VstInsert { Id = "a" }, new VstInsert { Id = "b", On = false }]);
+    Check(string.Join(",", cm.Slots()) == "vst:a,vst:b,trim,filter,gate,eq,comp", "old chain: inserts first when never patched");
+    var u = new ChannelMix { EqOn = true, Bands = [new Band { Freq = 1000, Gain = 3 }] }.UnitNative("eq", 7, false);
+    Check(u.Kind == 4 && u.On == 1 && u.Id == 7 && u.Eq0.GainDb == 3, "mix graph: an EQ module as a unit");
+    Check(new ChannelMix { EqOn = true }.UnitNative("eq", 7, true).Kind == 0, "mix graph: a rendered module is a wire");
 }
 
-// DS-C lunchbox: the tracks' routes the cables make.
+// DS-C lunchbox: what the cables reach, the serial run from SAI (rendered with its inserts), loops.
 {
     CableLink L(string f, string t) => new() { From = f, To = t };
-    BoxModule Mod(string id, string type) => new() { Id = id, Type = type };
-    var box = new List<BoxModule> { Mod("eq1", "eq"), Mod("trim1", "trim"), Mod("gate1", "gate"), Mod("comp1", "comp"), Mod("eq2", "eq"), Mod("vst:a", "vst") };
-    string R(string track, params CableLink[] k)
-    {
-        var r = Patchbay.Route(k, box, ["mix", "vocals", "bass"], id => id)[track];
-        return r.Error ?? string.Join(",", r.Modules) + (r.First is null ? "" : $" ∥{r.First}-{r.Last}") + (r.SendTo is null ? "" : $" >{r.SendTo}");
-    }
-    Check(R("vocals", L("vocals.sai:out", "eq1:in"), L("eq1:out", "trim1:in"), L("trim1:out", "vocals.volta:in")) == "eq1,trim1", "lunchbox: a track's SAI through modules to its VOLTA");
-    Check(R("mix", L("vocals.sai:out", "eq1:in"), L("eq1:out", "vocals.volta:in")) == "", "lunchbox: a track with no cable on its SAI goes straight through (normalled)");
-    Check(R("vocals", L("vocals.sai:out", "trim1:in"), L("trim1:out", "gate1:in"), L("gate1:out", "comp1:in"), L("comp1:out", "vocals.volta:in"), L("trim1:out", "vocals.volta:in")) == "trim1,gate1,comp1 ∥gate1-comp1",
-        "lunchbox: an output on two cables round a run of modules is the parallel path");
-    Check(R("vocals", L("vocals.sai:out", "eq1:in"), L("eq1:out", "bass.volta:in")) == "eq1 >bass", "lunchbox: ending at another track's VOLTA sends the track into it");
-    Check(R("vocals", L("vocals.sai:out", "eq1:in")).Contains("não está ligada"), "lunchbox: a module whose output goes nowhere: no route");
-    Check(R("vocals", L("vocals.sai:out", "eq1:in"), L("eq1:out", "eq2:in"), L("eq2:out", "vocals.volta:in")).Contains("dois"), "lunchbox: two modules of a kind on a track: not yet");
-    Check(R("bass", L("vocals.sai:out", "eq1:in"), L("eq1:out", "vocals.volta:in"), L("bass.sai:out", "eq1:in")).Contains("duas faixas"), "lunchbox: a module on two tracks: not yet");
-    Check(R("vocals", L("vocals.sai:out", "vst:a:in"), L("vst:a:out", "vocals.volta:in"), L("vocals.sai:out", "vocals.volta:in")).Contains("VST3"), "lunchbox: no insert in a parallel path");
+    string J(IEnumerable<string> x) => string.Join(",", x);
+    var bus = new[] { L("vocals.sai:out", "eq1:in"), L("bass.sai:out", "eq1:in"), L("eq1:out", "comp1:in"), L("comp1:out", "master:in"), L("vocals.aux:out", "rev:in"), L("rev:out", "master:in") };
+    Check(J(Patchbay.Reach(bus, "vocals.sai")) == "eq1,comp1,master", "lunchbox: a track's SAI reaches a bus and the master");
+    Check(J(Patchbay.Reach(bus, "vocals.aux")) == "rev,master", "lunchbox: the AUX is a send of its own");
+    Check(J(Patchbay.Feeders(bus, "comp1")) == "eq1,vocals.sai,bass.sai", "lunchbox: a bus is fed by both tracks");
+    Check(Patchbay.Head(bus, "vocals").Count == 0, "lunchbox: a module fed by two cables is not a track's own run");
+    var serial = new[] { L("vocals.sai:out", "vst:a:in"), L("vst:a:out", "eq1:in"), L("eq1:out", "vocals.volta:in") };
+    Check(J(Patchbay.Head(serial, "vocals")) == "vst:a,eq1", "lunchbox: the serial run from SAI");
+    Check(Patchbay.Loops(bus).Count == 0, "lunchbox: no loop in a bus");
+    var loop = new[] { L("vocals.aux:out", "eq1:in"), L("eq1:out", "vocals.volta:in") };
+    Check(J(Patchbay.Loops(loop).OrderBy(x => x)) == "eq1,vocals.aux,vocals.volta", "lunchbox: the AUX back into its own VOLTA is a loop");
 }
 
 string Shape(int[] pcs, int bass) => string.Join(" ", Theory.LikelyShape(pcs, bass).Select(f => f < 0 ? "x" : f.ToString()));

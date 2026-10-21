@@ -221,13 +221,14 @@ int32_t ana_player_add_track(PlayerHandle* p, const char* path) {
     }
 }
 void ana_player_clear_tracks(PlayerHandle* p) { if (p) p->player.clear_tracks(); }
-void ana_channel_defaults(ChannelParams* out) { if (out) dz::mix::channel_defaults(*out); }
+void ana_unit_defaults(UnitParams* out) { if (out) dz::mix::unit_defaults(*out); }
 void ana_master_defaults(MasterParams* out) { if (out) dz::mix::master_defaults(*out); }
-int32_t ana_player_set_channel(PlayerHandle* p, int32_t track, const ChannelParams* params) {
-    if (!p || !params) return ANA_ERR_ARG;
-    return p->player.set_channel(track, *params);
+int32_t ana_player_set_mix(PlayerHandle* p, const MixGraph* mix) {
+    if (!p || !mix) return ANA_ERR_ARG;
+    int32_t r = p->player.set_mix(*mix);
+    if (r < 0) p->error = p->player.error();
+    return r;
 }
-void ana_player_set_master(PlayerHandle* p, const MasterParams* params) { if (p && params) p->player.set_master(*params); }
 void ana_player_meters(PlayerHandle* p, MixMeters* out) { if (p && out) p->player.meters(*out); }
 int32_t ana_player_render_tap(PlayerHandle* p, uint32_t mask, const char* path) {
     if (!p || !path) return ANA_ERR_ARG;
@@ -235,9 +236,9 @@ int32_t ana_player_render_tap(PlayerHandle* p, uint32_t mask, const char* path) 
     if (r < 0) p->error = std::string("cannot write ") + path;
     return r;
 }
-int32_t ana_render_chain(const char* in, const ChannelParams* params, const char* out) {
-    if (!in || !params || !out) return ANA_ERR_ARG;
-    return dz::render_chain(in, *params, out);
+int32_t ana_render_chain(const char* in, const UnitParams* units, int32_t count, const char* out) {
+    if (!in || (!units && count > 0) || count < 0 || count > ANA_MAX_UNITS || !out) return ANA_ERR_ARG;
+    return dz::render_chain(in, units, count, out);
 }
 int32_t ana_player_bounce(PlayerHandle* p, const char* path) {
     if (!p || !path) return ANA_ERR_ARG;

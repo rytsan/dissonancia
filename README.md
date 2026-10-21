@@ -49,6 +49,11 @@ import     fades, gain stems         strips     bass, beats      meter,     Musi
 - **Chords in detail**: the same notes model decoded over the whole take at
   once (past and future), every quality, and a bass that holds becomes a slash
   chord (G/B, D/F♯).
+- **Mixing as a console**: every track is a strip (polarity, inserts, fader, pan, mute / solo,
+  a post-fader AUX send); its inserts are modules in one lunchbox, patched with cables that are
+  the signal graph: several cables into one jack are a bus, one output on several cables a
+  parallel path or a send, each cable with its own level. Rendered about a second ahead in
+  64-bit, a change heard ~50 ms later; the bounce is what you heard, sample for sample.
 - **Notes of every instrument**: YourMT3+ (multi-instrument transcription),
   native through onnxruntime, on the GPU when the machine has one.
 

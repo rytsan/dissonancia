@@ -8,15 +8,17 @@ namespace Dissonancia;
 
 // STUDIO S10 — DS-C, the session's lunchbox: a chassis of slots where modules sit (built-in units
 // from the drawer, VST3 plugins dragged in from the effect browser), each with an IN and an OUT
-// jack on its lip, and under it a patchbay with every track's SAI (its signal out) and VOLTA (its
-// return). Patch cables between jacks route the tracks: VOZ SAI -> EQ -> COMP -> VOZ VOLTA; a track
-// whose SAI has no cable goes straight through (normalled); one that ends at another track's VOLTA
-// goes into that track. Cables are ropes: a plug is picked out of its jack with the mouse, the cable
-// swings and hangs under its weight, and drops into a jack (or hangs loose anywhere else). Where a
-// module sits does not change the sound; the cables do (Patchbay.Route).
+// jack on its lip, and under it a patchbay with every track's SAI (its source), VOLTA (its insert
+// return, into its fader) and AUX (after its fader, a send), and the MASTER's input. Patch cables
+// between jacks are the mixer graph (S11): VOZ SAI -> EQ -> COMP -> VOZ VOLTA; a track whose SAI has
+// no cable goes straight through (normalled); cables into one jack are summed (a bus), one output on
+// several cables is copied (a parallel path, a send), and such a cable has its own level knob.
+// Cables are ropes: a plug is picked out of its jack with the mouse, the cable swings and hangs
+// under its weight, and drops into a jack (or hangs loose anywhere else). Where a module sits does
+// not change the sound; the cables do.
 public sealed partial class ChainUnit
 {
-    const double SlotW = 62, LipH = 26, PatchH = 64, ColW = 74;
+    const double SlotW = 62, LipH = 26, PatchH = 86, ColW = 74;
     public const int SlotCount = 16;
 
     static readonly Dictionary<string, (string Model, int Span)> Face = new()
@@ -131,20 +133,30 @@ public sealed partial class ChainUnit
         double now = _clock.Elapsed.TotalSeconds, dt = Math.Clamp(now - _lastT, 0.001, 0.04);
         _lastT = now;
         var names = Enumerable.Range(0, S.Tracks).Select(S.NameOf).ToList();
-        var routes = Patchbay.Route(mix.Patch, mix.Box, names, S.ModuleName);
-        var onTrack = routes.SelectMany(kv => kv.Value.Modules.Select(m => (m, t: names.IndexOf(kv.Key)))).GroupBy(x => x.m).ToDictionary(g => g.Key, g => g.First().t);
+        // Which tracks reach each module (one: its name on the module; more: a bus).
+        var onTrack = new Dictionary<string, List<int>>();
+        for (int t = 0; t < names.Count; t++)
+            foreach (var n in Patchbay.Reach(mix.Patch, names[t] + ".sai", names[t] + ".aux"))
+                if (!onTrack.TryGetValue(n, out var l)) onTrack[n] = [t]; else if (!l.Contains(t)) l.Add(t);
+        var loops = Patchbay.Loops(mix.Patch);
 
-        // Header: the selected track's route, how to use the box.
-        var sc = S.Channel(sel);
-        var sr = routes.GetValueOrDefault(S.NameOf(sel));
-        Ui.Led(ctx, new Point(r.X + 96, r.Y + 8), 3.5, true, sc.RouteError is null ? Ui.Green : Ui.Red, Ui.GreenOff);
-        string tn = S.ModuleName(S.NameOf(sel) + ".sai");
-        string route = sc.RouteError is { } err ? $"{tn}: SEM SOM — {err}"
-            : sr is null || sr.Modules.Count == 0 && sr.SendTo is null ? $"{tn}: SAI ▶ VOLTA (direto, sem cabo)"
-            : $"{tn}: SAI ▶ " + string.Join(" ▶ ", sr.Modules.Select(S.ModuleName)) + $" ▶ {(sr.SendTo is { } to ? S.ModuleName(to + ".sai") + " " : "")}VOLTA"
-              + (sr.First is not null ? $"   (∥ {S.ModuleName(sr.First)}…{S.ModuleName(sr.Last!)})" : "");
-        Ui.Text(ctx, route.Length > 110 ? route[..110] : route, r.X + 106, r.Y + 2, 9, sc.RouteError is null ? Ui.LabelBright : Ui.Red, Ui.Mono);
-        Ui.Text(ctx, "pegue um plugue e leve a outro jack · arraste um módulo pelo topo · fora da caixa = tira · plugins: arraste da lista de efeitos", r.X + 106, r.Y + 15, 8, Ui.Label, Ui.Sans);
+        // Header: the selected track's way, how to use the box.
+        string tn = S.ModuleName(S.NameOf(sel) + ".sai"), self = S.NameOf(sel);
+        var way = Patchbay.Reach(mix.Patch, self + ".sai");
+        var ends = way.Where(n => n.EndsWith(".volta") || n == "master").ToList();
+        string? err = loops.Any(n => n.StartsWith(self + ".") || way.Contains(n)) ? "um cabo faz o sinal voltar (laço): o que está no laço fica mudo"
+            : mix.Patch.Any(k => k.From == Patchbay.Sai(self)) && ends.Count == 0 ? "a saída não chega a uma VOLTA nem ao MASTER" : null;
+        string Name(string n) => n.EndsWith(".volta") ? (n == self + ".volta" ? "VOLTA" : "VOLTA " + S.ModuleName(n)) : S.ModuleName(n);
+        string route = err is not null ? $"{tn}: SEM SOM — {err}"
+            : way.Count == 0 ? $"{tn}: SAI ▶ VOLTA (direto, sem cabo)"
+            : $"{tn}: SAI ▶ " + string.Join(" ▶ ", way.Where(n => !n.EndsWith(".aux")).Select(Name));
+        var aux = Patchbay.Reach(mix.Patch, self + ".aux");
+        if (err is null && aux.Count > 0) route += "   · AUX ▶ " + string.Join(" ▶ ", aux.Select(Name));
+        var bypassed = way.Concat(aux).Select(n => mix.Box.FirstOrDefault(m => m.Id == n)).Where(m => m?.Vst is { On: true } && !S.Rendered(sel).Contains(m)).ToList();
+        if (err is null && bypassed.Count > 0) route += $"   ({bypassed[0]!.Vst!.Name}: VST3 só toca logo depois do SAI, em série; aqui passa direto)";
+        Ui.Led(ctx, new Point(r.X + 96, r.Y + 8), 3.5, true, err is null ? Ui.Green : Ui.Red, Ui.GreenOff);
+        Ui.Text(ctx, route.Length > 130 ? route[..130] : route, r.X + 106, r.Y + 2, 9, err is null ? Ui.LabelBright : Ui.Red, Ui.Mono);
+        Ui.Text(ctx, "pegue um plugue e leve a outro jack · vários cabos num jack somam (bus) · AUX = envio pós-fader · arraste um módulo pelo topo · fora da caixa = tira · plugins: arraste da lista de efeitos", r.X + 106, r.Y + 15, 8, Ui.Label, Ui.Sans);
 
         double y = r.Y + 36, h = r.Height - 36 - LipH - PatchH - 40;
         double bx = r.X;
@@ -162,12 +174,16 @@ public sealed partial class ChainUnit
         }
         _jacks.Clear();
 
-        // The patchbay: per track its tape, SAI on top, VOLTA under it.
-        var bay = new Rect(bx, chassis.Bottom + 6, Math.Max(ColW * names.Count + 70, 200), PatchH);
+        // The patchbay: per track its tape, SAI on top, VOLTA under it, AUX at the bottom; the MASTER.
+        var bay = new Rect(bx, chassis.Bottom + 6, Math.Max(ColW * names.Count + 70 + ColW, 200), PatchH);
         ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF1E2024)), Ui.FaceEdge, bay, 4, 4);
         Ui.Text(ctx, "PATCHBAY", bay.X + 8, bay.Y + 4, 8, Ui.Label, Ui.SansBold);
         Ui.Text(ctx, "SAI", bay.X + 8, bay.Y + 22, 7, Ui.Label, Ui.SansBold);
         Ui.Text(ctx, "VOLTA", bay.X + 8, bay.Y + 44, 7, Ui.Label, Ui.SansBold);
+        Ui.Text(ctx, "AUX", bay.X + 8, bay.Y + 66, 7, Ui.Label, Ui.SansBold);
+        double mxc = bay.X + 70 + names.Count * ColW + ColW / 2;
+        Ui.Text(ctx, "MASTER", mxc, bay.Y + 4, 8, Ui.Amber, Ui.SansBold, Ui.Align.Center);
+        _jacks[Patchbay.Master] = new Point(mxc, bay.Y + 48);
         for (int t = 0; t < names.Count; t++)
         {
             double cx = bay.X + 70 + t * ColW + ColW / 2;
@@ -175,21 +191,17 @@ public sealed partial class ChainUnit
             Ui.Text(ctx, label.Length > 8 ? label[..8] : label, cx, bay.Y + 4, 8, t == sel ? Ui.Amber : Ui.LabelBright, Ui.SansBold, Ui.Align.Center);
             _jacks[Patchbay.Sai(names[t])] = new Point(cx, bay.Y + 26);
             _jacks[Patchbay.Volta(names[t])] = new Point(cx, bay.Y + 48);
+            _jacks[Patchbay.Aux(names[t])] = new Point(cx, bay.Y + 70);
             bool normalled = !mix.Patch.Any(k => k.From == Patchbay.Sai(names[t]));
             if (normalled) ctx.DrawLine(new ImmutablePen(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF3E6B53)), 1.2, new ImmutableDashStyle([2, 2], 0)), new Point(cx, bay.Y + 32), new Point(cx, bay.Y + 42));
         }
 
-        // Levels: a track's SAI at its input; a module live after the last insert that is on, by its
-        // position; before it everything is rendered, its level the track's input.
+        // Levels on the cables: a track's SAI (its source), its AUX (after the fader), a module's output.
         float Lv(string node)
         {
-            if (node.EndsWith(".sai")) { int t = names.IndexOf(node[..^4]); return t < 0 ? -90 : S.Meters.Stage[Math.Min(t, 7), 0]; }
-            if (!onTrack.TryGetValue(node, out int tt)) return -90;
-            var c = S.Channel(tt);
-            var live = c.Segments()[^1];
-            string key = mix.Box.FirstOrDefault(m => m.Id == node)?.Type ?? "";
-            int mt = Math.Min(tt, 7);
-            return live.Contains(key) ? S.Meters.Stage[mt, live.IndexOf(key) + 1] : S.Meters.Stage[mt, 0];
+            int dot = node.LastIndexOf('.'), t = dot < 0 ? -1 : names.IndexOf(node[..dot]);
+            if (t >= 0) return node.EndsWith(".sai") ? S.Meters.In[Math.Min(t, 7)] : S.Meters.Peak[Math.Min(t, 7)];
+            return S.MeterOf(node) is int mi and >= 0 ? S.Meters.Unit[mi] : -90;
         }
 
         // Modules: they glide into their slot; the one in the hand follows it, lifted, with a shadow.
@@ -210,11 +222,11 @@ public sealed partial class ChainUnit
             double ky = box.Y + h / 2 - 6, fy = box.Y + h - 22;
             var b = box;
             void Veil(bool on) { if (!on && has) { ctx.DrawRectangle(BypassVeil, null, b, 4, 4); Ui.Text(ctx, "BYPASS", b.Center.X + 22, fy - 6, 8, Ui.Amber, Ui.SansBold); } }
-            int mt = Math.Min(onTrack.GetValueOrDefault(m.Id, sel), 7);
             if (m.Vst is { } v) DrawInsert(ctx, box, m, v, fy);
-            else DrawUnit(ctx, box, m.Type, m.P, mt, ky, fy, has, () => S.MixChanged(), Veil, Lv(m.Id), S.ModuleName(m.Id));
-            if (!onTrack.ContainsKey(m.Id)) Ui.Text(ctx, "sem cabo", box.Center.X, box.Y + 20, 7, Ui.Amber, Ui.SansBold, Ui.Align.Center);
-            else Ui.Text(ctx, S.ModuleName(names[onTrack[m.Id]] + ".sai"), box.Center.X, box.Y + 20, 7, Ui.Green, Ui.SansBold, Ui.Align.Center);
+            else DrawUnit(ctx, box, m.Type, m.P, S.MeterOf(m.Id), ky, fy, has, () => S.MixChanged(), Veil, Lv(m.Id), S.ModuleName(m.Id));
+            string who = !onTrack.TryGetValue(m.Id, out var ts) ? "sem cabo" : loops.Contains(m.Id) ? "LAÇO" : ts.Count > 1 ? "BUS " + string.Join("+", ts.Select(t => S.ModuleName(names[t] + ".sai")[..Math.Min(3, S.ModuleName(names[t] + ".sai").Length)]))
+                : S.ModuleName(names[ts[0]] + ".sai");
+            Ui.Text(ctx, who.Length > 16 ? who[..16] : who, box.Center.X, box.Y + 20, 7, who is "sem cabo" or "LAÇO" ? Ui.Amber : Ui.Green, Ui.SansBold, Ui.Align.Center);
             var jin = new Point(lip.X + 14, lip.Center.Y);
             var jout = new Point(lip.Right - 14, lip.Center.Y);
             Ui.Text(ctx, "IN", jin.X + 10, lip.Y + 7, 7, Ui.Label, Ui.SansBold);
@@ -251,18 +263,15 @@ public sealed partial class ChainUnit
             if (NearJack(_hand, !held.FixedIsOut) is { } target) ctx.DrawEllipse(null, new ImmutablePen((IImmutableBrush)Ui.Green, 2), _jacks[target], 10, 10);
         }
 
-        // The parallel path's mix: a knob by the jack where it comes back (the selected track's).
-        if (sc.RouteError is null && sr?.Last is { } last)
-        {
-            int li = sr.Modules.IndexOf(last);
-            string merge = li + 1 < sr.Modules.Count ? sr.Modules[li + 1] + ":in" : Patchbay.Volta(sr.SendTo ?? S.NameOf(sel));
-            if (_jacks.TryGetValue(merge, out var mj))
+        // A level knob in line: on a send (from an AUX) and on each of several cables into one jack.
+        foreach (var k in mix.Patch)
+            if ((k.From.EndsWith(".aux:out") || mix.Patch.Count(x => x.To == k.To) > 1) && _ropes.TryGetValue(k, out var rope))
             {
-                var kp = new Point(mj.X + 28, mj.Y + (merge.EndsWith(".volta:in") ? 0 : 30));
-                Knob(ctx, kp, 9, "", "", sc.ParallelMix, n => { sc.ParallelMix = (float)Math.Round(n, 2); S.MixChanged(); }, true);
-                Ui.Text(ctx, $"∥ {sc.ParallelMix * 100:0} %", kp.X + 13, kp.Y - 6, 8, Ui.Amber, Ui.SansBold);
+                var kp = rope.P[rope.P.Length / 2];
+                var link = k;
+                Knob(ctx, kp, 8, "", "", Math.Sqrt(k.Gain), n => { link.Gain = (float)Math.Round(n * n, 3); S.MixChanged(); }, true);
+                Ui.Text(ctx, k.Gain <= 0.001 ? "-∞" : $"{20 * Math.Log10(k.Gain):0}", kp.X + 11, kp.Y - 5, 8, Ui.Amber, Ui.SansBold);
             }
-        }
 
         // The drawer: built-in modules, as many as fit; a click puts one in the first free slot.
         double dx = bay.Right + 16, dy = bay.Y + 8;
@@ -339,7 +348,7 @@ public sealed partial class ChainUnit
         foreach (var (id, j) in _jacks)
         {
             if (IsOut(id) != wantOut || (p - j).X * (p - j).X + (p - j).Y * (p - j).Y > 14 * 14) continue;
-            if (S.Mix.Patch.Count(k => k.From == id || k.To == id) < 2) return id;
+            if (S.Mix.Patch.Count(k => k.From == id || k.To == id) < 4) return id;
         }
         return null;
     }

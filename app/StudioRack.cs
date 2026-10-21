@@ -265,55 +265,107 @@ public sealed class StudioState
 
     void ApplyMix()
     {
-        SyncBox();
-        if (Player is null) return;
-        for (int t = 0; t < Tracks; t++) Player.SetChannel(t, Channel(t));
-        Player.SetMaster(Mix.Master);
+        if (!Mix.Boxed) MigrateToBox();
+        SyncTracks();
+        Player?.SetMix(Graph());
     }
 
-    /// A strip or the master changed in the UI: audible from the next block, kept with the take.
+    /// A strip, a module or a cable changed in the UI: heard ~50 ms later, kept with the take.
     public void MixChanged()
     {
         if (Current is null) return;
         ApplyMix();
         StudioProject.SaveMix(Current, Mix);
         // Units patched before an insert are rendered into it: render again (the cache keeps what did not change).
-        if (Enumerable.Range(0, Tracks).Any(t => Channel(t).Vst.Any(v => v.On))) ApplyVst();
+        if (Mix.Box.Any(m => m.Vst is { On: true })) ApplyVst();
         RefreshResult();   // the analysis tap of an edited chain is another input
         Changed?.Invoke();
     }
 
-    // ---------------------------------------------------------------- S10 the lunchbox (DS-C)
+    // ---------------------------------------------------------------- S10 the lunchbox (DS-C), S11 the mixer graph
 
     public static readonly Dictionary<string, string> UnitNames = new() { ["trim"] = "TRIM", ["filter"] = "FILTRO", ["gate"] = "GATE", ["eq"] = "EQ", ["comp"] = "COMP" };
-    public string ModuleName(string id) => id.EndsWith(".sai") || id.EndsWith(".volta") ? id[..id.IndexOf('.')].ToUpperInvariant()
+    public string ModuleName(string id) => id == "master" ? "MASTER" : id.EndsWith(".sai") || id.EndsWith(".volta") || id.EndsWith(".aux") ? id[..id.IndexOf('.')].ToUpperInvariant()
         : Mix.Box.FirstOrDefault(m => m.Id == id) is { } m ? (m.Vst?.Name ?? UnitNames.GetValueOrDefault(m.Type, m.Type) + " " + new string(m.Id.Where(char.IsDigit).ToArray())).Trim() : id;
 
-    /// Every track's chain from the lunchbox: the modules its patch goes through, in order (their
-    /// settings copied into the track's strip), the parallel run, where it returns. A track the
-    /// patch has no route for keeps its chain and is silent (RouteError).
-    void SyncBox()
+    /// The modules a track's signal goes through (from its SAI, and its AUX: the sends), in the order it meets them.
+    public List<BoxModule> ModulesOf(int track, bool sends = true)
     {
-        if (!Mix.Boxed) MigrateToBox();
-        var names = Enumerable.Range(0, Tracks).Select(NameOf).ToList();
-        var routes = Patchbay.Route(Mix.Patch, Mix.Box, names, ModuleName);
         var byId = Mix.Box.ToDictionary(m => m.Id);
-        for (int t = 0; t < Tracks; t++)
+        string[] from = sends ? [NameOf(track) + ".sai", NameOf(track) + ".aux"] : [NameOf(track) + ".sai"];
+        return Patchbay.Reach(Mix.Patch, from).Where(byId.ContainsKey).Select(n => byId[n]).ToList();
+    }
+
+    /// Each track's inserts (for its header's FX keys and the effect panel): the VST3 modules on its way.
+    void SyncTracks()
+    {
+        for (int t = 0; t < Tracks; t++) Channel(t).Vst = ModulesOf(t).Select(m => m.Vst).OfType<VstInsert>().ToList();
+    }
+
+    /// What a track's audio source already went through (rendered offline, ApplyVst): the run of
+    /// modules straight from its SAI up to its last VST3 insert that is on. In the graph they are wires.
+    public List<BoxModule> Rendered(int track)
+    {
+        if (!PluginHost.Present) return [];
+        var byId = Mix.Box.ToDictionary(m => m.Id);
+        var head = Patchbay.Head(Mix.Patch, NameOf(track)).Select(id => byId[id]).ToList();
+        return head.Take(head.FindLastIndex(m => m.Vst is { On: true }) + 1).ToList();
+    }
+
+    readonly Dictionary<string, ushort> _unitIds = [];
+    ushort UnitId(string module)
+    {
+        if (!_unitIds.TryGetValue(module, out var id)) _unitIds[module] = id = (ushort)(_unitIds.Count + 1);
+        return id;
+    }
+    Dictionary<string, int> _meterOf = [];
+    /// A module's place in the graph: its index into Meters.Unit / UnitGr (-1: not in it).
+    public int MeterOf(string module) => _meterOf.GetValueOrDefault(module, -1);
+
+    /// The whole mix as the core plays it: the tracks' strips, the box's modules as units (the VST3
+    /// ones, and those rendered into a track's source, as wires), the cables between their jacks.
+    MixGraphNative Graph()
+    {
+        var g = new MixGraphNative { Master = Mix.Master.Native };
+        var names = Enumerable.Range(0, Tracks).Select(NameOf).ToList();
+        for (int t = 0; t < Tracks; t++) g.Track[t] = Channel(t).TrackNative;
+        var wire = Enumerable.Range(0, Tracks).Where(t => Channel(t).VstSignature.Length > 0).SelectMany(t => Rendered(t).Select(m => m.Id)).ToHashSet();
+        _meterOf = [];
+        foreach (var m in Mix.Box.Take(32))
         {
-            var c = Channel(t);
-            var r = routes[names[t]];
-            c.RouteError = r.Error;
-            if (r.Error is not null) continue;
-            var fresh = ChannelMix.Default();
-            foreach (var u in ChannelMix.Units) Patchbay.CopyUnit(fresh, c, u);   // nothing on unless a module is
-            foreach (var id in r.Modules) if (byId[id].Type != "vst") Patchbay.CopyUnit(byId[id].P, c, byId[id].Type);
-            c.Vst = r.Modules.Select(id => byId[id].Vst).OfType<VstInsert>().ToList();
-            c.Chain = r.Modules.Count == 0 ? ["trim"] : r.Modules.Select(id => byId[id].Type == "vst" ? id : byId[id].Type).ToList();   // trim at 0 dB: a wire
-            c.ParallelFirst = r.First is null ? null : byId[r.First].Type;
-            c.ParallelLast = r.Last is null ? null : byId[r.Last].Type;
-            if (r.First is not null && c.ParallelMix <= 0) c.ParallelMix = 0.5f;
-            c.SendTo = r.SendTo is { } to ? names.IndexOf(to) + 1 : 0;
+            _meterOf[m.Id] = g.Units;
+            g.Unit[g.Units++] = m.P.UnitNative(m.Type, UnitId(m.Id), m.Type == "vst" || wire.Contains(m.Id));
         }
+        (byte Kind, int Index)? Jack(string jack)
+        {
+            if (jack == Patchbay.Master) return (5, 0);
+            string node = Patchbay.Node(jack), end = jack[(jack.LastIndexOf(':') + 1)..];
+            if (_meterOf.TryGetValue(node, out int u)) return ((byte)(end == "in" ? 3 : 4), u);
+            int dot = node.LastIndexOf('.');
+            int t = dot < 0 ? -1 : names.IndexOf(node[..dot]);
+            if (t < 0) return null;
+            return node[(dot + 1)..] switch { "sai" => (0, t), "aux" => (1, t), "volta" => (2, t), _ => null };
+        }
+        foreach (var k in Mix.Patch)
+            if (g.Cables < 96 && Jack(k.From) is { } f && Jack(k.To) is { } to)
+                g.Cable[g.Cables++] = new CableNative { FromKind = f.Kind, From = (byte)f.Index, ToKind = to.Kind, To = (byte)to.Index, Gain = k.Gain };
+        return g;
+    }
+
+    /// What a track's analysis tap (its VOLTA) hears: every module and cable that feeds it, and the
+    /// sources of the tracks they start from.
+    public string TapKey(int track)
+    {
+        var feeders = Patchbay.Feeders(Mix.Patch, NameOf(track) + ".volta");
+        var parts = new List<string> { Channel(track).VstSignature, Channel(track).Polarity ? "Ø" : "", Mix.Patch.Any(k => k.From == Patchbay.Sai(NameOf(track))) ? "" : "normal" };
+        foreach (var n in feeders)
+        {
+            if (Mix.Box.FirstOrDefault(m => m.Id == n) is { } m) parts.Add(n + "=" + (m.Vst is { } v ? v.Id + (v.On ? "" : "off") : m.P.UnitKey(m.Type)));
+            else if (n.LastIndexOf('.') is int dot && dot > 0 && Enumerable.Range(0, Tracks).FirstOrDefault(t => NameOf(t) == n[..dot], -1) is int t && t >= 0)
+                parts.Add(n + "=" + Channel(t).VstSignature + (Channel(t).Polarity ? "Ø" : "") + (n.EndsWith(".aux") ? $"{Channel(t).Fader}/{Channel(t).Pan}/{Channel(t).Mute}" : ""));
+        }
+        parts.AddRange(Mix.Patch.Where(k => feeders.Contains(Patchbay.Node(k.From)) || k.To == Patchbay.Volta(NameOf(track))).Select(k => $"{k.From}>{k.To}*{k.Gain}"));
+        return string.Join(";", parts);
     }
 
     /// A take from before the lunchbox: each track's units that do something, and its inserts,
@@ -490,17 +542,17 @@ public sealed class StudioState
         {   // S9: the choir by section and its harmony, both on the mix
             var cs = AnalysisSession(AppMode.VoiceMono);
             var hs = AnalysisSession(AppMode.GeneralChords);
-            string tap = ";tap=" + Channel(0).TapKey;
+            string tap = ";tap=" + TapKey(0);
             return [new Pass(cs, 1, StudioProject.TapPath(Current, "mix"), ".choir", Options(cs, ";choir" + tap), Choir: true),
                     new Pass(hs, 1, StudioProject.TapPath(Current, "mix"), ".harmony", Options(hs, tap))];
         }
         if (Stems.Count == 0)
         {
             var s = AnalysisSession();
-            return [new Pass(s, 1, StudioProject.TapPath(Current, "mix"), "", Options(s, ";tap=" + Channel(0).TapKey))];
+            return [new Pass(s, 1, StudioProject.TapPath(Current, "mix"), "", Options(s, ";tap=" + TapKey(0)))];
         }
         uint Mask(params string[] names) => (uint)Enumerable.Range(1, Stems.Count).Where(t => names.Contains(Stems[t - 1].Name)).Sum(t => 1 << t);
-        string Keys(uint mask) => string.Join("|", Enumerable.Range(0, Tracks).Where(t => (mask >> t & 1) != 0).Select(t => NameOf(t) + ":" + Channel(t).TapKey));
+        string Keys(uint mask) => string.Join("|", Enumerable.Range(0, Tracks).Where(t => (mask >> t & 1) != 0).Select(t => NameOf(t) + ":" + TapKey(t)));
         var voice = AnalysisSession(AppMode.VoiceMono);
         var harmony = AnalysisSession(HarmonyMode);
         uint vm = Mask("vocals"), hm = Mask("other", "bass", "guitar", "piano"), bm = Mask("bass");
@@ -668,7 +720,7 @@ public sealed class StudioState
     YourMt3Job? _mt3;
     string Mt3Input => StudioProject.TapPath(Current!, "mt3");   // the mix channel at its tap: any source format, as edited
     string Mt3Path(string source) => StudioProject.ResultPath(source, ".mt3");
-    string Mt3Key => Edits.Key + ";tap=" + Channel(0).TapKey;   // edits and the mix channel's inserts
+    string Mt3Key => Edits.Key + ";tap=" + TapKey(0);   // edits and the mix channel's inserts
 
     YourMt3.Result? Mt3Notes()
     {
@@ -798,25 +850,33 @@ public sealed class StudioState
     string VstKey(int t)
     {
         string src = t == 0 ? "take;" + Edits.Key : "stem;" + StemsKey + ";" + NameOf(t);
-        var c = Channel(t);
-        var segs = c.Segments();
-        return src + "|" + string.Join("|", OnInserts(c).Select((v, i) =>
+        var (on, segs) = Inserts(t);
+        return src + "|" + string.Join("|", on.Select((v, i) =>
         {
             string st = StudioProject.VstStatePath(Current!, v.Id);
-            return ChainHash(c, segs[i]) + ">" + v.Cid + ":" + (File.Exists(st) ? Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(st)))[..16] : "-")
+            return ChainHash(segs[i]) + ">" + v.Cid + ":" + (File.Exists(st) ? Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(st)))[..16] : "-")
                 + ":" + string.Join(",", v.Params.OrderBy(p => p.Key).Select(p => FormattableString.Invariant($"{p.Key}={p.Value:R}")));
         }));
     }
 
-    /// The inserts that are on, in the order they are patched.
-    static List<VstInsert> OnInserts(ChannelMix c) => c.Slots().Select(c.VstOf).OfType<VstInsert>().Where(v => v.On).ToList();
+    /// The inserts rendered into a track's source, in order, and the units patched before each.
+    (List<VstInsert> On, List<List<BoxModule>> Segs) Inserts(int t)
+    {
+        var on = new List<VstInsert>();
+        var segs = new List<List<BoxModule>> { new() };
+        foreach (var m in Rendered(t))
+            if (m.Vst is { On: true } v) { on.Add(v); segs.Add([]); }
+            else if (m.Vst is null) segs[^1].Add(m);
+        return (on, segs);
+    }
 
-    /// The built-in units patched before an insert, as the render sees them ("" = none).
-    static string ChainHash(ChannelMix c, List<string> units)
+    static UnitParamsNative[] Natives(List<BoxModule> units) => units.Select(m => m.P.UnitNative(m.Type, 0, false)).ToArray();
+
+    /// The units patched before an insert, as the render sees them ("" = none).
+    static string ChainHash(List<BoxModule> units)
     {
         if (units.Count == 0) return "";
-        var n = c.NativeFor(units);
-        var bytes = System.Runtime.InteropServices.MemoryMarshal.AsBytes(new ReadOnlySpan<ChannelParamsNative>(ref n)).ToArray();
+        var bytes = System.Runtime.InteropServices.MemoryMarshal.AsBytes(Natives(units).AsSpan()).ToArray();
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes))[..12];
     }
 
@@ -842,9 +902,8 @@ public sealed class StudioState
         for (int t = 0; t < Tracks; t++)
         {
             var c = Channel(t);
-            var on = OnInserts(c);
-            var segs = c.Segments();
-            if (on.Count == 0 || !PluginHost.Present)
+            var (on, segs) = Inserts(t);
+            if (on.Count == 0)
             {
                 if (c.VstSignature.Length > 0) { Player.SetSource(t, null); c.VstSignature = ""; changed = true; }
                 continue;
@@ -867,9 +926,9 @@ public sealed class StudioState
                 {   // the units patched before this insert, rendered into it
                     string pre = $"{outPath}.c{i}.wav";
                     VstWhat = $"cadeia antes de {on[i].Name} · canal {t + 1}";
-                    var n = c.NativeFor(segs[i]);
+                    var units = Natives(segs[i]);
                     string inFile = cur!;
-                    int rc = await Task.Run(() => MixApi.RenderChain(inFile, n, pre));
+                    int rc = await Task.Run(() => { unsafe { fixed (UnitParamsNative* u = units) return MixApi.RenderChain(inFile, u, units.Length, pre); } });
                     if (rc != 0) { err = "não foi possível renderizar a cadeia"; break; }
                     if (cur != src) File.Delete(cur!);
                     cur = pre;
@@ -900,7 +959,7 @@ public sealed class StudioState
         }
         RenderingVst = false;
         VstProgress = 0;
-        if (changed) { RefreshResult(); Changed?.Invoke(); }
+        if (changed) { ApplyMix(); RefreshResult(); Changed?.Invoke(); }   // the rendered modules are wires now (or no longer)
         if (OpenVst is { } ov) await LoadParams(ov);   // the texts as the plugin now has them
     }
 
@@ -2029,7 +2088,7 @@ public sealed partial class ChainUnit : StudioUnit
     }
 
     /// One built-in unit at `box`, its controls as on the console (S4).
-    void DrawUnit(DrawingContext ctx, Rect box, string unit, ChannelMix c, int mt, double ky, double fy, bool has, Action Changed, Action<bool> Veil, float level, string name)
+    void DrawUnit(DrawingContext ctx, Rect box, string unit, ChannelMix c, int mi, double ky, double fy, bool has, Action Changed, Action<bool> Veil, float level, string name)
     {
         double y = box.Y;
         switch (unit)
@@ -2051,7 +2110,7 @@ public sealed partial class ChainUnit : StudioUnit
                 break;
             case "gate":
                 DrawDevice(ctx, box, "DG-3", name, c.GateOn);
-                Ui.Led(ctx, new Point(box.X + 18, box.Y + 32), 3.5, c.GateOn && S.Meters.GateOpen[mt], Ui.Green, Ui.GreenOff);
+                Ui.Led(ctx, new Point(box.X + 18, box.Y + 32), 3.5, c.GateOn && (mi < 0 || S.Meters.UnitGr[mi] < 1), Ui.Green, Ui.GreenOff);
                 Ui.Text(ctx, "ABERTO", box.X + 26, box.Y + 26, 7, Ui.Label, Ui.SansBold);
                 Knob(ctx, new Point(box.X + 24, ky + 4), 14, "LIMIAR", $"{c.GateThreshold:0}", LinNorm(c.GateThreshold, -80, 0), n => { c.GateThreshold = (float)Math.Round(FromLin(n, -80, 0)); Changed(); }, c.GateOn);
                 Knob(ctx, new Point(box.X + 60, ky + 4), 14, "SOLTURA", $"{c.GateRelease:0} ms", LogNorm(c.GateRelease, 5, 1000), n => { c.GateRelease = (float)Math.Round(FromLog(n, 5, 1000)); Changed(); }, c.GateOn);
@@ -2074,7 +2133,7 @@ public sealed partial class ChainUnit : StudioUnit
                 break;
             case "comp":
                 DrawDevice(ctx, box, "DC-5", name, c.CompOn);
-                float gr = S.Meters.Gr[mt];
+                float gr = mi < 0 ? 0 : S.Meters.UnitGr[mi];
                 for (int i = 0; i < 8; i++) Ui.Led(ctx, new Point(box.X + 16 + i * 10, box.Y + 32), 3, c.CompOn && gr > 1 + i * 1.5, Ui.Amber, Ui.AmberOff);
                 Ui.Text(ctx, "REDUÇÃO", box.X + 100, box.Y + 26, 7, Ui.Label, Ui.SansBold);
                 Knob(ctx, new Point(box.X + 24, ky + 4), 13, "LIMIAR", $"{c.CompThreshold:0}", LinNorm(c.CompThreshold, -50, 0), n => { c.CompThreshold = (float)Math.Round(FromLin(n, -50, 0)); Changed(); }, c.CompOn);
@@ -2099,8 +2158,8 @@ public sealed partial class ChainUnit : StudioUnit
     }
 }
 
-/// DS-M: the console — one strip per channel (number, tape label, trim, insert LEDs in console order,
-/// analyser, pan, mute / solo, meter, fader, dB) and the master (EQ, bus compressor, limiter,
+/// DS-M: the console — one strip per channel (number, tape label, polarity, its inserts as patched
+/// in the lunchbox with their levels, analyser, pan, mute / solo, meter, fader, dB) and the master (EQ, bus compressor, limiter,
 /// fader, a pair of VU meters, BOUNCE). Faders and pans are listening only: never the transcription.
 public sealed class ConsoleUnit : StudioUnit
 {
@@ -2125,22 +2184,26 @@ public sealed class ConsoleUnit : StudioUnit
             ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF2A2D32)), t == S.Selected ? new ImmutablePen((IImmutableBrush)Ui.Amber, 1.5) : Ui.FaceEdge, st, 4, 4);
             Plasma.DotText(ctx, $"{t + 1}", st.X + 8, st.Y + 8, 2.2, 1);
             Tape(ctx, st.X + 26, st.Y + 6, names.GetValueOrDefault(S.NameOf(t), S.NameOf(t)), t % 2 == 0 ? -1.2 : 1.2);
-            // Where the channel's signal comes from.
-            Ui.Led(ctx, new Point(st.X + 12, st.Y + 36), 2.4, S.Meters.Stage[mt, 0] > -60, LevelLed(S.Meters.Stage[mt, 0]), Ui.GreenOff);
+            // Where the channel's signal comes from; its polarity.
+            Ui.Led(ctx, new Point(st.X + 12, st.Y + 36), 2.4, S.Meters.In[mt] > -60, LevelLed(S.Meters.In[mt]), Ui.GreenOff);
             Ui.Text(ctx, t == 0 ? "◀ FONTE direto" : $"◀ DS-S saída {t}", st.X + 20, st.Y + 30, 8, Ui.Label, Ui.Mono);
-            Knob(ctx, new Point(st.Center.X, st.Y + 62), 13, "TRIM", $"{c.Trim:+0;-0} dB", LinNorm(c.Trim, -24, 24), n => { c.Trim = (float)Math.Round(FromLin(n, -24, 24)); S.MixChanged(); });
-            // Inserts in signal order, joined by a thin cable, each with the level it hands on.
-            (string, bool, int)[] ins = [("FILT", c.HpOn || c.LpOn, 2), ("GATE", c.GateOn, 3), ("EQ", c.EqOn, 4), ("COMP", c.CompOn, 5)];
-            ctx.DrawLine(new ImmutablePen(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF0B0C0D)), 3), new Point(st.X + 5, st.Y + 100), new Point(st.X + 5, st.Y + 100 + ins.Length * 17));
-            for (int i = 0; i < ins.Length; i++)
+            Key(ctx, new Rect(st.X + 8, st.Y + 50, 30, 20), "Ø", () => { c.Polarity = !c.Polarity; S.MixChanged(); }, c.Polarity, Ui.Amber);
+            Ui.Text(ctx, "INSERTS", st.X + 44, st.Y + 55, 8, Ui.Label, Ui.SansBold);
+            // Inserts as patched in the lunchbox (SAI ... VOLTA), each with the level it hands on.
+            var mods = S.ModulesOf(t, sends: false);
+            ctx.DrawLine(new ImmutablePen(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF0B0C0D)), 3), new Point(st.X + 5, st.Y + 78), new Point(st.X + 5, st.Y + 78 + 5 * 17));
+            for (int i = 0; i < 5; i++)
             {
-                var rr = new Rect(st.X + 10, st.Y + 100 + i * 17, w - 18, 15);
-                ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(ins[i].Item2 ? 0xFF24272Bu : 0xFF16181Bu)), Ui.FaceEdge, rr, 2, 2);
-                Ui.Text(ctx, ins[i].Item1, rr.X + 5, rr.Y + 1, 8, ins[i].Item2 ? Ui.LabelBright : Ui.Label, Ui.Mono);
-                if (!ins[i].Item2) Ui.Text(ctx, "bypass", rr.X + 40, rr.Y + 2, 7, Ui.Label, Ui.Mono);
-                float lv = S.Meters.Stage[mt, ins[i].Item3];
+                var rr = new Rect(st.X + 10, st.Y + 78 + i * 17, w - 18, 15);
+                var md = i < mods.Count ? mods[i] : null;
+                bool on = md is not null && (md.Vst?.On ?? md.P.IsOn(md.Type));
+                ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(md is not null ? 0xFF24272Bu : 0xFF16181Bu)), Ui.FaceEdge, rr, 2, 2);
+                if (md is null) { if (i == 0) Ui.Text(ctx, "direto", rr.X + 5, rr.Y + 2, 7, Ui.Label, Ui.Mono); continue; }
+                string nm = i == 4 && mods.Count > 5 ? $"+{mods.Count - 4}" : S.ModuleName(md.Id);
+                Ui.Text(ctx, nm.Length > 9 ? nm[..9] : nm, rr.X + 5, rr.Y + 1, 8, on ? Ui.LabelBright : Ui.Label, Ui.Mono);
+                float lv = S.MeterOf(md.Id) is int mi and >= 0 ? S.Meters.Unit[mi] : -120;
                 Ui.Led(ctx, new Point(rr.Right - 18, rr.Center.Y), 2.2, lv > -60, LevelLed(lv), Ui.GreenOff);
-                Ui.Led(ctx, new Point(rr.Right - 7, rr.Center.Y), 2.6, ins[i].Item2, Ui.Green, Ui.GreenOff);
+                Ui.Led(ctx, new Point(rr.Right - 7, rr.Center.Y), 2.6, on, Ui.Green, Ui.GreenOff);
             }
             // The send to the analysis: a copy from the tap, before the fader.
             var an = S.AnalysersOf(t);
@@ -2279,6 +2342,7 @@ public sealed class StudioView : DockPanel
         _recorder.IsVisible = !_s.ConsoleView;
         _recorder.MinHeight = _recorder.Needed;
         _console.IsVisible = _s.ConsoleView;
+        _console.MinHeight = _s.ConsoleView ? 480 : 0;   // a strip's full height (inserts, pan, M / S, fader); it shares the recorder's place
         _library.IsVisible = _s.ShowBrowser && !_s.ConsoleView;   // mixing: the console takes the library's width
         _flow.IsVisible = _s.ShowRouting;
         _meters.IsVisible = _s.ShowMeters;
@@ -2310,7 +2374,8 @@ public sealed class StudioView : DockPanel
         foreach (var m in mix.Box) m.P = ChannelMix.Default();
         string sai = Patchbay.Sai(_s.NameOf(0)), volta = Patchbay.Volta(_s.NameOf(0));
         mix.Patch = [new() { From = sai, To = "eq1:in" }, new() { From = "eq1:out", To = "trim1:in" }, new() { From = "trim1:out", To = "gate1:in" },
-                     new() { From = "gate1:out", To = "comp1:in" }, new() { From = "comp1:out", To = volta }, new() { From = "trim1:out", To = volta }];
+                     new() { From = "gate1:out", To = "comp1:in" }, new() { From = "comp1:out", To = volta }, new() { From = "trim1:out", To = volta, Gain = 0.5f },
+                     new() { From = Patchbay.Aux(_s.NameOf(0)), To = "filter1:in", Gain = 0.3f }, new() { From = "filter1:out", To = Patchbay.Master }];
         mix.Boxed = true;
         Refresh();
     }

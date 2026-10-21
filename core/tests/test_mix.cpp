@@ -1,6 +1,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <chrono>
 #include <cmath>
+#include <thread>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -45,7 +47,27 @@ double peak_db(const std::vector<float>& y, size_t from, int ch = 0) {
     for (size_t i = from; i < y.size() / 2; i++) m = std::max(m, std::fabs(y[2 * i + size_t(ch)]));
     return 20 * std::log10(std::max(m, 1e-9f));
 }
-ChannelParams defaults() { ChannelParams c; mix::channel_defaults(c); return c; }
+MixGraph graph() { MixGraph g; mix::graph_defaults(g); return g; }
+int unit(MixGraph& g, UnitKind kind, uint16_t id) {
+    UnitParams u;
+    mix::unit_defaults(u);
+    u.kind = kind; u.on = 1; u.id = id;
+    g.unit[g.units] = u;
+    return g.units++;
+}
+void cable(MixGraph& g, JackKind fk, int from, JackKind tk, int to, float gain = 1) { g.cable[g.cables++] = {fk, uint8_t(from), tk, uint8_t(to), gain}; }
+// Track t's SAI through the units in order to its VOLTA (its inserts).
+void inserts(MixGraph& g, int t, std::initializer_list<int> units) {
+    JackKind fk = JackKind::TrackOut;
+    int from = t;
+    for (int u : units) { cable(g, fk, from, JackKind::UnitIn, u); fk = JackKind::UnitOut; from = u; }
+    cable(g, fk, from, JackKind::TrackReturn, t);
+}
+int zero_crossings(const std::vector<float>& y, size_t from) {
+    int zc = 0;
+    for (size_t i = from + 1; i < y.size() / 2; i++) zc += (y[2 * i] >= 0) != (y[2 * i - 2] >= 0);
+    return zc;
+}
 }  // namespace
 
 TEST_CASE("mix: a strip with its defaults is transparent; filters, EQ, pan do what they say") {
@@ -53,17 +75,20 @@ TEST_CASE("mix: a strip with its defaults is transparent; filters, EQ, pan do wh
     REQUIRE(p.load(wav("dz_mix_a.wav", sine(1000, 0.5)).c_str()) == ANA_OK);
     CHECK(peak_db(play(p), 4800) == Approx(20 * std::log10(0.5)).margin(0.05));   // defaults: nothing on, unity
 
-    auto c = defaults();
-    c.hpOn = 1; c.hpHz = 4000; c.steep = 1;       // 1 kHz two octaves under a 24 dB/oct high-pass
-    p.set_channel(0, c);
+    auto g = graph();
+    const int f = unit(g, UnitKind::Filter, 1), eq = unit(g, UnitKind::Eq, 2);
+    g.unit[f].hpOn = 1; g.unit[f].hpHz = 4000; g.unit[f].steep = 1;   // 1 kHz two octaves under a 24 dB/oct high-pass
+    g.unit[eq].on = 0;
+    inserts(g, 0, {f, eq});
+    p.set_mix(g);
     CHECK(peak_db(play(p), 4800) < -6 - 40);
-    c.hpOn = 0;
-    c.eqOn = 1; c.eq[1] = {1000, 6, 1.0f, EqType::Peak, 1, {}};   // +6 dB bell at the tone
-    p.set_channel(0, c);
+    g.unit[f].on = 0;
+    g.unit[eq].on = 1; g.unit[eq].eq[1] = {1000, 6, 1.0f, EqType::Peak, 1, {}};   // +6 dB bell at the tone
+    p.set_mix(g);
     CHECK(peak_db(play(p), 4800) == Approx(-6.02 + 6).margin(0.3));
-    c.eqOn = 0;
-    c.pan = -1;                                   // hard left, constant power: centre = unity, left = +3 dB
-    p.set_channel(0, c);
+    g.unit[eq].on = 0;
+    g.track[0].pan = -1;                          // hard left, constant power: centre = unity, left = +3 dB
+    p.set_mix(g);
     auto y = play(p);
     CHECK(peak_db(y, 4800, 0) == Approx(-6.02 + 3.01).margin(0.1));
     CHECK(peak_db(y, 4800, 1) < -80);
@@ -77,16 +102,20 @@ TEST_CASE("mix: gate, compressor, limiter") {
     auto q = sine(440, 0.001, 0.5);
     x.insert(x.end(), q.begin(), q.end());
     REQUIRE(p.load(wav("dz_mix_b.wav", x).c_str()) == ANA_OK);
-    auto c = defaults();
-    c.gateOn = 1; c.gateThresholdDb = -40; c.gateRangeDb = 40; c.gateReleaseMs = 20;
-    p.set_channel(0, c);
+    auto g = graph();
+    const int gate = unit(g, UnitKind::Gate, 1), comp = unit(g, UnitKind::Comp, 2);
+    g.unit[gate].gateThresholdDb = -40; g.unit[gate].gateRangeDb = 40; g.unit[gate].gateReleaseMs = 20;
+    g.unit[comp].on = 0;
+    inserts(g, 0, {gate, comp});
+    p.set_mix(g);
     auto y = play(p);
     CHECK(peak_db(y, size_t(0.75 * kRate)) < -60 - 30);   // the quiet half is gated 40 dB down
     CHECK(peak_db(y, size_t(0.1 * kRate)) == Approx(-6.02).margin(0.2));
 
-    c.gateOn = 0;
-    c.compOn = 1; c.compThresholdDb = -18; c.compRatio = 4; c.compAttackMs = 1; c.compReleaseMs = 50;
-    p.set_channel(0, c);
+    g.unit[gate].on = 0;
+    auto& cu = g.unit[comp];
+    cu.on = 1; cu.compThresholdDb = -18; cu.compRatio = 4; cu.compAttackMs = 1; cu.compReleaseMs = 50;
+    p.set_mix(g);
     y = play(p);
     // -6 dBFS in, 12 dB over the threshold at 4:1: 9 dB of reduction -> about -15 dBFS.
     const double settled = peak_db(std::vector<float>(y.begin() + size_t(0.3 * kRate) * 2, y.begin() + size_t(0.45 * kRate) * 2), 0);
@@ -95,13 +124,10 @@ TEST_CASE("mix: gate, compressor, limiter") {
     p.meters(m);
     CHECK(m.tracks == 1);
 
-    c.compOn = 0;
-    c.faderDb = 12;                               // +12 dB into a -1 dBFS limiter
-    p.set_channel(0, c);
-    MasterParams mp;
-    mix::master_defaults(mp);
-    mp.limiterOn = 1; mp.limiterCeilingDb = -1;
-    p.set_master(mp);
+    cu.on = 0;
+    g.track[0].faderDb = 12;                      // +12 dB into a -1 dBFS limiter
+    g.master.limiterOn = 1; g.master.limiterCeilingDb = -1;
+    p.set_mix(g);
     y = play(p);
     CHECK(peak_db(y, 0) <= -1.0 + 0.01);
     std::remove("dz_mix_b.wav");
@@ -113,19 +139,19 @@ TEST_CASE("mix: stems as tracks, mute / solo, tap before the fader, bounce") {
     // A stem at another rate is resampled to the take's rate and length.
     REQUIRE(p.add_track(wav("dz_mix_stem.wav", sine(880, 0.25, 1.0, 44100), 44100).c_str()) == 1);
     CHECK(p.tracks() == 2);
-    auto c0 = defaults(), c1 = defaults();
-    c1.solo = 1;
-    p.set_channel(0, c0);
-    p.set_channel(1, c1);
+    auto g = graph();
+    g.track[1].solo = 1;
+    p.set_mix(g);
     auto y = play(p);
     // Only the 880 Hz stem: zero crossings ~ 1760 per second.
-    int zc = 0;
-    for (size_t i = 4800 + 1; i < y.size() / 2; i++) zc += (y[2 * i] >= 0) != (y[2 * i - 2] >= 0);
-    CHECK(zc == Approx(1760 * 0.9).margin(40));
+    CHECK(zero_crossings(y, 4800) == Approx(1760 * 0.9).margin(40));
 
-    // The tap is before the fader: a -20 dB fader does not change it, the trim does.
-    c1.solo = 0; c1.faderDb = -20; c1.trimDb = -6;
-    p.set_channel(1, c1);
+    // The tap is before the fader: a -20 dB fader does not change it, an insert does.
+    g.track[1].solo = 0; g.track[1].faderDb = -20;
+    const int trim = unit(g, UnitKind::Trim, 1);
+    g.unit[trim].trimDb = -6;
+    inserts(g, 1, {trim});
+    p.set_mix(g);
     REQUIRE(p.render_tap(0b10, "dz_mix_tap.wav") == ANA_OK);
     Player t;
     REQUIRE(t.load("dz_mix_tap.wav") == ANA_OK);
@@ -134,8 +160,8 @@ TEST_CASE("mix: stems as tracks, mute / solo, tap before the fader, bounce") {
     CHECK(20 * std::log10(*std::max_element(mx.begin(), mx.end())) == Approx(20 * std::log10(0.25) - 6).margin(0.3));
 
     // Bounce: mute the take, the stem at -20 dB fader and -6 dB trim.
-    c0.mute = 1;
-    p.set_channel(0, c0);
+    g.track[0].mute = 1;
+    p.set_mix(g);
     REQUIRE(p.bounce("dz_mix_bounce.wav") == ANA_OK);
     Player bnc;
     REQUIRE(bnc.load("dz_mix_bounce.wav") == ANA_OK);
@@ -192,9 +218,12 @@ TEST_CASE("meters: loudness as EBU Tech 3341 / 3342, true peak between samples")
 TEST_CASE("meters: levels between the units, the scope ring") {
     Player p;
     REQUIRE(p.load(wav("dz_stage.wav", sine(1000, 0.25, 0.5)).c_str()) == ANA_OK);
-    auto c = defaults();
-    c.trimDb = 6;
-    p.set_channel(0, c);
+    auto g = graph();
+    const int trim = unit(g, UnitKind::Trim, 7), eq = unit(g, UnitKind::Eq, 8);
+    g.unit[trim].trimDb = 6;
+    g.unit[eq].on = 0;
+    inserts(g, 0, {trim, eq});
+    p.set_mix(g);
     PlayerInfo info{};
     p.info(info);
     std::vector<float> out(size_t(info.frames) * 2);
@@ -203,9 +232,10 @@ TEST_CASE("meters: levels between the units, the scope ring") {
     p.render(out.data(), 4800, 2);   // 100 ms, still playing
     MixMeters m{};
     p.meters(m);
-    CHECK(m.stagePeakDb[0][0] == Approx(-12.04).margin(0.1));   // in
-    CHECK(m.stagePeakDb[0][1] == Approx(-6.02).margin(0.1));    // after the trim
-    CHECK(m.stagePeakDb[0][5] == Approx(-6.02).margin(0.1));    // nothing else on
+    CHECK(m.inDb[0] == Approx(-12.04).margin(0.1));        // SAI
+    CHECK(m.unitDb[trim] == Approx(-6.02).margin(0.1));    // after the trim
+    CHECK(m.unitDb[eq] == Approx(-6.02).margin(0.1));      // bypassed
+    CHECK(m.returnDb[0] == Approx(-6.02).margin(0.1));     // VOLTA
     std::vector<float> sc(2 * 1024);
     REQUIRE(p.scope(0, sc.data(), 1024) == 1024);
     for (int i = 0; i < 1024; i++) CHECK(sc[size_t(2 * i)] == out[size_t(2 * (4800 - 1024 + i))]);
@@ -233,59 +263,190 @@ TEST_CASE("mix: a track's pre-chain source (VST3 render) replaces its audio unti
     std::remove("dz_src_b.wav");
 }
 
-TEST_CASE("mix: the chain as patched — order, units left out, a parallel path; a file through a chain") {
+TEST_CASE("mix graph: the cables make the chain — order, a parallel path at a cable's gain, two of a kind; a file through units") {
     Player p;
     REQUIRE(p.load(wav("dz_mix_order.wav", sine(1000, 0.25)).c_str()) == ANA_OK);
-    auto c = defaults();
-    c.trimDb = 12;
-    c.compOn = 1; c.compThresholdDb = -20; c.compRatio = 20; c.compMakeupDb = 0;
+    auto g = graph();
+    const int trim = unit(g, UnitKind::Trim, 1), comp = unit(g, UnitKind::Comp, 2);
+    g.unit[trim].trimDb = 12;
+    g.unit[comp].compThresholdDb = -20; g.unit[comp].compRatio = 20;
     // Trim before the compressor: +12 dB into it, squashed. Compressor first: -12 dBFS barely touched, then +12.
-    p.set_channel(0, c);
+    inserts(g, 0, {trim, comp});
+    p.set_mix(g);
     const double trimFirst = peak_db(play(p), 9600);
-    c.order[0] = 5; c.order[1] = 1; c.order[2] = 2; c.order[3] = 3; c.order[4] = 4;
-    p.set_channel(0, c);
+    g.cables = 0;
+    inserts(g, 0, {comp, trim});
+    p.set_mix(g);
     const double compFirst = peak_db(play(p), 9600);
     CHECK(compFirst > trimFirst + 3);
-    // Left out: only the trim in the chain, the compressor's switch on but unpatched.
-    uint8_t onlyTrim[5] = {1, 0, 0, 0, 0};
-    std::copy(onlyTrim, onlyTrim + 5, c.order);
-    p.set_channel(0, c);
+    // Unpatched: the compressor is in the box but no cable goes through it.
+    g.cables = 0;
+    inserts(g, 0, {trim});
+    p.set_mix(g);
     CHECK(peak_db(play(p), 9600) == Approx(20 * std::log10(0.25) + 12).margin(0.1));
-    // Parallel: the trim (+12 dB, x3.98) in parallel at mix 0.5 -> dry + 0.5 * wet = x2.99.
-    c.parallelFrom = 0; c.parallelTo = 1; c.parallelMix = 0.5f;
-    p.set_channel(0, c);
+    // Parallel: SAI on two cables, one through the trim (+12 dB, x3.98) at 0.5, both into VOLTA: dry + 0.5 * wet.
+    g.cables = 0;
+    cable(g, JackKind::TrackOut, 0, JackKind::TrackReturn, 0);
+    cable(g, JackKind::TrackOut, 0, JackKind::UnitIn, trim);
+    cable(g, JackKind::UnitOut, trim, JackKind::TrackReturn, 0, 0.5f);
+    p.set_mix(g);
     CHECK(peak_db(play(p), 9600) == Approx(20 * std::log10(0.25 * (1 + 0.5 * 3.981))).margin(0.1));
-    // A file through the chain (the units before a VST3 insert): same gain, stereo out.
-    REQUIRE(render_chain("dz_mix_order.wav", c, "dz_mix_chain.wav") == ANA_OK);
+    // Two trims in series: +12 and -6.
+    const int trim2 = unit(g, UnitKind::Trim, 3);
+    g.unit[trim2].trimDb = -6;
+    g.cables = 0;
+    inserts(g, 0, {trim, trim2});
+    p.set_mix(g);
+    CHECK(peak_db(play(p), 9600) == Approx(20 * std::log10(0.25) + 6).margin(0.1));
+    // A file through units in series (the units before a VST3 insert): same gain, stereo out.
+    const UnitParams series[2] = {g.unit[trim], g.unit[trim2]};
+    REQUIRE(render_chain("dz_mix_order.wav", series, 2, "dz_mix_chain.wav") == ANA_OK);
     Player q;
     REQUIRE(q.load("dz_mix_chain.wav") == ANA_OK);
-    CHECK(peak_db(play(q), 9600) == Approx(20 * std::log10(0.25 * (1 + 0.5 * 3.981))).margin(0.1));
+    CHECK(peak_db(play(q), 9600) == Approx(20 * std::log10(0.25) + 6).margin(0.1));
     std::remove("dz_mix_order.wav");
     std::remove("dz_mix_chain.wav");
 }
 
-TEST_CASE("mix: a track sent into another (patchbay return) goes through that track's fader") {
+TEST_CASE("mix graph: buses, sends, returns into another track, loops, solo") {
     Player p;
-    REQUIRE(p.load(wav("dz_mix_send_a.wav", sine(220, 0.25)).c_str()) == ANA_OK);
-    REQUIRE(p.add_track(wav("dz_mix_send_b.wav", sine(880, 0.25)).c_str()) == 1);
-    auto c0 = defaults(), c1 = defaults();
-    c0.mute = 1;      // the take's own signal muted
-    c1.sendTo = 1;    // the stem into track 0
-    p.set_channel(0, c0);
-    p.set_channel(1, c1);
-    CHECK(peak_db(play(p), 4800) < -80);   // into a muted track: silent
-    c0.mute = 0; c0.faderDb = -60;         // the take's fader carries both
-    p.set_channel(0, c0);
-    CHECK(peak_db(play(p), 4800) < -50);
-    c0.faderDb = 0; c0.trimDb = -90;       // the trim is before the return: only the stem is heard
-    p.set_channel(0, c0);
+    REQUIRE(p.load(wav("dz_mix_bus_a.wav", sine(220, 0.25)).c_str()) == ANA_OK);
+    REQUIRE(p.add_track(wav("dz_mix_bus_b.wav", sine(880, 0.25)).c_str()) == 1);
+    const double a = 20 * std::log10(0.25);
+
+    // A bus: both tracks' SAI into one trim (-6 dB), out to the master. The tracks' own VOLTAs get
+    // nothing (their SAI is patched): each heard once, through the bus.
+    auto g = graph();
+    const int bus = unit(g, UnitKind::Trim, 1);
+    g.unit[bus].trimDb = -6;
+    cable(g, JackKind::TrackOut, 0, JackKind::UnitIn, bus);
+    cable(g, JackKind::TrackOut, 1, JackKind::UnitIn, bus);
+    cable(g, JackKind::UnitOut, bus, JackKind::Master, 0);
+    p.set_mix(g);
     auto y = play(p);
-    int zc = 0;
-    for (size_t i = 4800 + 1; i < y.size() / 2; i++) zc += (y[2 * i] >= 0) != (y[2 * i - 2] >= 0);
-    CHECK(zc == Approx(1760 * 0.9).margin(40));
-    REQUIRE(p.bounce("dz_mix_send.wav") == ANA_OK);
-    Player bnc;
-    REQUIRE(bnc.load("dz_mix_send.wav") == ANA_OK);
-    CHECK(peak_db(play(bnc), 4800) == Approx(20 * std::log10(0.25)).margin(0.3));
-    for (const char* f : {"dz_mix_send_a.wav", "dz_mix_send_b.wav", "dz_mix_send.wav"}) std::remove(f);
+    CHECK(peak_db(y, 4800) == Approx(20 * std::log10(0.5 * 0.964) - 6).margin(0.1));   // 220 + 880 Hz at 0.25 each: their sum peaks at 0.482
+    g.track[0].faderDb = -60; g.track[1].faderDb = -60;                         // the faders carry nothing here
+    p.set_mix(g);
+    CHECK(peak_db(play(p), 4800) == Approx(20 * std::log10(0.5 * 0.964) - 6).margin(0.1));
+
+    // A send: track 1 normalled and heard; its AUX (after the fader) into a -20 dB trim to the master.
+    g = graph();
+    const int fx = unit(g, UnitKind::Trim, 2);
+    g.unit[fx].trimDb = -20;
+    g.track[0].mute = 1;
+    cable(g, JackKind::TrackAux, 1, JackKind::UnitIn, fx);
+    cable(g, JackKind::UnitOut, fx, JackKind::Master, 0);
+    p.set_mix(g);
+    CHECK(peak_db(play(p), 4800) == Approx(20 * std::log10(0.25 * 1.1)).margin(0.1));   // dry + 0.1 x dry
+    g.track[1].mute = 1;                                                                 // muted: its send too
+    p.set_mix(g);
+    CHECK(peak_db(play(p), 4800) < -80);
+
+    // Into another track's VOLTA: track 1's chain ends at track 0's return, before track 0's fader.
+    g = graph();
+    cable(g, JackKind::TrackOut, 1, JackKind::TrackReturn, 0);
+    g.track[0].faderDb = -60;
+    p.set_mix(g);
+    CHECK(peak_db(play(p), 4800) < a - 50);   // both under track 0's fader
+    g.track[0].faderDb = 0;
+    g.track[0].solo = 1;                      // track 0 soloed: what comes into it is heard with it
+    p.set_mix(g);
+    CHECK(peak_db(play(p), 4800) == Approx(20 * std::log10(0.5 * 0.964)).margin(0.1));
+    g.track[0].solo = 0;
+    g.track[1].solo = 1;                      // track 1 soloed: track 0, which it feeds, is heard too
+    p.set_mix(g);
+    CHECK(peak_db(play(p), 4800) == Approx(20 * std::log10(0.5 * 0.964)).margin(0.1));
+
+    // A loop: track 1's AUX back into its own VOLTA through a unit. Track 1 is silent, track 0 plays.
+    g = graph();
+    const int u = unit(g, UnitKind::Trim, 3);
+    cable(g, JackKind::TrackAux, 1, JackKind::UnitIn, u);
+    cable(g, JackKind::UnitOut, u, JackKind::TrackReturn, 1);
+    p.set_mix(g);
+    y = play(p);
+    CHECK(peak_db(y, 4800) == Approx(a).margin(0.1));
+    CHECK(zero_crossings(y, 4800) == Approx(440 * 0.9).margin(20));
+
+    // Out of range: refused, the mix as it was.
+    g.cable[0].to = 40;
+    CHECK(p.set_mix(g) == ANA_ERR_ARG);
+    for (const char* f : {"dz_mix_bus_a.wav", "dz_mix_bus_b.wav"}) std::remove(f);
+}
+
+TEST_CASE("mix ring: rendered ahead, a change heard a few blocks after the one playing; bounce = playback, sample for sample") {
+    Player p;
+    REQUIRE(p.load(wav("dz_mix_ring.wav", sine(440, 0.5, 2.0)).c_str()) == ANA_OK);
+    auto g = graph();
+    const int eq = unit(g, UnitKind::Eq, 1), comp = unit(g, UnitKind::Comp, 2), trim = unit(g, UnitKind::Trim, 3);
+    g.unit[eq].eq[0].gainDb = 4;
+    g.unit[comp].compThresholdDb = -20;
+    inserts(g, 0, {eq, comp, trim});
+    p.set_mix(g);
+    auto y = play(p);
+    REQUIRE(p.bounce("dz_mix_ring_b.wav") == ANA_OK);
+    Player q;
+    REQUIRE(q.load("dz_mix_ring_b.wav") == ANA_OK);
+    auto z = play(q);   // the bounce played plain
+    REQUIRE(z.size() == y.size());
+    size_t same = 0;
+    for (size_t i = 0; i < y.size(); i++) same += y[i] == z[i];
+    CHECK(same == y.size());
+
+    // Playing, 4800 frames in (a second rendered ahead): the trim to -20 dB.
+    PlayerInfo info{};
+    p.info(info);
+    std::vector<float> out(size_t(info.frames) * 2);
+    p.seek(0);
+    p.play();
+    size_t pos = 0;
+    for (; pos < 4800; pos += 512) p.render(out.data() + pos * 2, 512, 2);
+    const double before = peak_db(std::vector<float>(out.begin() + 2400 * 2, out.begin() + pos * 2), 0);
+    g.unit[trim].trimDb = -20;
+    p.set_mix(g);
+    for (; pos + 512 <= info.frames; pos += 512) p.render(out.data() + pos * 2, 512, 2);
+    // The blocks already handed on (the guard) play as rendered; from the cut, -20 dB.
+    CHECK(peak_db(std::vector<float>(out.begin() + 4800 * 2, out.begin() + 6400 * 2), 0) == Approx(before).margin(0.1));
+    CHECK(peak_db(std::vector<float>(out.begin() + 12000 * 2, out.begin() + 30000 * 2), 0) == Approx(before - 20).margin(1.0));
+    // No click at the cut: the gain glides (no sample jumps more than the sine itself can).
+    double jump = 0;
+    for (size_t i = 4800; i < 12000; i++) jump = std::max(jump, double(std::fabs(out[2 * i] - out[2 * i - 2])));
+    CHECK(jump < 2 * kPi * 440 / kRate * 0.6);
+    p.stop();
+    std::remove("dz_mix_ring.wav");
+    std::remove("dz_mix_ring_b.wav");
+}
+
+TEST_CASE("mix ring: with a device (miniaudio's null backend) the worker renders ahead and the callback plays it") {
+    ma_backend backends[1] = {ma_backend_null};
+    ma_context ctx;
+    REQUIRE(ma_context_init(backends, 1, nullptr, &ctx) == MA_SUCCESS);
+    {
+        Player p;
+        REQUIRE(p.load(wav("dz_mix_dev.wav", sine(440, 0.5, 3.0)).c_str()) == ANA_OK);
+        REQUIRE(p.open_device(&ctx) == ANA_OK);
+        p.play();
+        std::this_thread::sleep_for(std::chrono::milliseconds(400));
+        PlayerInfo info{};
+        p.info(info);
+        CHECK(info.playing);
+        CHECK(info.positionFrame > 4800);
+        MixMeters m{};
+        p.meters(m);
+        CHECK(m.peakDb[0] == Approx(-6.02).margin(0.2));
+        CHECK(m.underruns <= 2);   // the first period may come before the first block
+        // A change while playing: heard within ~50 ms (plus the null device's period).
+        auto g = graph();
+        g.track[0].faderDb = -20;
+        p.set_mix(g);
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        p.meters(m);
+        CHECK(m.peakDb[0] == Approx(-26.02).margin(0.3));
+        p.seek(0);
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        p.info(info);
+        CHECK(info.positionFrame < 48000 / 2);
+        p.close_device();
+    }
+    ma_context_uninit(&ctx);
+    std::remove("dz_mix_dev.wav");
 }

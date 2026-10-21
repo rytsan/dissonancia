@@ -246,6 +246,23 @@ this order because each stage needs the one before it, as in a studio.
   chord decoder is weak on a choir), repeated notes on one pitch (a re-sung syllable stays one
   note), score-informed separation from a MusicXML reference.
 
+### S11 — Mixing engine as a console, rendered ahead (decision 2026-10-21) — phases 1–3 done 2026-10-21
+STUDIO wants quality, not latency (LIVE keeps its own fast path). The plan:
+1. Blocks rendered ahead of the device (~1 s ring) by a worker; the callback only copies. A change
+   re-renders from a few blocks after the one playing (~50 ms) from the engine state saved with
+   that block. 64-bit filters and sums, gains that glide (no zipper). Bounce = playback, sample
+   for sample. — done
+2. A console's strip per track: source (polarity) → SAI → inserts as patched → VOLTA → fader →
+   pan → mute / solo → master, AUX after the fader. Any number of units, two of a kind. — done
+3. The lunchbox's cables as the mixer graph: cables into one jack sum (a bus), one output on
+   several cables is copied (parallel path, send), each cable with its level; run in an order
+   where every node follows what feeds it; a loop is silent; solo in place reaches what the
+   soloed track feeds. — done
+4. VST3 played live by the helper, block by block through shared memory (the ring absorbs its
+   latency), with plugin delay compensation; until then an insert plays only in the serial run
+   straight from a track's SAI (rendered offline), elsewhere it is a wire and the box says so.
+5. Oversampled compressor / limiter, a look-ahead true-peak limiter, linear-phase EQ on the master.
+
 ### Later
 
 ## How precision is measured
