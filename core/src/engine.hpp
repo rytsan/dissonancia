@@ -40,6 +40,8 @@ public:
     int set_metronome(bool on, float bpm, TimeSignature meter);
     void clear_clip() { clearClip_.store(true, std::memory_order_relaxed); }
     Playground& playground() { return play_; }
+    double beat_frames_now() const { return beat_frames(); }
+    int beats_per_bar() const { return beatsPerBar_.load(std::memory_order_relaxed); }
     uint32_t rate() const { return rate_; }
 
     // Audio callback body; public for headless tests. in: interleaved captureChannels_, out: playbackChannels_ (may be null).

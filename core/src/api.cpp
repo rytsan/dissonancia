@@ -177,6 +177,46 @@ void ana_pad_hit(AnalyzerHandle* h, int32_t pad, float velocity) { if (h && pad 
 void ana_midi_send(AnalyzerHandle* h, uint8_t status, uint8_t d1, uint8_t d2) { if (h) h->engine.playground().midi_from_api(status, d1, d2); }
 void ana_playground_set(AnalyzerHandle* h, const PlaygroundConfig* c) { if (h && c) h->engine.playground().set(*c); }
 void ana_playground_status(AnalyzerHandle* h, PlaygroundStatus* out) { if (h && out) h->engine.playground().status(*out); }
+int32_t ana_pg_song(AnalyzerHandle* h, const PgBlock* blocks, int32_t nb, const uint8_t* steps, int32_t ns, const PgNote* notes, int32_t nn,
+                    const PgEntry* order, int32_t no) {
+    if (!h || (nb > 0 && !blocks) || (ns > 0 && !steps) || (nn > 0 && !notes) || (no > 0 && !order)) return ANA_ERR_ARG;
+    return guarded(h, [&] {
+        std::string err;
+        int32_t r = h->engine.playground().song(blocks, nb, steps, ns, notes, nn, order, no, err);
+        if (r < 0) h->error = err;
+        return r;
+    });
+}
+void ana_pg_play(AnalyzerHandle* h, int32_t entry, uint8_t loop) { if (h) h->engine.playground().play(entry, loop != 0); }
+void ana_pg_stop(AnalyzerHandle* h) { if (h) h->engine.playground().stop(); }
+int32_t ana_pg_record(AnalyzerHandle* h, uint8_t on) {
+    return guarded(h, [&] {
+        if (on && !h->engine.running()) { h->error = "start LIVE first"; return int32_t(ANA_ERR_STATE); }
+        return int32_t(h->engine.playground().record(on != 0, h->engine.beat_frames_now() * h->engine.beats_per_bar()));
+    });
+}
+int32_t ana_pg_recorded(AnalyzerHandle* h, PgRecorded* out, int32_t cap) {
+    if (!h || !out || cap <= 0) return 0;
+    return int32_t(h->engine.playground().recorded(out, size_t(cap)));
+}
+int32_t ana_pg_loop_file(AnalyzerHandle* h, uint32_t id, const char* path, uint8_t save) {
+    if (!h || !path) return ANA_ERR_ARG;
+    return guarded(h, [&] {
+        std::string err;
+        int32_t r = h->engine.playground().loop_file(id, path, save != 0, h->engine.rate(), err);
+        if (r < 0) h->error = err.empty() ? std::string("cannot write ") + path : err;
+        return r;
+    });
+}
+int32_t ana_pg_bounce(AnalyzerHandle* h, const char* path) {
+    if (!h || !path) return ANA_ERR_ARG;
+    return guarded(h, [&] {
+        std::string err;
+        int32_t r = h->engine.playground().bounce(path, h->engine.rate(), h->engine.beat_frames_now(), h->engine.beats_per_bar(), err);
+        if (r < 0) h->error = err.empty() ? std::string("cannot write ") + path : err;
+        return r;
+    });
+}
 
 #if DZ_MIDI
 namespace {
