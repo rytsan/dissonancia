@@ -130,6 +130,7 @@ public sealed class MainWindow : Window
             ["StudioPlayDemo"] = () => _studio.PlayHeadless(8, 12),   // screenshot tool: meters and tubes as if playing
             ["StudioSelect2"] = () => _studio.SelectChannel(2),
             ["StudioPatchDemo"] = () => _studio.PatchDemo(),
+            ["StudioPullDemo"] = () => _studio.PullDemo(),
             ["StudioSelectDemo"] = () => _studio.SelectRange(1.0, 6.0),   // screenshot tool: a selection to edit
             ["StudioTrim"] = () => _studio.EditAction("trim"),
             ["StudioCut"] = () => _studio.EditAction("cut"),

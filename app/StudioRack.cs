@@ -282,56 +282,33 @@ public sealed class StudioState
         Changed?.Invoke();
     }
 
-    // ---------------------------------------------------------------- S10 the chain as patched
+    // ---------------------------------------------------------------- S10 the lunchbox (DS-C)
 
-    /// Moves a module (unit or insert) to `index` in the chain of `track` (a cable dragged elsewhere).
-    public void MoveSlot(int track, string slot, int index)
+    /// The cables of a track changed: the chain they make, or, while they make none (a cable just
+    /// pulled), the chain as it was and why (on the panel).
+    public void Repatch(int track)
     {
         var c = Channel(track);
-        var l = c.Slots();
-        int from = l.IndexOf(slot);
-        if (from < 0) l.Add(slot);   // an unpatched unit plugged back in
-        else l.RemoveAt(from);
-        l.Insert(Math.Clamp(from >= 0 && index > from ? index - 1 : index, 0, l.Count), slot);
-        c.Chain = l;
-        FixParallel(c);
+        var (order, a, b, err) = ChannelMix.Route(c.Cables);
+        c.RouteError = err;
+        if (order is not null)
+        {
+            c.Chain = order;
+            (c.ParallelFirst, c.ParallelLast) = (a, b);
+            if (a is not null && c.ParallelMix <= 0) c.ParallelMix = 0.5f;
+        }
         MixChanged();
     }
 
-    /// Pulls a built-in unit's cables: out of the chain (it stays in the drawer, settings kept).
-    public void Unpatch(int track, string unit)
+    /// A module taken out of the rack (or an insert removed): its cables go, and what came into it is
+    /// joined to where it went, so the sound keeps flowing as through a wire.
+    public static void Bridge(ChannelMix c, string slot)
     {
-        var c = Channel(track);
-        var l = c.Slots();
-        l.Remove(unit);
-        c.Chain = l;
-        FixParallel(c);
-        MixChanged();
-    }
-
-    /// Adds a unit to the parallel path, or takes an end unit out of it; the path is always one run
-    /// of built-in units with no insert between them.
-    public void ToggleParallel(int track, string unit)
-    {
-        var c = Channel(track);
-        var l = c.Slots();
-        if (c.ParallelFirst is null) (c.ParallelFirst, c.ParallelLast) = (unit, unit);
-        else if (unit == c.ParallelFirst && unit == c.ParallelLast) (c.ParallelFirst, c.ParallelLast) = (null, null);
-        else if (unit == c.ParallelFirst) c.ParallelFirst = l[l.IndexOf(unit) + 1];
-        else if (unit == c.ParallelLast) c.ParallelLast = l[l.IndexOf(unit) - 1];
-        else if (l.IndexOf(unit) < l.IndexOf(c.ParallelFirst)) c.ParallelFirst = unit;
-        else c.ParallelLast = unit;
-        if (c.ParallelFirst is not null && c.ParallelMix <= 0) c.ParallelMix = 0.5f;
-        FixParallel(c);
-        MixChanged();
-    }
-
-    static void FixParallel(ChannelMix c)
-    {
-        var l = c.Slots();
-        int a = c.ParallelFirst is null ? -1 : l.IndexOf(c.ParallelFirst), b = c.ParallelLast is null ? -1 : l.IndexOf(c.ParallelLast);
-        bool ok = a >= 0 && b >= a && l.Skip(a).Take(b - a + 1).All(ChannelMix.Units.Contains);
-        if (!ok) (c.ParallelFirst, c.ParallelLast) = (null, null);
+        var into = c.Cables.Where(k => k.To == slot + ":in").ToList();
+        var outOf = c.Cables.Where(k => k.From == slot + ":out").ToList();
+        c.Cables.RemoveAll(k => k.To == slot + ":in" || k.From == slot + ":out");
+        if (into.Count == 1 && outOf.Count == 1 && !c.Cables.Any(k => k.From == into[0].From && k.To == outOf[0].To))
+            c.Cables.Add(new() { From = into[0].From, To = outOf[0].To });
     }
 
     public void Bounce()
@@ -776,7 +753,16 @@ public sealed class StudioState
         if (Current is null) return;
         var c = Channel(Selected);
         if (c.Vst.Count >= MaxVst) { Status = $"no máximo {MaxVst} VST3 por canal"; Changed?.Invoke(); return; }
-        c.Vst.Add(new VstInsert { Bundle = plugin.Bundle, Cid = plugin.Cid, Name = plugin.Name, Vendor = plugin.Vendor });
+        var v = new VstInsert { Bundle = plugin.Bundle, Cid = plugin.Cid, Name = plugin.Name, Vendor = plugin.Vendor };
+        c.Vst.Add(v);
+        if (c.Cables.Count > 0 && c.Cables.FirstOrDefault(k => k.From == "src") is { } first)
+        {   // patched right after the source, as a pedal plugged in first
+            string slot = ChannelMix.SlotOf(v);
+            c.Cables.Add(new() { From = slot + ":out", To = first.To });
+            first.To = slot + ":in";
+            Repatch(Selected);
+            return;
+        }
         StudioProject.SaveMix(Current, Mix);
         ApplyVst();
     }
@@ -785,6 +771,9 @@ public sealed class StudioState
     {
         if (Current is null) return;
         Channel(track).Vst.Remove(v);
+        Bridge(Channel(track), ChannelMix.SlotOf(v));
+        Channel(track).Rack.Remove(ChannelMix.SlotOf(v));
+        if (Channel(track).Cables.Count > 0) { var (o, a, b, _) = ChannelMix.Route(Channel(track).Cables); if (o is not null) (Channel(track).Chain, Channel(track).ParallelFirst, Channel(track).ParallelLast) = (o, a, b); }
         if (OpenVst == v) OpenVst = null;
         try { File.Delete(StudioProject.VstStatePath(Current, v.Id)); } catch (IOException) { }
         StudioProject.SaveMix(Current, Mix);
@@ -1886,9 +1875,9 @@ public sealed class RecorderUnit : StudioUnit
 
 /// DS-C: the channel chain in fixed studio order, joined by patch cables, ending in the analyser
 /// (the only unit at work before S4: the others are mounted and wait for the mixing milestone).
-public sealed class ChainUnit : StudioUnit
+public sealed partial class ChainUnit : StudioUnit
 {
-    public ChainUnit(StudioState s) : base(s, "DS-C", "CADEIA DO CANAL") { Height = 290; }
+    public ChainUnit(StudioState s) : base(s, "DS-C", "LUNCHBOX DO CANAL") { Height = 340; }
 
     readonly List<(Rect R, VstInsert V)> _vstRows = [], _vstOpen = [];
 
@@ -1898,15 +1887,7 @@ public sealed class ChainUnit : StudioUnit
             if (r.Contains(p) && !S.RenderingVst) { S.ToggleVst(v); return; }
         foreach (var (r, v) in _vstOpen)
             if (r.Contains(p)) { S.OpenPanel(S.OpenVst == v ? null : v); return; }
-        // A module's top (its engraved name): pick it up to patch it elsewhere.
-        foreach (var (slot, box) in _modules)
-            if (new Rect(box.X, box.Y, box.Width, 20).Contains(p) && S.Current is not null)
-            {
-                (_dragSlot, _dragX) = (slot, p.X);
-                e.Pointer.Capture(this);
-                InvalidateVisual();
-                return;
-            }
+        BayPressed(e, p);
     }
 
     /// The open insert's parameters as knobs, eight a page, where the analyser sits.
@@ -1938,117 +1919,15 @@ public sealed class ChainUnit : StudioUnit
     static string Hz(double f) => f >= 1000 ? $"{f / 1000:0.#}k" : $"{f:0}";
     static readonly IBrush BypassVeil = new ImmutableSolidColorBrush(Color.FromUInt32(0x77111214));
 
-    // Modules on screen this frame (slot id, box) and a module being dragged by its top.
-    readonly List<(string Slot, Rect Box)> _modules = [];
-    string? _dragSlot;
-    double _dragX;
-    static readonly Dictionary<string, (string Model, string Name, double W)> UnitFace = new()
-    {
-        ["trim"] = ("DS-1", "TRIM", 100), ["filter"] = ("DF-2", "FILTRO", 120), ["gate"] = ("DG-3", "GATE", 120), ["eq"] = ("DQ-4", "EQ", 184), ["comp"] = ("DC-5", "COMP", 156),
-    };
-
     protected override void DrawContent(DrawingContext ctx, Rect r)
     {
         var names = new Dictionary<string, string> { ["mix"] = "MIX", ["vocals"] = "VOZ", ["bass"] = "BAIXO", ["other"] = "OUTROS", ["drums"] = "BATERIA", ["guitar"] = "VIOLÃO", ["piano"] = "PIANO" };
-        int sel = S.Selected, mt = Math.Min(sel, 7);
+        int sel = S.Selected;
         string chName = S.Current is null ? "—" : names.GetValueOrDefault(S.NameOf(sel), S.NameOf(sel));
         Tape(ctx, r.X, r.Y, chName, -1);
         var an0 = S.AnalysersOf(sel);
         var c = S.Channel(sel);
-        bool has = S.Current is not null;
-        var slots = c.Slots();
-        // The drawer: units with their cables pulled; a click plugs one back in before the tap.
-        double dx = r.X + 90;
-        Ui.Text(ctx, "arraste um módulo pelo topo: muda a ordem  ·  ⏏ tira da cadeia  ·  ∥ caminho paralelo", dx, r.Y + 2, 9, Ui.Label, Ui.Mono);
-        dx += 560;
-        foreach (var u in ChannelMix.Units.Where(u => !slots.Contains(u)))
-        {
-            string label = "+ " + UnitFace[u].Name;
-            double w = label.Length * 7 + 18;
-            Key(ctx, new Rect(dx, r.Y - 2, w, 20), label, () => S.MoveSlot(sel, u, c.Slots().Count), false, Ui.Amber, has, withLed: false);
-            dx += w + 4;
-        }
-        Key(ctx, new Rect(dx, r.Y - 2, 70, 20), "+ VST3", () => { S.PluginView = true; S.ShowBrowser = true; S.Select(); }, S.PluginView, Ui.Amber, has && PluginHost.Present && c.Vst.Count < StudioState.MaxVst, withLed: false);
-        double y = r.Y + 30, h = r.Height - 30 - 30;   // room under the modules for the parallel path's dry cable
-        void Changed() => S.MixChanged();
-        double ky = y + h / 2 - 6, fy = y + h - 22;   // knob row, footswitch row
-        // Cable levels: the units after the last insert that is on play live (the player's stage
-        // peaks by position); before it everything is rendered, and its level is the source's.
-        var live = c.Segments()[^1];
-        float Lv(string? slot) => slot is null || !live.Contains(slot) ? S.Meters.Stage[mt, 0] : S.Meters.Stage[mt, live.IndexOf(slot) + 1];
-
-        // IN plate.
-        var inPlate = new Rect(r.X, y + h / 2 - 22, 30, 44);
-        ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF1A1C1F)), Ui.FaceEdge, inPlate, 3, 3);
-        Ui.Text(ctx, "IN", inPlate.Center.X, inPlate.Y + 3, 8, Ui.LabelBright, Ui.SansBold, Ui.Align.Center);
-        Jack(ctx, new Point(inPlate.Center.X, inPlate.Center.Y + 6));
-        double x = inPlate.Right + 20;
-        Rect box = new(inPlate.Center.X, inPlate.Center.Y + 6, 0, 0);
-        Point outPt = new(inPlate.Center.X, inPlate.Center.Y + 6);
-        string? prev = null;
-        _modules.Clear();
-        _vstRows.Clear();
-        _vstOpen.Clear();
-        void Veil(bool on) { if (!on && has) { ctx.DrawRectangle(BypassVeil, null, box, 4, 4); Ui.Text(ctx, "BYPASS", box.Center.X + 22, fy - 6, 8, Ui.Amber, Ui.SansBold); } }
-
-        foreach (var slot in slots)
-        {
-            var v = c.VstOf(slot);
-            double w = v is not null ? 120 : UnitFace[slot].W;
-            box = new Rect(x, y, w, h);
-            Patch(ctx, outPt, new Point(box.X, box.Center.Y), Lv(prev), 14);
-            if (v is not null) DrawInsert(ctx, box, sel, v, fy);
-            else DrawUnit(ctx, box, slot, c, mt, ky, fy, has, Changed, Veil, Lv(slot));
-            // The module's own keys on its top: the parallel path and pulling its cables.
-            if (v is null && has)
-            {
-                bool inPar = InParallel(c, slots, slot);
-                Key(ctx, new Rect(box.Right - 50, box.Y + 4, 18, 15), "∥", () => S.ToggleParallel(sel, slot), inPar, Ui.Amber, true, withLed: false);
-                Key(ctx, new Rect(box.Right - 30, box.Y + 4, 18, 15), "⏏", () => S.Unpatch(sel, slot), false, null, true, withLed: false);
-            }
-            _modules.Add((slot, box));
-            outPt = new Point(box.Right, box.Center.Y);
-            prev = slot;
-            x = box.Right + 20;
-        }
-        if (slots.Count == 0) Ui.Text(ctx, "cadeia vazia: o sinal passa direto", x, y + h / 2 - 6, 9, Ui.Label, Ui.Mono);
-
-        // The parallel path: the dry signal on its own cable under the units it goes round, back in
-        // at the end of the run with the processed one at the mix knob.
-        if (c.ParallelFirst is not null && _modules.FirstOrDefault(m => m.Slot == c.ParallelFirst) is { Slot: not null } pa
-            && _modules.FirstOrDefault(m => m.Slot == c.ParallelLast) is { Slot: not null } pb)
-        {
-            double py = y + h + 14;
-            var a = new Point(pa.Box.X - 8, pa.Box.Center.Y);
-            var b = new Point(pb.Box.Right + 6, pb.Box.Center.Y);
-            ctx.DrawEllipse(Ui.Amber, null, a, 3.5, 3.5);
-            ctx.DrawEllipse(Ui.Amber, null, b, 3.5, 3.5);
-            Patch(ctx, a, new Point(a.X, py), Lv(slots.ElementAtOrDefault(slots.IndexOf(pa.Slot) - 1)), 0, led: false);
-            Patch(ctx, new Point(a.X, py), new Point(b.X, py), Lv(slots.ElementAtOrDefault(slots.IndexOf(pa.Slot) - 1)), 0, thin: true);
-            Patch(ctx, new Point(b.X, py), b, Lv(pb.Slot), 0, led: false);
-            double kx = (a.X + b.X) / 2;
-            Knob(ctx, new Point(kx, py - 2), 8, "", "", c.ParallelMix, n => { c.ParallelMix = (float)Math.Round(n, 2); Changed(); }, true);
-            Ui.Text(ctx, $"∥ PARALELO · seco + {c.ParallelMix * 100:0} % processado", kx + 14, py - 16, 8, Ui.Amber, Ui.SansBold);
-        }
-        // A module being dragged: where it would go.
-        if (_dragSlot is not null)
-        {
-            int at = DropIndex(_dragX);
-            double gx = at < _modules.Count ? _modules[at].Box.X - 10 : (_modules.Count > 0 ? _modules[^1].Box.Right + 10 : inPlate.Right + 10);
-            ctx.DrawLine(new ImmutablePen((IImmutableBrush)Ui.Amber, 3), new Point(gx, y - 4), new Point(gx, y + h + 4));
-        }
-
-        // The tap: the signal splits — OUT to the channel's fader, a send to the analyser.
-        var tap = new Point(outPt.X + 14, outPt.Y);
-        Patch(ctx, outPt, tap, Lv(prev), 0, led: false);
-        ctx.DrawEllipse(Ui.Amber, null, tap, 4, 4);
-        Ui.Text(ctx, "TAP", tap.X, tap.Y + 8, 7, Ui.Amber, Ui.SansBold, Ui.Align.Center);
-        Patch(ctx, tap, new Point(tap.X, y - 8), Lv(prev), 0, led: false);
-        Patch(ctx, new Point(tap.X, y - 8), new Point(r.Right - 96, y - 8), Lv(prev), 0, thin: true);
-        Ui.Text(ctx, $"OUT ▶ FADER {sel + 1} · DS-M", r.Right, y - 14, 8, Ui.LabelBright, Ui.SansBold, Ui.Align.Right);
-        x = tap.X + 14;
-        if (an0.Length > 0) Patch(ctx, tap, new Point(x, tap.Y), Lv(prev), 0, send: true);
-        x = Math.Min(x, r.Right - 200);
+        var (x, y, h) = DrawBay(ctx, r, sel);
         var an = new Rect(x, y, r.Right - x, h);
         if (S.OpenVst is { } ov && c.Vst.Contains(ov)) { DrawParams(ctx, an, ov); return; }
         DrawDevice(ctx, an, an0.Length > 0 ? string.Join(" ", an0) : "DA", an0.Length > 0 ? "ANALISADOR · ENVIO PRÉ-FADER" : "ANALISADOR · canal sem análise", an0.Length > 0);
@@ -2069,37 +1948,6 @@ public sealed class ChainUnit : StudioUnit
             Plasma.Text(ctx, how.Length > fit ? how[..fit] : how, win.X + 84, win.Y + 24, 9, false);
         }
         else Plasma.Text(ctx, S.Separating ? $"SEPARANDO {S.SepProgress * 100:0} %" : S.Running ? $"{S.Progress * 100:0} %" : "—", win.X + 12, win.Y + 12, 16, S.Running || S.Separating);
-    }
-
-    static bool InParallel(ChannelMix c, List<string> slots, string slot)
-    {
-        int a = c.ParallelFirst is null ? -1 : slots.IndexOf(c.ParallelFirst), b = c.ParallelLast is null ? -1 : slots.IndexOf(c.ParallelLast), i = slots.IndexOf(slot);
-        return a >= 0 && i >= a && i <= b;
-    }
-
-    /// Where a dragged module would land: before the first module whose centre is right of x.
-    int DropIndex(double x)
-    {
-        for (int i = 0; i < _modules.Count; i++) if (x < _modules[i].Box.Center.X) return i;
-        return _modules.Count;
-    }
-
-    protected override void OnPointerMoved(PointerEventArgs e)
-    {
-        if (_dragSlot is null) { base.OnPointerMoved(e); return; }
-        _dragX = e.GetPosition(this).X;
-        InvalidateVisual();
-    }
-
-    protected override void OnPointerReleased(PointerReleasedEventArgs e)
-    {
-        if (_dragSlot is null) { base.OnPointerReleased(e); return; }
-        int at = DropIndex(_dragX);
-        string slot = _dragSlot;
-        _dragSlot = null;
-        e.Pointer.Capture(null);
-        if (_modules.FindIndex(m => m.Slot == slot) is var from && at != from && at != from + 1) S.MoveSlot(S.Selected, slot, at);
-        InvalidateVisual();
     }
 
     /// A VST3 insert as its own module: power, name (opens its parameters), remove.
@@ -2192,11 +2040,6 @@ public sealed class ChainUnit : StudioUnit
         tx += Ui.Text(ctx, model, tx, box.Y + 6, 9, on ? Ui.Amber : Ui.Label, Ui.SansBold).Width + 6;
         Ui.Text(ctx, name, tx, box.Y + 6, 9, on ? Ui.LabelBright : Ui.Label, Ui.SansBold);
         Ui.Led(ctx, new Point(box.Right - 14, box.Y + 12), 3, on, Ui.Green, Ui.GreenOff);
-        foreach (double jx in new[] { box.X, box.Right })   // jacks
-        {
-            ctx.DrawEllipse(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF5B6068)), null, new Point(jx, box.Center.Y), 6, 6);
-            ctx.DrawEllipse(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF0B0C0D)), null, new Point(jx, box.Center.Y), 2.5, 2.5);
-        }
     }
 }
 
@@ -2327,7 +2170,7 @@ public sealed class StudioView : DockPanel
         var transport = new TransportUnit(_s);
         var library = new LibraryUnit(_s);
         var recorder = new RecorderUnit(_s);
-        var chain = new ChainUnit(_s);
+        var chain = _chain = new ChainUnit(_s);
         var console = new ConsoleUnit(_s) { IsVisible = false };
         var flow = new FlowUnit(_s) { Margin = new Thickness(0, 0, 0, 6) };
         var meters = new MeterUnit(_s) { Margin = new Thickness(6, 0, 0, 0) };
@@ -2398,10 +2241,14 @@ public sealed class StudioView : DockPanel
     public void SelectChannel(int track) { _s.Selected = Math.Clamp(track, 0, _s.Tracks - 1); Refresh(); }
     /// Screenshot tool: a patched chain on screen only (nothing saved to the take): EQ first, the
     /// filter pulled out, gate and compressor in parallel.
+    ChainUnit _chain = null!;
+    public void PullDemo() { _chain.PullDemo(); Refresh(); }
     public void PatchDemo()
     {
         var c = _s.Channel(_s.Selected);
         (c.Chain, c.ParallelFirst, c.ParallelLast, c.ParallelMix) = (["eq", "trim", "gate", "comp"], "gate", "comp", 0.6f);
+        c.Cables = c.DefaultCables();
+        c.Rack = new() { ["eq"] = 0, ["trim"] = 3, ["gate"] = 6, ["comp"] = 8, ["filter"] = 11 };   // the filter in the box, out of the path
         Refresh();
     }
 

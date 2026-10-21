@@ -132,6 +132,15 @@ public sealed class ChannelMix
     public string? ParallelLast { get; set; }
     public float ParallelMix { get; set; }
 
+    /// The lunchbox (DS-C): where each module sits (first slot), and the patch cables between jacks
+    /// ("src" the channel's source, "dst" the way out to the tap, "<slot>:in" / "<slot>:out" a
+    /// module's). The cables make the chain (Chain and the parallel run are read from them); where a
+    /// module sits does not change the sound.
+    public Dictionary<string, int> Rack { get; set; } = [];
+    public List<CableLink> Cables { get; set; } = [];
+    /// Why the cables make no chain right now (the chain stays as it was), null when they do.
+    [System.Text.Json.Serialization.JsonIgnore] public string? RouteError { get; set; }
+
     public static string SlotOf(VstInsert v) => "vst:" + v.Id;
     public VstInsert? VstOf(string slot) => Vst.FirstOrDefault(v => SlotOf(v) == slot);
 
@@ -139,10 +148,82 @@ public sealed class ChannelMix
     public List<string> Slots()
     {
         var ids = Vst.Select(SlotOf).ToList();
-        if (Chain.Count == 0) return [.. ids, .. Units];
+        if (Chain.Count == 0 && Cables.Count == 0) return [.. ids, .. Units];
         var l = Chain.Where(s => Units.Contains(s) || ids.Contains(s)).Distinct().ToList();
-        for (int i = ids.Count - 1; i >= 0; i--) if (!l.Contains(ids[i])) l.Insert(0, ids[i]);
+        if (Cables.Count == 0)   // patched by cables: an insert not on the path is not in the chain
+            for (int i = ids.Count - 1; i >= 0; i--) if (!l.Contains(ids[i])) l.Insert(0, ids[i]);
         return l;
+    }
+
+    /// The cables as they would be patched for the chain as it is (a take from before the lunchbox):
+    /// source -> each module in order -> out, and the parallel run with its dry cable round it.
+    public List<CableLink> DefaultCables()
+    {
+        var l = Slots();
+        var o = new List<CableLink>();
+        string prev = "src";
+        int a = ParallelFirst is null ? -1 : l.IndexOf(ParallelFirst), b = ParallelLast is null ? -1 : l.IndexOf(ParallelLast);
+        for (int i = 0; i < l.Count; i++)
+        {
+            o.Add(new() { From = prev, To = l[i] + ":in", Colour = o.Count });
+            if (i == a && b >= a) o.Add(new() { From = prev, To = b + 1 < l.Count ? l[b + 1] + ":in" : "dst", Colour = o.Count });   // the dry cable
+            prev = l[i] + ":out";
+        }
+        o.Add(new() { From = prev, To = "dst", Colour = o.Count });
+        return o;
+    }
+
+    /// The chain the cables make: from the source, cable by cable, to the way out. One output may
+    /// feed two cables once: a run of built-in units on one, straight to where the run comes back
+    /// on the other (the parallel path). Null order: no sound path, with why.
+    public static (List<string>? Order, string? First, string? Last, string? Error) Route(IReadOnlyList<CableLink> cables)
+    {
+        static string Node(string jack) => jack is "src" or "dst" ? jack : jack[..jack.LastIndexOf(':')];
+        var outs = new Dictionary<string, List<string>>();
+        var ins = new Dictionary<string, int>();
+        foreach (var c in cables)
+        {
+            string f = Node(c.From), t = Node(c.To);
+            if (!outs.TryGetValue(f, out var l)) outs[f] = l = [];
+            l.Add(t);
+            ins[t] = ins.GetValueOrDefault(t) + 1;
+        }
+        var order = new List<string>();
+        string? first = null, last = null;
+        string node = "src";
+        var seen = new HashSet<string> { "src" };
+        while (true)
+        {
+            var o = outs.GetValueOrDefault(node) ?? [];
+            if (o.Count == 0) return (null, null, null, node == "src" ? "a fonte não está ligada" : $"{node} não está ligado a nada na saída");
+            if (o.Count > 2) return (null, null, null, "uma saída alimenta mais de dois cabos");
+            string next;
+            if (o.Count == 1) next = o[0];
+            else
+            {
+                if (first is not null) return (null, null, null, "só um caminho paralelo por canal");
+                List<string>? run = null;
+                string merge = "";
+                foreach (var (dry, wet) in new[] { (o[0], o[1]), (o[1], o[0]) })
+                {
+                    var r = new List<string>();
+                    string n = wet;
+                    while (n != dry && n != "dst" && r.Count < 8 && (outs.GetValueOrDefault(n)?.Count ?? 0) == 1) { r.Add(n); n = outs[n][0]; }
+                    if (n == dry && r.Count > 0) { run = r; merge = dry; break; }
+                }
+                if (run is null) return (null, null, null, "o caminho dividido não volta a se juntar");
+                if (run.Any(u => !Units.Contains(u))) return (null, null, null, "o caminho paralelo leva só módulos da casa, sem VST3");
+                if (ins.GetValueOrDefault(merge) != 2) return (null, null, null, "o caminho paralelo não volta a se juntar");
+                foreach (var u in run) if (!seen.Add(u)) return (null, null, null, "um cabo faz o sinal voltar (laço)");
+                order.AddRange(run);
+                (first, last) = (run[0], run[^1]);
+                next = merge;
+            }
+            if (next == "dst") return (order, first, last, null);
+            if (!seen.Add(next)) return (null, null, null, "um cabo faz o sinal voltar (laço)");
+            order.Add(next);
+            node = next;
+        }
     }
 
     /// The built-in units between the inserts that are on: one run before each insert (rendered
@@ -157,7 +238,15 @@ public sealed class ChannelMix
     }
 
     /// The units patched after the last insert that is on: what the player runs.
-    internal ChannelParamsNative Realtime => NativeFor(Segments()[^1]);
+    internal ChannelParamsNative Realtime
+    {
+        get
+        {
+            var n = NativeFor(Segments()[^1]);
+            if (RouteError is not null) n.Mute = 1;   // a cable pulled out of the path: no sound until it is back
+            return n;
+        }
+    }
 
     internal unsafe ChannelParamsNative NativeFor(List<string> units)
     {
@@ -183,6 +272,15 @@ public sealed class ChannelMix
 
     /// What changes the audio at the analysis tap (fader, pan, mute, solo do not): the cache key.
     public string TapKey => JsonSerializer.Serialize(new { Trim, HpOn, Hp, LpOn, Lp, Steep, GateOn, GateThreshold, GateAttack, GateRelease, GateRange, EqOn, Bands, CompOn, CompThreshold, CompRatio, CompAttack, CompRelease, CompMakeup, VstSignature, Chain = Slots(), ParallelFirst, ParallelLast, ParallelMix });
+}
+
+/// A patch cable from an output jack to an input jack (DS-C).
+public sealed class CableLink
+{
+    public string From { get; set; } = "";
+    public string To { get; set; } = "";
+    /// Which of the box's cables it is (its colour), kept while it is replugged.
+    public int Colour { get; set; } = -1;
 }
 
 /// One VST3 effect on a channel, before its chain; its state lives next to the take project.

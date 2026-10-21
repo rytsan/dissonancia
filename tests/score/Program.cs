@@ -242,6 +242,21 @@ Check(LeadSheet.Harmony([Ch(0, 2, "Am"), Ch(2, 4, "E7")], new KeyOption(0, true)
     }
 }
 
+// DS-C lunchbox: the chain the cables make.
+{
+    CableLink L(string f, string t) => new() { From = f, To = t };
+    string R(params CableLink[] k) { var (o, a, b, e) = ChannelMix.Route(k); return e ?? string.Join(",", o!) + (a is null ? "" : $" ∥{a}-{b}"); }
+    Check(R(L("src", "eq:in"), L("eq:out", "trim:in"), L("trim:out", "dst")) == "eq,trim", "lunchbox: cables in series make the order, wherever the modules sit");
+    Check(R(L("src", "dst")) == "", "lunchbox: source straight to out is a wire");
+    Check(R(L("src", "trim:in"), L("trim:out", "gate:in"), L("gate:out", "comp:in"), L("comp:out", "dst"), L("trim:out", "dst")) == "trim,gate,comp ∥gate-comp",
+        "lunchbox: an output on two cables, one straight to where the run comes back, is the parallel path");
+    Check(R(L("src", "eq:in"), L("eq:out", "trim:in")).Contains("não está ligado"), "lunchbox: a module whose output goes nowhere: no sound path");
+    Check(R(L("src", "eq:in"), L("eq:out", "trim:in"), L("trim:out", "eq:in")).Contains("laço"), "lunchbox: a loop is no path");
+    Check(R(L("src", "vst:a:in"), L("vst:a:out", "dst"), L("src", "dst")).Contains("VST3"), "lunchbox: no insert in the parallel path");
+    var dc = new ChannelMix { Chain = ["trim", "gate", "comp"], ParallelFirst = "gate", ParallelLast = "comp", ParallelMix = 0.5f, Cables = [] };
+    Check(R([.. dc.DefaultCables()]) == "trim,gate,comp ∥gate-comp", "lunchbox: a take from before the lunchbox gets the cables of its chain");
+}
+
 string Shape(int[] pcs, int bass) => string.Join(" ", Theory.LikelyShape(pcs, bass).Select(f => f < 0 ? "x" : f.ToString()));
 Check(Shape([0, 4, 7], 0) == "x 3 2 0 1 0", $"shape C: {Shape([0, 4, 7], 0)}");
 Check(Shape([7, 11, 2], 7) == "3 2 0 0 0 3", $"shape G: {Shape([7, 11, 2], 7)}");
