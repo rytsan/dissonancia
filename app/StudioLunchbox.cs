@@ -156,7 +156,7 @@ public sealed partial class ChainUnit
         if (err is null && bypassed.Count > 0) route += $"   ({bypassed[0]!.Vst!.Name}: VST3 só toca logo depois do SAI, em série; aqui passa direto)";
         Ui.Led(ctx, new Point(r.X + 96, r.Y + 8), 3.5, true, err is null ? Ui.Green : Ui.Red, Ui.GreenOff);
         Ui.Text(ctx, route.Length > 130 ? route[..130] : route, r.X + 106, r.Y + 2, 9, err is null ? Ui.LabelBright : Ui.Red, Ui.Mono);
-        Ui.Text(ctx, "pegue um plugue e leve a outro jack · vários cabos num jack somam (bus) · AUX = envio pós-fader · arraste um módulo pelo topo · fora da caixa = tira · plugins: arraste da lista de efeitos", r.X + 106, r.Y + 15, 8, Ui.Label, Ui.Sans);
+        Ui.Text(ctx, "pegue um plugue e leve a outro jack · cabo sob o mouse: Delete ou botão direito apaga · vários cabos num jack somam (bus) · AUX = envio pós-fader · arraste um módulo pelo topo · fora da caixa = tira · plugins: arraste da lista de efeitos", r.X + 106, r.Y + 15, 8, Ui.Label, Ui.Sans);
 
         double y = r.Y + 36, h = r.Height - 36 - LipH - PatchH - 40;
         double bx = r.X;
@@ -250,11 +250,12 @@ public sealed partial class ChainUnit
             if (!_jacks.TryGetValue(k.From, out var a) || !_jacks.TryGetValue(k.To, out var e)) continue;
             if (!_ropes.TryGetValue(k, out var rope)) _ropes[k] = rope = new Rope(a, e);
             rope.Step(dt, a, e, _floor);
+            if (ReferenceEquals(_hover, rope)) Halo(ctx, rope);
             DrawCable(ctx, rope, CableColours[k.Colour % CableColours.Length], Lv(Patchbay.Node(k.From)), true, true);
         }
         foreach (var k in _ropes.Keys.Where(k => !mix.Patch.Contains(k)).ToList()) _ropes.Remove(k);
         foreach (var (rope, fix, _, col) in _loose)
-            if (_jacks.TryGetValue(fix, out var a)) { rope.Step(dt, a, null, _floor); DrawCable(ctx, rope, CableColours[col % CableColours.Length], -90, true, true); }
+            if (_jacks.TryGetValue(fix, out var a)) { rope.Step(dt, a, null, _floor); if (ReferenceEquals(_hover, rope)) Halo(ctx, rope); DrawCable(ctx, rope, CableColours[col % CableColours.Length], -90, true, true); }
         _loose.RemoveAll(l => !_jacks.ContainsKey(l.Fixed));
         if (_cable is { } held && _jacks.TryGetValue(held.Fixed, out var fa))
         {
@@ -342,6 +343,35 @@ public sealed partial class ChainUnit
         ctx.DrawEllipse(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF2A2D32)), null, tip, 3.2, 3.2);
     }
 
+    // The cable under the mouse (a rope, plugged or loose): Delete / Backspace or a right click removes it.
+    Rope? _hover;
+    Rope? RopeAt(Point p)
+    {
+        Rope? best = null;
+        double bd = 8 * 8;
+        foreach (var rope in _ropes.Values.Concat(_loose.Select(l => l.Rope)))
+            foreach (var q in rope.P)
+                if ((p - q).X * (p - q).X + (p - q).Y * (p - q).Y is double d && d < bd) (bd, best) = (d, rope);
+        return best;
+    }
+    static void Halo(DrawingContext ctx, Rope rope)
+    {
+        var pen = new ImmutablePen(new ImmutableSolidColorBrush(Color.FromUInt32(0xAAFFFFFF)), 10, lineCap: PenLineCap.Round);
+        for (int i = 1; i < rope.P.Length; i++) ctx.DrawLine(pen, rope.P[i - 1], rope.P[i]);
+    }
+
+    /// Delete / Backspace: the cable in the hand, or the one under the mouse, out of the box.
+    public bool DeleteCable()
+    {
+        if (_cable is not null) { _cable = null; InvalidateVisual(); return true; }   // already out of the patch: dropped
+        if (_hover is not { } rope) return false;
+        _hover = null;
+        _loose.RemoveAll(l => ReferenceEquals(l.Rope, rope));
+        if (_ropes.FirstOrDefault(kv => ReferenceEquals(kv.Value, rope)).Key is { } k) { S.Mix.Patch.Remove(k); _ropes.Remove(k); S.MixChanged(); }
+        InvalidateVisual();
+        return true;
+    }
+
     /// The jack under a point, of the kind wanted (an output, or an input), with room for a cable.
     string? NearJack(Point p, bool wantOut)
     {
@@ -384,6 +414,7 @@ public sealed partial class ChainUnit
     {
         if (S.Current is null) return;
         var mix = S.Mix;
+        if (e.GetCurrentPoint(this).Properties.IsRightButtonPressed) { _hover = RopeAt(p); DeleteCable(); return; }
         // A plug: picked out of its jack (the newest cable there), or a new cable from an empty jack.
         foreach (var (id, j) in _jacks)
         {
@@ -426,7 +457,13 @@ public sealed partial class ChainUnit
 
     protected override void OnPointerMoved(PointerEventArgs e)
     {
-        if (_cable is null && _heldModule is null) { base.OnPointerMoved(e); return; }
+        if (_cable is null && _heldModule is null)
+        {
+            var h = RopeAt(e.GetPosition(this));
+            if (!ReferenceEquals(h, _hover)) { _hover = h; InvalidateVisual(); }
+            base.OnPointerMoved(e);
+            return;
+        }
         _hand = e.GetPosition(this);
         InvalidateVisual();
     }

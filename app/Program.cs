@@ -276,6 +276,7 @@ public sealed class MainWindow : Window
     protected override void OnKeyDown(KeyEventArgs e)
     {
         if (_tabs.SelectedItem == _studioTab && e.Key == Key.Space) { _studio.TogglePlay(); e.Handled = true; return; }
+        if (_tabs.SelectedItem == _studioTab && e.Key is Key.Delete or Key.Back && _studio.DeleteCable()) { e.Handled = true; return; }
         if (_tabs.SelectedItem != _liveTab) { base.OnKeyDown(e); return; }
         if (!_keys.TryGetValue(e.Key, out var action)) { base.OnKeyDown(e); return; }
         _actions[action]();

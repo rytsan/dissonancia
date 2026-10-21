@@ -2381,6 +2381,7 @@ public sealed class StudioView : DockPanel
     }
 
     public void TogglePlay() => _s.TogglePlay();
+    public bool DeleteCable() => _s.Bay?.DeleteCable() ?? false;
     public void OpenFirst() { if (_s.Library.Count > 0) _s.Open(_s.Library[0].Path); Refresh(); }
     /// Screenshot tool: the newest take already separated (its stems as tracks).
     public void OpenSeparated() { if (_s.Library.FirstOrDefault(i => Directory.Exists(StudioProject.StemsDir(i.Path))) is { } it) _s.Open(it.Path); Refresh(); }
