@@ -232,8 +232,18 @@ Check(LeadSheet.Harmony([Ch(0, 2, "Am"), Ch(2, 4, "E7")], new KeyOption(0, true)
 }
 
 // LIVE playground: the native mirrors are the core's sizes; a pattern step toggles one bit.
-Check(System.Runtime.CompilerServices.Unsafe.SizeOf<PlaygroundConfigNative>() == 172 && System.Runtime.CompilerServices.Unsafe.SizeOf<PlaygroundStatusNative>() == 152,
-    "playground: PlaygroundConfig 172, PlaygroundStatus 152 bytes, as the core");
+Check(System.Runtime.CompilerServices.Unsafe.SizeOf<PlaygroundConfigNative>() == 144 && System.Runtime.CompilerServices.Unsafe.SizeOf<PlaygroundStatusNative>() == 172
+      && System.Runtime.CompilerServices.Unsafe.SizeOf<PgBlockNative>() == 20 && System.Runtime.CompilerServices.Unsafe.SizeOf<PgNoteNative>() == 8
+      && System.Runtime.CompilerServices.Unsafe.SizeOf<PgRecordedNative>() == 12, "playground: the song's native mirrors are the core's sizes");
+{
+    var blk = new SongBlock { Id = 1, Bars = 1 };
+    blk.Set(2, 5, 100);
+    blk.Notes.Add(new SongNote(20, 2, 60, 90));
+    blk.Resize(2);
+    Check(blk.At(2, 5) == 100 && blk.Steps.Length == 16 * 2 * 16 && blk.Notes.Count == 1, "song block: more bars keep the pattern and notes");
+    blk.Resize(1);
+    Check(blk.At(2, 5) == 100 && blk.Notes.Count == 0, "song block: fewer bars drop what is past the end");
+}
 Check(RackCatalog.WithPlayground(RackCatalog.Default(LiveMode.Acoustic), true).Take(3).Select(e => e.Module).SequenceEqual(RackCatalog.Playground)
       && !RackCatalog.WithPlayground(RackCatalog.WithPlayground(RackCatalog.Default(LiveMode.Acoustic), true), false).Any(e => RackCatalog.Playground.Contains(e.Module)),
     "playground: PLAYGROUND puts its units on top of the rack and takes them out again");

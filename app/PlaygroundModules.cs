@@ -242,25 +242,31 @@ public sealed class PadsModule : KeyedModule
     }
 }
 
-/// DS-Q SEQUENCER: 16 steps (sixteenths from the bar's downbeat, on the metronome's grid) per pad
-/// with a sound; the step playing lit.
+/// DS-Q SEQUENCER: the selected block's pattern, one bar at a time (16 sixteenths per pad with a
+/// sound); the sixteenth playing lit when that block and bar play.
 public sealed class SequencerModule : KeyedModule
 {
-    public SequencerModule() { Title = "DS-Q  SEQUENCER · 16 PASSOS"; }
+    public SequencerModule() { Title = "DS-Q  SEQUENCER · BLOCO SELECIONADO"; }
 
     protected override void Draw(DrawingContext ctx, Rect r)
     {
         var s = P.S;
-        Key(ctx, new Rect(r.X, r.Y, 70, 24), s.SequencerOn ? "■ SEQ" : "▶ SEQ", () => P.SetSequencer(!s.SequencerOn), s.SequencerOn);
-        Key(ctx, new Rect(r.X, r.Y + 30, 70, 20), "LIMPAR", () => { Array.Clear(s.Steps); P.Apply(); P.Save(); }, withLed: false);
-        Ui.Text(ctx, $"♩ = {Frame!.Bpm:0}", r.X + 4, r.Y + 56, 10, Ui.LabelBright, Ui.Mono);
-        Ui.Text(ctx, "grade do metrônomo", r.X + 4, r.Y + 70, 7, Ui.Label, Ui.Sans);
-        var rows = Enumerable.Range(0, 16).Where(k => s.Pads[k].Path.Length > 0 || s.Steps[k] != 0).ToList();
+        var blk = P.SelBlock;
+        P.Page = Math.Clamp(P.Page, 0, blk.Bars - 1);
+        Ui.Text(ctx, $"BLOCO {blk.Name}", r.X + 2, r.Y, 12, Ui.Amber, Ui.SansBold);
+        Key(ctx, new Rect(r.X, r.Y + 20, 22, 20), "◀", () => P.Page = Math.Max(0, P.Page - 1), withLed: false);
+        Ui.Text(ctx, $"{P.Page + 1}/{blk.Bars}", r.X + 36, r.Y + 22, 11, Ui.LabelBright, Ui.Mono, Ui.Align.Center);
+        Key(ctx, new Rect(r.X + 50, r.Y + 20, 22, 20), "▶", () => P.Page = Math.Min(blk.Bars - 1, P.Page + 1), withLed: false);
+        Ui.Text(ctx, "compasso", r.X + 2, r.Y + 44, 7, Ui.Label, Ui.Sans);
+        Key(ctx, new Rect(r.X, r.Y + 56, 72, 20), "LIMPAR", P.ClearBlock, withLed: false);
+        if (blk.Notes.Count > 0) Ui.Text(ctx, $"{blk.Notes.Count} notas", r.X + 2, r.Y + 80, 8, Ui.LcdText, Ui.Mono);
+        var rows = Enumerable.Range(0, 16).Where(k => s.Pads[k].Path.Length > 0 || Enumerable.Range(0, blk.Bars * 16).Any(i => blk.At(k, i) > 0)).ToList();
         if (rows.Count == 0) rows = [0, 1, 2, 3];
         double x0 = r.X + 150, cw = Math.Max(14, (r.Right - x0) / 16 - 3), rh = Math.Max(10, Math.Min(22, (r.Height - 16) / rows.Count - 3));
         int steps = Math.Clamp(Session.BeatsPerBar * 4, 1, 16);
+        bool here = P.Playing && P.Entry >= 0 && P.Entry < s.Order.Count && s.Order[P.Entry].Block == P.SelEntry.Block && P.Bar == P.Page;
         for (int c = 0; c < 16; c++)
-            Ui.Led(ctx, new Point(x0 + c * (cw + 3) + cw / 2, r.Y + 5), 3, P.Step == c, c % 4 == 0 ? Ui.Amber : Ui.Green, c < steps ? Ui.GreenOff : Ui.RackBg);
+            Ui.Led(ctx, new Point(x0 + c * (cw + 3) + cw / 2, r.Y + 5), 3, here && P.Step == c, c % 4 == 0 ? Ui.Amber : Ui.Green, c < steps ? Ui.GreenOff : Ui.RackBg);
         for (int i = 0; i < rows.Count; i++)
         {
             int k = rows[i];
@@ -271,14 +277,101 @@ public sealed class SequencerModule : KeyedModule
             for (int c = 0; c < 16; c++)
             {
                 var b = new Rect(x0 + c * (cw + 3), y, cw, rh);
-                bool on = (s.Steps[k] >> c & 1) != 0, now = P.Step == c && on;
+                int step = P.Page * 16 + c;
+                bool on = blk.At(k, step) > 0, now = here && P.Step == c && on;
                 uint col = now ? 0xFFFFE08Au : on ? (c % 4 == 0 ? 0xFFFFB000u : 0xFF3DDC84u) : c % 4 == 0 ? 0xFF2A2D32u : 0xFF1C1E21u;
                 ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(col)), KeyEdge, b, 2, 2);
-                int pad = k, step = c;
+                int pad = k;
                 if (c < steps) Area(b, () => P.ToggleStep(pad, step));
             }
         }
     }
+}
+
+/// DS-T TIMELINE: the song as blocks in a row (width = bars x repeats), the one playing with its
+/// progress, the one queued; transport (play the song, loop a block, stop, REC overdub, bounce to
+/// STUDIO) and the selected entry's edit keys (bars, repeats, move, new, duplicate, repeat, remove).
+public sealed class SongModule : KeyedModule
+{
+    public SongModule() { Title = "DS-T  TIMELINE · MÚSICA"; }
+
+    static readonly uint[] Colours = [0xFF2E6B8Fu, 0xFF8F5A2Eu, 0xFF4E8F2Eu, 0xFF7A2E8Fu, 0xFF8F2E45u, 0xFF2E8F7Fu, 0xFF8F842Eu, 0xFF4A4F8Fu];
+
+    protected override void Draw(DrawingContext ctx, Rect r)
+    {
+        var s = P.S;
+        P.Selected = Math.Clamp(P.Selected, 0, s.Order.Count - 1);
+        bool blink = Environment.TickCount64 / 250 % 2 == 0;
+        Key(ctx, new Rect(r.X, r.Y, 96, 24), "▶ MÚSICA", () => P.Play(loop: false), P.Playing && !P.Looping, Ui.Green);
+        Key(ctx, new Rect(r.X + 100, r.Y, 84, 24), "⟲ LOOP", () => P.Play(loop: true), P.Playing && P.Looping, Ui.Green);
+        Key(ctx, new Rect(r.X + 188, r.Y, 40, 24), "■", P.Stop, false, withLed: false);
+        Key(ctx, new Rect(r.X + 232, r.Y, 74, 24), "● REC", P.Record, P.Armed && (P.Recording || blink), Ui.Red);
+        Key(ctx, new Rect(r.X + 310, r.Y, 150, 24), "BOUNCE → STUDIO", () => Bounced?.Invoke(), false, withLed: false);
+        string where = P.Starting ? "começa no próximo compasso…"
+            : P.Playing && P.Entry >= 0 && P.Entry < s.Order.Count
+                ? $"{s.Blocks[s.Order[P.Entry].Block].Name} · compasso {P.Bar + 1}/{s.Blocks[s.Order[P.Entry].Block].Bars} · vez {P.Repeat + 1}/{s.Order[P.Entry].Repeats}"
+                  + (P.Queued >= 0 && P.Queued < s.Order.Count ? $" · próximo compasso: {s.Blocks[s.Order[P.Queued].Block].Name}" : "") + (P.Recording ? " · GRAVANDO" : "")
+                : "parado";
+        Ui.Text(ctx, where, r.X + 472, r.Y + 5, 11, P.Recording ? Ui.Red : Ui.LcdText, Ui.Mono);
+
+        // The lane.
+        var lane = new Rect(r.X, r.Y + 32, r.Width, Math.Max(36, r.Height - 32 - 32));
+        ctx.DrawRectangle(Ui.Lcd, Ui.LcdEdge, lane, 3, 3);
+        int totalBars = s.Order.Sum(e => s.Blocks[e.Block].Bars * e.Repeats);
+        double px = Math.Min(48, (lane.Width - 8) / Math.Max(1, totalBars)), x = lane.X + 4;
+        for (int i = 0; i < s.Order.Count; i++)
+        {
+            var e = s.Order[i];
+            var b = s.Blocks[e.Block];
+            var box = new Rect(x, lane.Y + 4, Math.Max(24, b.Bars * e.Repeats * px) - 3, lane.Height - 8);
+            ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(Colours[e.Block % Colours.Length])), null, box, 4, 4);
+            for (int k = 1; k < e.Repeats; k++)   // the repeats
+                ctx.DrawLine(new ImmutablePen(new ImmutableSolidColorBrush(Color.FromUInt32(0x88000000)), 1.5, new ImmutableDashStyle([3, 3], 0)),
+                    new Point(box.X + box.Width * k / e.Repeats, box.Y + 2), new Point(box.X + box.Width * k / e.Repeats, box.Bottom - 2));
+            if (P.Playing && P.Entry == i)
+            {
+                double prog = ((P.Looping ? 0 : P.Repeat) * b.Bars + P.Bar + Math.Max(0, P.Step) / 16.0) / (b.Bars * (P.Looping ? 1 : e.Repeats));
+                ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0x40FFFFFF)), null, new Rect(box.X, box.Y, box.Width * Math.Clamp(prog, 0, 1), box.Height), 4, 4);
+                ctx.DrawLine(new ImmutablePen(P.Recording ? (IImmutableBrush)Ui.Red : (IImmutableBrush)Ui.Amber, 2), new Point(box.X + box.Width * prog, box.Y), new Point(box.X + box.Width * prog, box.Bottom));
+            }
+            if (i == P.Selected) ctx.DrawRectangle(null, new ImmutablePen((IImmutableBrush)Ui.Amber, 2), box.Inflate(1.5), 5, 5);
+            if (P.Queued == i && blink) ctx.DrawRectangle(null, new ImmutablePen((IImmutableBrush)Ui.Green, 2, new ImmutableDashStyle([3, 2], 0)), box.Inflate(3.5), 6, 6);
+            Ui.Text(ctx, b.Name, box.X + 6, box.Y + 3, 14, Ui.LabelBright, Ui.SansBold);
+            if (box.Width > 50) Ui.Text(ctx, $"{b.Bars}c{(e.Repeats > 1 ? $" ×{e.Repeats}" : "")}", box.X + 6, box.Bottom - 15, 9, Ui.LabelBright, Ui.Mono);
+            if (b.HasLoop) Ui.Text(ctx, "◉", box.Right - 14, box.Y + 3, 10, Ui.Red, Ui.SansBold);
+            int idx = i;
+            Area(box, () => { P.Selected = idx; P.Page = 0; });
+            x += box.Width + 3;
+        }
+
+        // The selected entry's keys.
+        double ky = lane.Bottom + 6, kx = r.X;
+        var sel = P.SelBlock;
+        void K(string label, Action a, double w) { Key(ctx, new Rect(kx, ky, w, 22), label, a, withLed: false); kx += w + 4; }
+        Ui.Text(ctx, $"BLOCO {sel.Name}", kx, ky + 4, 10, Ui.Amber, Ui.SansBold);
+        kx += 66;
+        K("−", () => P.Bars(-1), 24);
+        Ui.Text(ctx, $"{sel.Bars} comp.", kx + 30, ky + 4, 10, Ui.LabelBright, Ui.Mono, Ui.Align.Center);
+        kx += 62;
+        K("+", () => P.Bars(+1), 24);
+        K("−", () => P.Repeats(-1), 24);
+        Ui.Text(ctx, $"×{P.SelEntry.Repeats}", kx + 18, ky + 4, 10, Ui.LabelBright, Ui.Mono, Ui.Align.Center);
+        kx += 38;
+        K("+", () => P.Repeats(+1), 24);
+        kx += 8;
+        K("◀", () => P.Move(-1), 24);
+        K("▶", () => P.Move(+1), 24);
+        kx += 8;
+        K("+ BLOCO", () => P.NewBlock(), 76);
+        K("DUPLICAR", P.Duplicate, 80);
+        K("REPETIR", P.RepeatBlock, 72);
+        K("✕", P.RemoveEntry, 28);
+        if (sel.HasLoop) K("APAGAR LOOP", P.ClearLoop, 100);
+        if (P.Status.Length > 0 && kx + 20 < r.Right) Ui.Text(ctx, P.Status, kx + 8, ky + 5, 9, Ui.Amber, Ui.Sans);
+    }
+
+    /// BOUNCE → STUDIO (the window renders the timeline and opens it in STUDIO).
+    public event Action? Bounced;
 }
 
 /// DS-I MIDI: the controller's port, activity, the last message, MIDI learn for the keys, and the

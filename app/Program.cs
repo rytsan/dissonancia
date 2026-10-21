@@ -91,7 +91,14 @@ public sealed class MainWindow : Window
             [ModuleKind.Tuner] = new TunerModule(), [ModuleKind.Fretboard] = new FretboardModule(), [ModuleKind.Keyboard] = new KeyboardModule(),
             [ModuleKind.Waterfall] = new WaterfallModule(), [ModuleKind.Timeline] = new TimelineModule(),
             [ModuleKind.Transport] = transport, [ModuleKind.Status] = new StatusModule(),
-            [ModuleKind.Metrics] = new MetricsModule(), [ModuleKind.Pads] = new PadsModule(), [ModuleKind.Sequencer] = new SequencerModule(), [ModuleKind.Midi] = new MidiModule(),
+            [ModuleKind.Metrics] = new MetricsModule(), [ModuleKind.Pads] = new PadsModule(), [ModuleKind.Sequencer] = new SequencerModule(), [ModuleKind.Midi] = new MidiModule(), [ModuleKind.Song] = new SongModule(),
+        };
+        ((SongModule)catalog[ModuleKind.Song]).Bounced += () =>
+        {   // the timeline rendered, into STUDIO's library and on its tracks
+            if (Playground.Current.Bounce(out var path) is { } err) { Playground.Current.Status = "bounce: " + err; return; }
+            StudioLibrary.Import(path);
+            _tabs.SelectedItem = _studioTab;
+            _studio.OpenPath(path);
         };
         Playground.Current.Command += c => { if (c == "rec") _source.ToggleRec(Clock()); else if (c == "metro") _source.ToggleMetronome(); };
         _modules = [.. catalog.Values, _stage];

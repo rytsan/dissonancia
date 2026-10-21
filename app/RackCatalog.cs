@@ -5,7 +5,7 @@ namespace Dissonancia;
 // Modular rack (spec §22.4): a fixed catalog of view-only modules, full or half width, heights in
 // rack units, one preset per mode saved as JSON. Changing the rack never touches the analysis.
 
-public enum ModuleKind { Input, Scope, Analyzer, Tuner, Fretboard, Keyboard, Waterfall, Timeline, Transport, Status, Metrics, Pads, Sequencer, Midi }
+public enum ModuleKind { Input, Scope, Analyzer, Tuner, Fretboard, Keyboard, Waterfall, Timeline, Transport, Status, Metrics, Pads, Sequencer, Midi, Song }
 
 public sealed record RackEntry(ModuleKind Module, bool Half, int HeightU);
 
@@ -17,7 +17,7 @@ public static class RackCatalog
     {
         ModuleKind.Input => "Analog VU + peak LEDs", ModuleKind.Analyzer => "Analyzer display (chord + note)",
         ModuleKind.Waterfall => "CQT waterfall", ModuleKind.Timeline => "Chord timeline", ModuleKind.Metrics => "Métricas do LIVE",
-        ModuleKind.Pads => "Playground: pads + sampler", ModuleKind.Sequencer => "Playground: sequencer", ModuleKind.Midi => "Playground: controlador MIDI", _ => k.ToString(),
+        ModuleKind.Pads => "Playground: pads + sampler", ModuleKind.Sequencer => "Playground: sequencer", ModuleKind.Midi => "Playground: controlador MIDI", ModuleKind.Song => "Playground: timeline da música", _ => k.ToString(),
     };
 
     /// REC access and the ms readout must always be on screen.
@@ -38,6 +38,7 @@ public static class RackCatalog
         ModuleKind.Metrics or ModuleKind.Midi => (1, 2),
         ModuleKind.Pads => (3, 4),
         ModuleKind.Sequencer => (2, 4),
+        ModuleKind.Song => (2, 3),
         _ => (1, 4),
     };
 
@@ -62,11 +63,11 @@ public static class RackCatalog
     }
 
     /// The playground's units (creation: pads, sequencer, MIDI), added and taken out together.
-    public static readonly ModuleKind[] Playground = [ModuleKind.Pads, ModuleKind.Sequencer, ModuleKind.Midi];
+    public static readonly ModuleKind[] Playground = [ModuleKind.Song, ModuleKind.Pads, ModuleKind.Sequencer, ModuleKind.Midi];
     public static List<RackEntry> WithPlayground(List<RackEntry> l, bool on)
     {
         var r = l.Where(e => !Playground.Contains(e.Module)).ToList();
-        if (on) r.InsertRange(0, [new(ModuleKind.Pads, false, 3), new(ModuleKind.Sequencer, false, 2), new(ModuleKind.Midi, false, 1)]);   // on top: the section in front
+        if (on) r.InsertRange(0, [new(ModuleKind.Song, false, 2), new(ModuleKind.Sequencer, false, 2), new(ModuleKind.Pads, false, 3), new(ModuleKind.Midi, false, 1)]);   // on top: the section in front
         return r;
     }
 

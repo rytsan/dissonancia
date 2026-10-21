@@ -2413,6 +2413,8 @@ public sealed class StudioView : DockPanel
 
     public void TogglePlay() => _s.TogglePlay();
     public void EnterFromLive() { _s.EnterFromLive(); Refresh(); }
+    /// A file made elsewhere (the playground's bounce) on the tracks.
+    public void OpenPath(string path) { _s.ReloadLibrary(); _s.Open(path); _s.Status = "música do playground: " + Path.GetFileName(path); Refresh(); }
     public bool DeleteCable() => _s.Bay?.DeleteCable() ?? false;
     public void OpenFirst() { if (_s.Library.Count > 0) _s.Open(_s.Library[0].Path); Refresh(); }
     /// Screenshot tool: the newest take already separated (its stems as tracks).
