@@ -232,7 +232,8 @@ Check(LeadSheet.Harmony([Ch(0, 2, "Am"), Ch(2, 4, "E7")], new KeyOption(0, true)
 }
 
 // LIVE playground: the native mirrors are the core's sizes; a pattern step toggles one bit.
-Check(System.Runtime.CompilerServices.Unsafe.SizeOf<PlaygroundConfigNative>() == 144 && System.Runtime.CompilerServices.Unsafe.SizeOf<PlaygroundStatusNative>() == 172
+Check(System.Runtime.CompilerServices.Unsafe.SizeOf<PlaygroundConfigNative>() == 144 && System.Runtime.CompilerServices.Unsafe.SizeOf<PlaygroundStatusNative>() == 244
+      && System.Runtime.CompilerServices.Unsafe.SizeOf<PedalboardNative>() == 712
       && System.Runtime.CompilerServices.Unsafe.SizeOf<PgBlockNative>() == 20 && System.Runtime.CompilerServices.Unsafe.SizeOf<PgNoteNative>() == 8
       && System.Runtime.CompilerServices.Unsafe.SizeOf<PgRecordedNative>() == 12, "playground: the song's native mirrors are the core's sizes");
 {

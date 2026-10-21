@@ -34,7 +34,15 @@ unsafe struct PlaygroundStatusNative
     public uint MidiMessages;
     public int Entry, Repeat, Bar, Step, Queued;
     public byte Playing, Recording, Looping, Starting;
+    public float InputDb, OutputDb;
+    public fixed float PedalDb[16];
 }
+
+[StructLayout(LayoutKind.Sequential)] unsafe struct PedalParamsNative { public ushort Id; public byte Kind, On; public fixed float Knob[4]; }
+[StructLayout(LayoutKind.Sequential)] struct PedalCableNative { public byte From, To; ushort _pad0; public float Gain; }
+[System.Runtime.CompilerServices.InlineArray(16)] struct PedalArray16 { PedalParamsNative _e; }
+[System.Runtime.CompilerServices.InlineArray(48)] struct PedalCableArray48 { PedalCableNative _e; }
+[StructLayout(LayoutKind.Sequential)] struct PedalboardNative { public PedalArray16 Pedal; public PedalCableArray48 Cable; public int Pedals, Cables; }
 
 static partial class PgApi
 {
@@ -49,6 +57,7 @@ static partial class PgApi
     [LibraryImport(Lib, EntryPoint = "ana_midi_open")] public static partial int Open(nint h, int index);
     [LibraryImport(Lib, EntryPoint = "ana_midi_read")] public static unsafe partial int Read(nint h, uint* out_, int cap);
     [LibraryImport(Lib, EntryPoint = "ana_pg_song")] public static unsafe partial int Song(nint h, PgBlockNative* b, int nb, byte* steps, int ns, PgNoteNative* notes, int nn, PgEntryNative* order, int no);
+    [LibraryImport(Lib, EntryPoint = "ana_pedalboard_set")] public static partial int Board(nint h, in PedalboardNative b);
     [LibraryImport(Lib, EntryPoint = "ana_pg_play")] public static partial void Play(nint h, int entry, byte loop);
     [LibraryImport(Lib, EntryPoint = "ana_pg_stop")] public static partial void Stop(nint h);
     [LibraryImport(Lib, EntryPoint = "ana_pg_record")] public static partial int Record(nint h, byte on);
@@ -81,6 +90,45 @@ public sealed class PlaygroundState
     public string MidiPort { get; set; } = "";
     /// MIDI learn: a target ("seq", "rec", "metro", "master", "sampler") -> "cc:<ch>:<n>" or "note:<ch>:<n>".
     public Dictionary<string, string> Learned { get; set; } = [];
+    /// The pedalboard: its pedals (left to right as on the floor) and its cables. Jacks: "in:out"
+    /// (ENTRADA), "pads:out", "out:in" (SAÍDA), "rec:in" (GRAVAR), "<pedal id>:in" / ":out".
+    public List<PedalDef> Pedals { get; set; } = [];
+    public List<CableLink> PedalCables { get; set; } = [];
+}
+
+public sealed class PedalDef
+{
+    public string Id { get; set; } = "";   // "p1", "p2" …
+    public int Kind { get; set; }           // 0 drive, 1 octave, 2 chorus, 3 delay, 4 reverb, 5 filter
+    public bool On { get; set; } = true;
+    public float[] Knobs { get; set; } = [0.5f, 0.5f, 0.5f, 0.5f];
+
+    public static readonly string[] Names = ["DRIVE", "OCTAVE", "CHORUS", "DELAY", "REVERB", "FILTRO"];
+    public static readonly string[][] Labels =
+    [
+        ["GANHO", "TOM", "NÍVEL", "MIX"], ["OITAVA −", "OITAVA +", "SECO", ""], ["VELOC.", "PROF.", "MIX", "LARGURA"],
+        ["TEMPO", "REPET.", "MIX", "TOM"], ["SALA", "ABAFAR", "MIX", "LARGURA"], ["CORTE", "RESSON.", "MODO", "LFO"],
+    ];
+    public static readonly float[][] Defaults =
+    [
+        [0.5f, 0.5f, 0.75f, 1], [0.8f, 0, 0.6f, 0], [0.3f, 0.4f, 0.5f, 0.6f], [3 / 15f, 0.35f, 0.4f, 0.5f], [0.6f, 0.4f, 0.35f, 0.8f], [0.45f, 0.4f, 0, 0],
+    ];
+    public static readonly uint[] Colours = [0xFFB0362Au, 0xFF2A6FB0u, 0xFF2AA08Au, 0xFF8A8A2Au, 0xFF6A3AA8u, 0xFFC27A1Eu];
+    /// A knob's value as the pedal reads it.
+    public string Value(int k)
+    {
+        float v = Knobs[k];
+        return (Kind, k) switch
+        {
+            (0, 0) => $"{v * 40:0} dB", (0, 1) => Hz(800 * Math.Pow(15, v)), (0, 2) => $"{v * 30 - 24:+0;-0} dB",
+            (2, 0) => $"{0.1 * Math.Pow(50, v):0.0} Hz", (2, 1) => $"{1 + 14 * v:0} ms",
+            (3, 0) => $"{Math.Round(1 + v * 15):0}/16", (3, 3) => Hz(1500 * Math.Pow(8, v)),
+            (5, 0) => Hz(80 * Math.Pow(100, v)), (5, 2) => v < 0.34f ? "LP" : v < 0.67f ? "BP" : "HP", (5, 3) => v < 0.02f ? "off" : $"{0.1 * Math.Pow(60, v):0.0} Hz",
+            (1, 3) => "",
+            _ => $"{v * 100:0}",
+        };
+    }
+    static string Hz(double f) => f >= 1000 ? $"{f / 1000:0.#}k" : $"{f:0}";
 }
 
 /// A block of the song: its bars, the pads' pattern ([pad][bar * 16 + sixteenth] velocities), the
@@ -130,7 +178,9 @@ public sealed class Playground
     public uint MidiMessages;
     public readonly uint[] Hits = new uint[17];
     public readonly float[] Seconds = new float[17];
-    public readonly double[] Flash = new double[17];   // when each pad last sounded (Environment ticks, ms)
+    public readonly double[] Flash = new double[17];
+    public float InputDb = -120, OutputDb = -120;
+    public readonly float[] PedalDb = Enumerable.Repeat(-120f, 16).ToArray();   // when each pad last sounded (Environment ticks, ms)
     public string[] Ports = [];
     public string? Learning;                            // a target waiting for a control
     public string LastMidi = "";
@@ -177,6 +227,7 @@ public sealed class Playground
             if (S.SamplerPath.Length > 0) LoadSlot(16, S.SamplerPath, save: false);
             Apply();
             Publish();
+            PublishBoard();
             foreach (var b in S.Blocks.Where(b => b.HasLoop)) if (File.Exists(LoopPath(b.Id))) PgApi.LoopFile(_h, b.Id, LoopPath(b.Id), 0);
             ScanPorts();
             int port = Array.IndexOf(Ports, S.MidiPort);
@@ -289,6 +340,50 @@ public sealed class Playground
 
     void Changed() { Publish(); Save(); }
 
+    // ---------------------------------------------------------------- the pedalboard
+
+    public PedalDef AddPedal(int kind)
+    {
+        int n = 1;
+        while (S.Pedals.Any(p => p.Id == $"p{n}")) n++;
+        var p = new PedalDef { Id = $"p{n}", Kind = kind, Knobs = (float[])PedalDef.Defaults[kind].Clone() };
+        S.Pedals.Add(p);
+        BoardChanged();
+        return p;
+    }
+    public void RemovePedal(PedalDef p)
+    {
+        S.Pedals.Remove(p);
+        S.PedalCables.RemoveAll(k => k.From.StartsWith(p.Id + ":") || k.To.StartsWith(p.Id + ":"));
+        BoardChanged();
+    }
+    public void BoardChanged() { PublishBoard(); Save(); }
+
+    /// The pedals and cables to the core (heard from the next callback).
+    public unsafe void PublishBoard()
+    {
+        if (_h == 0) return;
+        var b = new PedalboardNative();
+        var pedals = S.Pedals.Take(16).ToList();
+        for (int k = 0; k < pedals.Count; k++)
+        {
+            var n = new PedalParamsNative { Id = ushort.Parse(pedals[k].Id[1..]), Kind = (byte)pedals[k].Kind, On = (byte)(pedals[k].On ? 1 : 0) };
+            for (int i = 0; i < 4; i++) n.Knob[i] = pedals[k].Knobs[i];
+            b.Pedal[k] = n;
+        }
+        b.Pedals = pedals.Count;
+        int? Jack(string j)
+        {
+            switch (j) { case "in:out": return 0; case "pads:out": return 1; case "out:in": return 2; case "rec:in": return 3; }
+            int k = pedals.FindIndex(p => j.StartsWith(p.Id + ":"));
+            return k < 0 ? null : j.EndsWith(":in") ? 8 + 2 * k : 9 + 2 * k;
+        }
+        foreach (var c in S.PedalCables)
+            if (b.Cables < 48 && Jack(c.From) is int f && Jack(c.To) is int t)
+                b.Cable[b.Cables++] = new PedalCableNative { From = (byte)f, To = (byte)t, Gain = c.Gain };
+        if (PgApi.Board(_h, b) != 0) Status = PgApi.Error(_h);
+    }
+
     /// The song to the core (heard from the next bar).
     public unsafe void Publish()
     {
@@ -382,6 +477,9 @@ public sealed class Playground
         }
         if (nr > 0) Changed();
         PeakDb = Math.Max(st.PeakDb, PeakDb - 1.5f);
+        InputDb = Math.Max(st.InputDb, InputDb - 1.5f);
+        OutputDb = Math.Max(st.OutputDb, OutputDb - 1.5f);
+        for (int k = 0; k < 16; k++) PedalDb[k] = Math.Max(st.PedalDb[k], PedalDb[k] - 1.5f);
         uint* msg = stackalloc uint[64];
         int n = PgApi.Read(_h, msg, 64);
         for (int i = 0; i < n; i++) Midi((byte)msg[i], (byte)(msg[i] >> 8), (byte)(msg[i] >> 16));

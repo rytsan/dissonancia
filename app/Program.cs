@@ -57,6 +57,7 @@ public sealed class MainWindow : Window
     readonly List<double> _taps = [];
     readonly TabControl _tabs = new();
     readonly TabItem _liveTab, _studioTab, _scoreTab;
+    readonly PedalboardModule _pedals;
     readonly StudioView _studio;
     readonly RackView _rack;
     readonly StageView _stage = new();
@@ -91,7 +92,7 @@ public sealed class MainWindow : Window
             [ModuleKind.Tuner] = new TunerModule(), [ModuleKind.Fretboard] = new FretboardModule(), [ModuleKind.Keyboard] = new KeyboardModule(),
             [ModuleKind.Waterfall] = new WaterfallModule(), [ModuleKind.Timeline] = new TimelineModule(),
             [ModuleKind.Transport] = transport, [ModuleKind.Status] = new StatusModule(),
-            [ModuleKind.Metrics] = new MetricsModule(), [ModuleKind.Pads] = new PadsModule(), [ModuleKind.Sequencer] = new SequencerModule(), [ModuleKind.Midi] = new MidiModule(), [ModuleKind.Song] = new SongModule(),
+            [ModuleKind.Metrics] = new MetricsModule(), [ModuleKind.Pads] = new PadsModule(), [ModuleKind.Sequencer] = new SequencerModule(), [ModuleKind.Midi] = new MidiModule(), [ModuleKind.Song] = new SongModule(), [ModuleKind.Pedals] = new PedalboardModule(),
         };
         ((SongModule)catalog[ModuleKind.Song]).Bounced += () =>
         {   // the timeline rendered, into STUDIO's library and on its tracks
@@ -101,6 +102,7 @@ public sealed class MainWindow : Window
             _studio.OpenPath(path);
         };
         Playground.Current.Command += c => { if (c == "rec") _source.ToggleRec(Clock()); else if (c == "metro") _source.ToggleMetronome(); };
+        _pedals = (PedalboardModule)catalog[ModuleKind.Pedals];
         _modules = [.. catalog.Values, _stage];
         foreach (var m in _modules) { m.Frame = _frame; m.Session = _session; }
         _rack = new RackView(catalog);
@@ -294,6 +296,7 @@ public sealed class MainWindow : Window
     {
         if (_tabs.SelectedItem == _studioTab && e.Key == Key.Space) { _studio.TogglePlay(); e.Handled = true; return; }
         if (_tabs.SelectedItem == _studioTab && e.Key is Key.Delete or Key.Back && _studio.DeleteCable()) { e.Handled = true; return; }
+        if (_tabs.SelectedItem == _liveTab && e.Key is Key.Delete or Key.Back && _pedals.DeleteCable()) { e.Handled = true; return; }
         if (_tabs.SelectedItem != _liveTab) { base.OnKeyDown(e); return; }
         if (!_keys.TryGetValue(e.Key, out var action)) { base.OnKeyDown(e); return; }
         _actions[action]();

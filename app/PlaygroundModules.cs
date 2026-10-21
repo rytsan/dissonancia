@@ -409,3 +409,234 @@ public sealed class MidiModule : KeyedModule
         }
     }
 }
+
+/// DS-B PEDALEIRA: stompboxes on the floor, patched with cables (ropes, as STUDIO's lunchbox):
+/// ENTRADA (the input) and PADS on the left, SAÍDA (the LIVE output) and GRAVAR (what REC puts in
+/// a loop) on the right, each pedal's IN / OUT on its top. Pick a plug out of its jack and carry it to
+/// another; a new cable comes from an empty jack; Delete or a right click on a cable removes it.
+/// A pedal's footswitch turns it on / off; a right click on its name takes it off the board.
+public sealed class PedalboardModule : KeyedModule
+{
+    public PedalboardModule() { Title = "DS-B  PEDALEIRA"; }
+
+    readonly Dictionary<string, Point> _jacks = [];
+    readonly Dictionary<CableLink, Rope> _ropes = new(ReferenceEqualityComparer.Instance);
+    readonly List<(Rope Rope, string Fixed, bool FixedIsOut, int Colour)> _loose = [];
+    (Rope Rope, string Fixed, bool FixedIsOut, int Colour)? _cable;
+    readonly List<(Rect Name, PedalDef P)> _names = [];
+    readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
+    double _lastT, _floor;
+    Point _hand;
+    Rope? _hover;
+
+    static bool IsOut(string jack) => jack.EndsWith(":out");
+
+    float Lv(string node) => node switch
+    {
+        "in" => P.InputDb,
+        "pads" => P.PeakDb,
+        _ => P.S.Pedals.FindIndex(p => p.Id == node) is int k and >= 0 && k < 16 ? P.PedalDb[k] : -120,
+    };
+
+    protected override void Draw(DrawingContext ctx, Rect r)
+    {
+        var s = P.S;
+        double now = _clock.Elapsed.TotalSeconds, dt = Math.Clamp(now - _lastT, 0.001, 0.04);
+        _lastT = now;
+        _floor = r.Bottom + 4;
+        _jacks.Clear();
+        _names.Clear();
+        // The board: a dark floor with the io panels at its ends.
+        ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF141517)), Ui.FaceEdge, new Rect(r.X, r.Y, r.Width, r.Height - 26), 4, 4);
+        void Io(double x, string label, string jack, bool lit, float db)
+        {
+            Ui.Text(ctx, label, x, r.Y + 6, 8, Ui.LabelBright, Ui.SansBold, Ui.Align.Center);
+            _jacks[jack] = new Point(x, r.Y + 30);
+            Ui.Led(ctx, new Point(x, r.Y + 48), 3, db > -50, db > -3 ? Ui.Red : Ui.Green, Ui.GreenOff);
+            if (lit) Ui.Text(ctx, "normal", x, r.Y + 56, 7, Ui.LcdDim, Ui.Mono, Ui.Align.Center);
+        }
+        Io(r.X + 30, "ENTRADA", "in:out", false, P.InputDb);
+        _jacks["pads:out"] = new Point(r.X + 30, r.Y + 90);
+        Ui.Text(ctx, "PADS", r.X + 30, r.Y + 66, 8, Ui.LabelBright, Ui.SansBold, Ui.Align.Center);
+        bool padsNormal = !s.PedalCables.Any(k => k.From == "pads:out"), recNormal = !s.PedalCables.Any(k => k.To == "rec:in");
+        if (padsNormal) Ui.Text(ctx, "→ saída", r.X + 30, r.Y + 104, 7, Ui.LcdDim, Ui.Mono, Ui.Align.Center);
+        Io(r.Right - 30, "SAÍDA", "out:in", false, P.OutputDb);
+        _jacks["rec:in"] = new Point(r.Right - 30, r.Y + 90);
+        Ui.Text(ctx, "GRAVAR", r.Right - 30, r.Y + 66, 8, P.Armed ? Ui.Red : Ui.LabelBright, Ui.SansBold, Ui.Align.Center);
+        if (recNormal) Ui.Text(ctx, "entrada seca", r.Right - 30, r.Y + 104, 7, Ui.LcdDim, Ui.Mono, Ui.Align.Center);
+
+        // The pedals, left to right.
+        double pw = 118, ph = Math.Min(r.Height - 40, 190), x = r.X + 70;
+        for (int i = 0; i < s.Pedals.Count && x + pw < r.Right - 66; i++, x += pw + 10)
+        {
+            var p = s.Pedals[i];
+            var box = new Rect(x, r.Y + 6, pw, ph);
+            var col = Color.FromUInt32(PedalDef.Colours[p.Kind]);
+            ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF060707)), null, box.Translate(new Vector(0, 3)), 8, 8);
+            ctx.DrawRectangle(new ImmutableLinearGradientBrush([new ImmutableGradientStop(0, col), new ImmutableGradientStop(1, Color.FromArgb(255, (byte)(col.R * 0.6), (byte)(col.G * 0.6), (byte)(col.B * 0.6)))],
+                startPoint: new RelativePoint(0, 0, RelativeUnit.Relative), endPoint: new RelativePoint(0, 1, RelativeUnit.Relative)), KeyEdge, box, 8, 8);
+            var name = new Rect(box.X, box.Y + 22, box.Width, 18);
+            Ui.Text(ctx, PedalDef.Names[p.Kind], box.Center.X, name.Y, 13, Ui.LabelBright, Ui.SansBold, Ui.Align.Center);
+            _names.Add((name, p));
+            int k = i;
+            float lv = k < 16 ? P.PedalDb[k] : -120;
+            for (int j = 0; j < 4; j++)
+            {
+                if (PedalDef.Labels[p.Kind][j].Length == 0) continue;
+                int kj = j;
+                Knob(ctx, new Point(box.X + 32 + (j % 2) * 54, box.Y + 62 + (j / 2) * 46), 12, PedalDef.Labels[p.Kind][j], p.Value(j), p.Knobs[j],
+                    n => { p.Knobs[kj] = (float)Math.Round(n, 3); P.PublishBoard(); });
+            }
+            // Footswitch and its LED.
+            var fs = new Point(box.Center.X, box.Bottom - 22);
+            Ui.Led(ctx, new Point(box.Center.X, box.Bottom - 44), 4, p.On, Ui.Red, Ui.RedOff);
+            ctx.DrawEllipse(new ImmutableSolidColorBrush(Color.FromUInt32(0xFFB9BEC5)), new ImmutablePen(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF3A3E44)), 2), fs, 11, 11);
+            ctx.DrawEllipse(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF7A7F86)), null, fs, 6, 6);
+            Area(new Rect(fs.X - 14, fs.Y - 14, 28, 28), () => { p.On = !p.On; P.BoardChanged(); });
+            for (int m = 0; m < 5; m++) Ui.Led(ctx, new Point(box.X + 14 + m * 7, box.Bottom - 8), 2, lv > -48 + m * 10, m > 3 ? Ui.Red : Ui.Green, Ui.GreenOff);
+            _jacks[p.Id + ":in"] = new Point(box.X + 12, box.Y + 10);
+            _jacks[p.Id + ":out"] = new Point(box.Right - 12, box.Y + 10);
+            Ui.Text(ctx, "IN", box.X + 22, box.Y + 4, 7, Ui.LabelBright, Ui.SansBold);
+            Ui.Text(ctx, "OUT", box.Right - 22, box.Y + 4, 7, Ui.LabelBright, Ui.SansBold, Ui.Align.Right);
+        }
+        foreach (var j in _jacks.Values)
+        {
+            ctx.DrawEllipse(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF0B0C0D)), new ImmutablePen(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF8A9099)), 1.5), j, 6.5, 6.5);
+            ctx.DrawEllipse(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF000000)), null, j, 3, 3);
+        }
+
+        // Cables.
+        foreach (var c in s.PedalCables.ToList())
+        {
+            if (c.Colour < 0) c.Colour = NextColour();
+            if (!_jacks.TryGetValue(c.From, out var a) || !_jacks.TryGetValue(c.To, out var e)) continue;
+            if (!_ropes.TryGetValue(c, out var rope)) _ropes[c] = rope = new Rope(a, e);
+            rope.Step(dt, a, e, _floor);
+            if (ReferenceEquals(rope, _hover)) Cables.Halo(ctx, rope);
+            Cables.Draw(ctx, rope, Cables.Colours[c.Colour % Cables.Colours.Length], Lv(c.From[..c.From.IndexOf(':')]), now);
+        }
+        foreach (var c in _ropes.Keys.Where(c => !s.PedalCables.Contains(c)).ToList()) _ropes.Remove(c);
+        foreach (var (rope, fix, _, col) in _loose)
+            if (_jacks.TryGetValue(fix, out var a)) { rope.Step(dt, a, null, _floor); if (ReferenceEquals(rope, _hover)) Cables.Halo(ctx, rope); Cables.Draw(ctx, rope, Cables.Colours[col % Cables.Colours.Length], -90, now); }
+        _loose.RemoveAll(l => !_jacks.ContainsKey(l.Fixed));
+        if (_cable is { } held && _jacks.TryGetValue(held.Fixed, out var fa))
+        {
+            held.Rope.Step(dt, fa, _hand, _floor);
+            Cables.Draw(ctx, held.Rope, Cables.Colours[held.Colour % Cables.Colours.Length], -90, now);
+            if (NearJack(_hand, !held.FixedIsOut) is { } target) ctx.DrawEllipse(null, new ImmutablePen((IImmutableBrush)Ui.Green, 2), _jacks[target], 10, 10);
+        }
+
+        // The drawer.
+        double dx = r.X, dy = r.Bottom - 22;
+        Ui.Text(ctx, "GAVETA", dx, dy + 4, 8, Ui.Label, Ui.SansBold);
+        dx += 52;
+        for (int kind = 0; kind < PedalDef.Names.Length; kind++)
+        {
+            int kk = kind;
+            Key(ctx, new Rect(dx, dy, 84, 20), "+ " + PedalDef.Names[kind], () => { if (P.S.Pedals.Count < 16) P.AddPedal(kk); }, withLed: false);
+            dx += 88;
+        }
+        Ui.Text(ctx, "plugue ↔ jack · Delete / botão direito no cabo apaga · direito no nome tira o pedal", dx + 8, dy + 5, 8, Ui.Label, Ui.Sans);
+    }
+
+    int NextColour()
+    {
+        for (int i = 0; i < Cables.Colours.Length; i++) if (!P.S.PedalCables.Any(k => k.Colour == i)) return i;
+        return P.S.PedalCables.Count;
+    }
+
+    string? NearJack(Point p, bool wantOut)
+    {
+        foreach (var (id, j) in _jacks)
+            if (IsOut(id) == wantOut && (p - j).X * (p - j).X + (p - j).Y * (p - j).Y <= 14 * 14 && P.S.PedalCables.Count(k => k.From == id || k.To == id) < 4) return id;
+        return null;
+    }
+
+    Rope? RopeAt(Point p)
+    {
+        Rope? best = null;
+        double bd = 8 * 8;
+        foreach (var rope in _ropes.Values.Concat(_loose.Select(l => l.Rope)))
+            foreach (var q in rope.P)
+                if ((p - q).X * (p - q).X + (p - q).Y * (p - q).Y is double d && d < bd) (bd, best) = (d, rope);
+        return best;
+    }
+
+    /// Delete / Backspace: the cable in the hand, or the one under the mouse, off the board.
+    public bool DeleteCable()
+    {
+        if (_cable is not null) { _cable = null; return true; }
+        if (_hover is not { } rope) return false;
+        _hover = null;
+        _loose.RemoveAll(l => ReferenceEquals(l.Rope, rope));
+        if (_ropes.FirstOrDefault(kv => ReferenceEquals(kv.Value, rope)).Key is { } k) { P.S.PedalCables.Remove(k); _ropes.Remove(k); P.BoardChanged(); }
+        return true;
+    }
+
+    protected override void Pressed(PointerPressedEventArgs e, Point p)
+    {
+        var s = P.S;
+        if (e.GetCurrentPoint(this).Properties.IsRightButtonPressed)
+        {
+            foreach (var (name, pd) in _names) if (name.Contains(p)) { P.RemovePedal(pd); return; }
+            _hover = RopeAt(p);
+            DeleteCable();
+            return;
+        }
+        foreach (var (id, j) in _jacks)
+        {
+            if ((p - j).X * (p - j).X + (p - j).Y * (p - j).Y > 11 * 11) continue;
+            var k = s.PedalCables.LastOrDefault(x => x.From == id || x.To == id);
+            if (k is not null)
+            {
+                bool heldIsTo = k.To == id;
+                var rope = _ropes.GetValueOrDefault(k) ?? new Rope(_jacks[k.From], _jacks[k.To]);
+                if (!heldIsTo) rope.Reverse();
+                s.PedalCables.Remove(k);
+                _cable = (rope, heldIsTo ? k.From : k.To, heldIsTo, k.Colour);
+                P.BoardChanged();
+            }
+            else _cable = (new Rope(j, p), id, IsOut(id), NextColour());
+            _hand = p;
+            e.Pointer.Capture(this);
+            return;
+        }
+        for (int i = _loose.Count - 1; i >= 0; i--)
+            if ((p - _loose[i].Rope.B).X * (p - _loose[i].Rope.B).X + (p - _loose[i].Rope.B).Y * (p - _loose[i].Rope.B).Y < 12 * 12)
+            {
+                _cable = _loose[i];
+                _loose.RemoveAt(i);
+                _hand = p;
+                e.Pointer.Capture(this);
+                return;
+            }
+    }
+
+    protected override void OnPointerMoved(PointerEventArgs e)
+    {
+        if (_cable is null)
+        {
+            _hover = RopeAt(e.GetPosition(this));
+            base.OnPointerMoved(e);
+            return;
+        }
+        _hand = e.GetPosition(this);
+    }
+
+    protected override void OnPointerReleased(PointerReleasedEventArgs e)
+    {
+        if (_cable is not { } held) { base.OnPointerReleased(e); return; }
+        _cable = null;
+        _hand = e.GetPosition(this);
+        e.Pointer.Capture(null);
+        if (NearJack(_hand, !held.FixedIsOut) is { } to && to[..to.IndexOf(':')] != held.Fixed[..held.Fixed.IndexOf(':')])
+        {
+            var k = held.FixedIsOut ? new CableLink { From = held.Fixed, To = to, Colour = held.Colour } : new CableLink { From = to, To = held.Fixed, Colour = held.Colour };
+            if (!held.FixedIsOut) held.Rope.Reverse();
+            P.S.PedalCables.Add(k);
+            _ropes[k] = held.Rope;
+            P.BoardChanged();
+        }
+        else _loose.Add(held);
+    }
+}

@@ -37,12 +37,22 @@ Latency, from a change to the screen (`tools/loopback/latency.py`): first
 pitch 30 ms, stable note 50 ms, bass settled 220 ms, chord played ~0.5 s,
 harmony ~1 s. CPU about 1 %.
 
-**Playground** (PLAYGROUND above the rack): 16 pads of your WAVs (click, or a MIDI pad
-controller on notes 36–51), a sampler that plays one WAV on every other MIDI note (repitched from
-its root), a 16-step sequencer on the metronome's grid (sample-accurate with the click and the
-input), and a MIDI controller slot with MIDI learn (sequencer, REC, metronome, volumes). It plays
-through the LIVE output; MIDI input is RtMidi (ALSA / WinMM / CoreMIDI). **Métricas**: the
-pipeline's latency, input, CPU, losses, tuning, tempo and confidence as lit keys, one plotted.
+**Playground** (PLAYGROUND above the rack), a place to make a song while LIVE listens:
+
+- **Timeline**: blocks of bars (a pad pattern, sampler notes, an audio loop) in a row, each played
+  N times. ▶ plays on through the timeline, ⟲ loops the selected block; launching a block, or
+  giving it more bars, takes effect on the next bar while it plays. **REC** overdubs the block
+  playing: your input into its loop (round trip compensated), pad hits and notes into its pattern
+  at the nearest sixteenth. **BOUNCE → STUDIO** renders the timeline and opens it on STUDIO's tracks.
+- **Pads** (16 WAVs; a MIDI pad controller on notes 36–51), a **sampler** (one WAV on every other
+  MIDI note, repitched from its root), a **sequencer** editing the selected block bar by bar.
+- **Pedalboard**: drive, octave, chorus, tempo delay, reverb, filter as stompboxes, patched with
+  cables between ENTRADA (the input), PADS, SAÍDA (the output) and GRAVAR (what REC records).
+- **MIDI controller** with MIDI learn. Everything plays through the LIVE output on the metronome's
+  grid, sample-accurate with the click and the input; MIDI input is RtMidi (ALSA / WinMM / CoreMIDI).
+
+**Métricas**: the pipeline's latency, input, CPU, losses, tuning, tempo and confidence as lit keys,
+one plotted.
 
 ## STUDIO
 
