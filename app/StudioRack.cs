@@ -9,7 +9,7 @@ using Avalonia.Platform.Storage;
 
 namespace Dissonancia;
 
-// The STUDIO tab as Dissonância's own 19" rack (docs/studio-plan.md, layout): DS-T transport,
+// The STUDIO tab as Dissonância's own 19" rack (docs/IMPLEMENTATION.md, layout): DS-T transport,
 // DS-L library, DS-A track recorder (with the S2 edit keys), DS-C channel chain ending in the
 // analyser. Same visual language as the LIVE rack: screwed faces, plasma dot-matrix readouts,
 // phosphor screens, LEDs.

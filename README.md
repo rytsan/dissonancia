@@ -6,7 +6,8 @@ takes the recording through a studio session (editing, separation, mixing,
 transcription, review) and delivers a score, MIDI and a chord chart.
 
 - Core in C++20, app in C# (.NET 10, Avalonia) through a plain C ABI.
-- Windows, Linux, macOS. No web, no cloud, no account.
+- Targets Windows, Linux and macOS; only Linux (WSL2) is verified so far. No web, no cloud,
+  no account.
 - The UI is Dissonância's own 19" rack.
 
 ## LIVE
@@ -97,7 +98,8 @@ Per style (STUDIO): singer-songwriter 86 %, rock 77 %, bossa nova 71 %, jazz
 62 %, funk 54 %. Synthetic fingerpicking 93–97 %, band mix 93 %. Weak spots:
 funk and mixes with loud drums.
 
-Dev tools for these numbers are in `tools/loopback/` (`guitarset.py`,
+Real songs have no corpus yet: by ear, about 80 % of chords read right on songs the author
+knows. Dev tools for these numbers are in `tools/loopback/` (`guitarset.py`,
 `picking.py`, `mix.py`, `chordscore.py`) and `core/build/dz_wav` (any WAV
 through the LIVE or STUDIO path).
 
@@ -117,6 +119,13 @@ size and SHA-256, and builds its own artifacts:
 
 Python is dev-side only (exports, prototypes, evaluation). Users never need it.
 
+## Status
+
+Built and tested on synthetic material and GuitarSet; see
+[`docs/IMPLEMENTATION.md`](docs/IMPLEMENTATION.md) for each requirement against the build and
+[`docs/ROADMAP.md`](docs/ROADMAP.md) for what comes next. There is no CI, no installer and no
+Windows or macOS build yet.
+
 ## Build
 
 Requirements: CMake ≥ 3.24, a C++20 compiler (GCC 13 / Clang 17 / MSVC 2022),
@@ -127,10 +136,10 @@ Ninja (optional), .NET SDK 10.
 # -DDZ_WITH_VEROVIO=OFF / DZ_WITH_DEMUCS=OFF / DZ_WITH_VST3=OFF skip the optional parts)
 cmake -S core -B core/build -G Ninja
 cmake --build core/build
-core/build/dz_tests
+core/build/dz_tests            # 71 cases
 
 # SCORE checks (quantization, ties, MusicXML/MIDI writers, rack presets)
-dotnet run --project tests/score
+dotnet run --project tests/score   # 128 checks
 
 # app (copies the native library from core/build)
 cd app
@@ -159,7 +168,7 @@ core/   C++ engine: include/dissonancia.h (C ABI), src/ (notes.cpp: perceived no
 app/    C# Avalonia app: LIVE rack, STUDIO stages, Score, Accel (GPU setup), YourMt3, BasicPitch
 tests/  score/: runnable checks for the SCORE layer, rack presets, fretboard shapes
 tools/  loopback/: evaluation scripts · yourmt3/: ONNX export (dev) · shot/: headless screenshots
-docs/   IMPLEMENTATION.md (what is built and measured), spec.md, studio-plan.md
+docs/   IMPLEMENTATION.md (requirements vs build, measurements, open items), ROADMAP.md
 ```
 
 ## License

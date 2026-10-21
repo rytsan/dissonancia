@@ -3,7 +3,7 @@ using System.Text.Json;
 
 namespace Dissonancia;
 
-// STUDIO S1 — Session: library, playback, waveform (docs/studio-plan.md).
+// STUDIO S1 — Session: library, playback, waveform (docs/IMPLEMENTATION.md).
 
 [StructLayout(LayoutKind.Sequential)]
 struct PlayerInfoNative

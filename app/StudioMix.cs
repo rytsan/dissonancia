@@ -3,7 +3,7 @@ using System.Text.Json;
 
 namespace Dissonancia;
 
-// STUDIO S4 / S11 — mixing (docs/studio-plan.md): the C# side of the core's mixer graph. A track's
+// STUDIO S4 / S11 — mixing (docs/IMPLEMENTATION.md): the C# side of the core's mixer graph. A track's
 // strip (fader, pan, mute, solo, polarity), the lunchbox's modules and cables, the master; per take
 // in <takes>/studio/<name>.mix.json; and the native mirrors (MixGraph).
 

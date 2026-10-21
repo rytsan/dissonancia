@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 
 namespace Dissonancia;
 
-// STUDIO S3 — separation (docs/studio-plan.md): Demucs v4 through the dz_separate helper, run as
+// STUDIO S3 — separation (docs/IMPLEMENTATION.md): Demucs v4 through the dz_separate helper, run as
 // its own process (a crash or a cancel never touches the app). Optional: the helper ships with the
 // app when it was built (DZ_WITH_DEMUCS), the weights are downloaded on demand, checksum-pinned.
 

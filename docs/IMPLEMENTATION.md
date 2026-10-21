@@ -1,84 +1,228 @@
-# Implementation status
+# Implementation
 
-What exists in the code today, how it fits together, and what was measured.
-The target design is [`spec.md`](spec.md); this file describes only what is built.
-`spec.v2.1.md` is the original spec, kept for history.
+What Dissonância is today, measured against what it was specified to be.
 
-| Milestone | Scope | Status |
+The original specification (`docs/spec.md` V2.3, `docs/spec.v2.1.md`) and the STUDIO plan
+(`docs/studio-plan.md`) were removed on 2026-10-21. They live in git history (last version at
+commit `4d1fca3`; code comments that cite `§n` or `studio-plan Sn` refer to that version). This
+file replaces them: every requirement they set is listed below with
+what was built, what changed by a later decision and what is still open. The future work is in
+[`ROADMAP.md`](ROADMAP.md).
+
+Status on 2026-10-21:
+- Core: 71 Catch2 cases, 5952 assertions, all pass (`core/build/dz_tests`).
+- App checks: 128 checks in `tests/score`, all pass.
+- Platforms: built and run on Linux (WSL2 + WSLg) only. Windows and macOS are not verified.
+- CI: none. Nothing runs the tests on a push.
+- Real use: the user has sung into a microphone and played YouTube songs whose chords they know.
+  Their estimate is that about 80 % reads right. That is a judgement, not a measurement.
+
+## Requirements against the build
+
+Status words: **Done** (built as specified), **Changed** (built differently by a later decision,
+listed under "Decisions that changed the spec"), **Partial**, **Open** (not built), **Dropped**.
+
+### Product shape
+
+| Requirement (spec) | Status | Where / notes |
 |---|---|---|
-| M0 | Skeleton: device, rings, threads, snapshot, events, REC, metronome, C ABI | Done (open items below) |
-| M1 | Voice / instrument melody (YIN, tracker, spelling) | Done |
-| M2 | CQT engine, chroma, global tuning | Done |
-| M3 | Chord templates, matching, tracker, ambiguity reasons | Done |
-| M4 | Onsets, onset gating, bass, inversions, arpeggios | Done |
-| M5 | Music theory: chord spelling, Roman numerals, cadences, LCD staff | Done (live cadences use harmonic evidence only) |
-| M5b | Rack modules: fretboard/keyboard, waterfall, tuner, edit mode, stage mode | Done (reorder by buttons, not drag) |
-| M6 | LIVE → SCORE fast path, MusicXML/MIDI, Verovio | Done (MuseScore round trip still to check by hand) |
-| M7+ | STUDIO (import, editor, separation, choir, VST3) | Not started |
+| Offline desktop app, no cloud, no account, no web build (§0) | Done | Downloads only fetch pinned upstream components (Setup) |
+| Four tabs: START, LIVE, STUDIO, SCORE (§0, §22) | Done | `app/Program.cs` |
+| LIVE: lowest latency, visual feedback only (§0, §4) | Changed | The playground makes LIVE produce sound: pads, sampler, pedalboard on the output |
+| LIVE never writes files (§0) | Changed | REC writes takes (always did); the playground saves loops and bounces to STUDIO |
+| No neural networks in LIVE (§0) | Changed | LIVE Melodia runs Basic Pitch (ONNX, CPU) |
+| Fixed modes chosen before the session, no runtime switching (§5) | Changed | Five LIVE modes over the core's pipelines; STUDIO keeps the old five `AnalysisMode`s |
+| LIVE → STUDIO → SCORE flow (§0, decision 2026-10-02) | Done | A LIVE take opens on STUDIO's tracks |
+| v1.0 = M0–M6 accepted before any STUDIO work (§24) | Dropped | STUDIO S1–S11 were built while the v1.0 acceptance items stayed open |
+| Never fake certainty: confidence, alternatives, reasons (§0) | Done | Chord reasons, `incerta` keys, DÚVIDA ▶ in review |
+| Placement rule: expensive, look-ahead or whole-take work only in STUDIO (§0) | Done | Except Melodia's neural notes (0.5–1 s window) |
+
+### Stack (§1)
+
+| Requirement | Status | Notes |
+|---|---|---|
+| C++20 core, C ABI, P/Invoke | Done | `core/include/dissonancia.h`, `app/Native.cs` |
+| C# .NET 10, Avalonia | Done | Avalonia 12.1.3 |
+| miniaudio capture, WASAPI shared / exclusive, CoreAudio, ALSA, JACK, PipeWire | Partial | miniaudio picks the backend; START offers device, rate, period, exclusive. No backend selector |
+| No ASIO unless WASAPI misses 20 ms on a real interface | Open | WASAPI never measured |
+| demucs.cpp for separation, ONNX Runtime optional | Done | Plus YourMT3+ and Basic Pitch on onnxruntime, GPU via `Accel.cs` |
+| VST3 SDK, out-of-process host | Done | `core/vst3/dz_plugin.cpp` |
+| r8brain resampler in STUDIO | Changed | miniaudio's resampler (decoder and device) |
+| WAV / FLAC / MP3 / OGG import | Partial | No OGG (stb_vorbis not added) |
+| PocketFFT / pffft | Changed | Direct-form CQT; no FFT library needed so far |
+| SIMD abstraction (AVX2 / NEON) | Open | Scalar code; measured cheap enough (CPU ≈ 1–2.5 %) |
+| Verovio as a separate LGPL library | Done | Built from pinned source, loaded at run time |
+| Catch2 + xUnit + RealtimeSanitizer + microbench | Partial | Catch2 and microbench yes; C# checks are a runnable program, not xUnit; no RTSan |
+| Windows primary, Linux, macOS | Open | Only Linux (WSL2) verified |
+
+### Real time (§3, §4)
+
+| Requirement | Status | Notes |
+|---|---|---|
+| Callback: no allocation, lock, I/O; notify rule | Done | `rt_trap.cpp` aborts on `new` inside a real-time scope |
+| Triple buffer snapshot, SPSC event queue with sequence numbers | Done | `lockfree.hpp` |
+| Complete events only, flush on stop, gaps marked | Done | |
+| Thread priority: MMCSS / SCHED_FIFO / QoS | Partial | Direct SCHED_FIFO; no rtkit, no macOS audio workgroup |
+| FTZ / DAZ, pre-touched buffers | Done | |
+| RealtimeSanitizer in CI | Open | No CI; needs Clang ≥ 20 |
+| Page-fault counter in the GUI | Open | |
+| Metronome on a separate output device (drift re-anchoring) | Open | Duplex device only |
+| Loopback latency calibration | Open | The reported capture + playback latency is used |
+| Reference machine fixed, CPU budgets measured on it | Open | All figures are from the dev machine |
+| Capture ≤ 20 ms; first pitch ≤ 80 ms; stable ≤ 150 ms | Done (dev machine) | 15 ms reported capture; 30 / 50 ms |
+| Chord confirmation 0.4–1 s | Changed | Chord played ~0.5 s, harmony ~1 s from a change to the screen |
+| CPU ≤ 15 % Balanced; 0 xruns in 10 min | Done (dev machine, WSLg) | ≈ 1–2.5 %; 0 xruns in loopback runs |
+
+### LIVE analysis (§5–§16)
+
+| Requirement | Status | Notes |
+|---|---|---|
+| Mode × quality table, integer decimation | Done | `live_config.hpp` |
+| Pre-processing: DC, HP, gate, RMS, peak, clip | Done | Adaptive silence gate (`noise_gate.hpp`) |
+| Voice: YIN, median-of-3 tracker, vibrato kept, octave guard | Done | `voice.cpp` |
+| YIN SIMD / FFT variant | Open | Not needed by measurement |
+| Octave-decimated CQT, tuning sets, chroma | Done | `cqt.cpp` |
+| NNLS chroma (bounded PGD) | Dropped | Replaced by perceived notes + HMM (`notes.cpp`) |
+| Polyphonic notes with harmonic handling (§10) | Changed | `NoteFrontEnd`: A-weighting, Bark masking, virtual pitch, per register |
+| Piano inharmonicity correction | Open | |
+| Bass preview + CQT confirmation, computed settle | Done | `bass.cpp` |
+| 180 templates, ambiguity reasons, tonal context | Done | Still the chroma path; chord modes now decode from notes |
+| Chord tracker states, backdating, no overlap | Done | `ChordTracker::process_notes` |
+| Guitar tunings, capo; voicing only as tie-break | Partial | In the ABI and the fretboard search; no START control |
+| Arpeggio accumulation | Done | Including damped picking |
+| Onsets, onset gating | Done | |
+| Key fixed by the user; spelling D♭ ≠ C♯ | Done | Plus a heard key (`KeyTracker`) shown, never applied |
+| Roman numerals, cadences (live, capped confidence) | Done | |
+| Solfège (§18) | Open | Display layer v1.5, sung syllables v2 |
+| A4 reference on START | Partial | In `SessionConfig`; no START control |
+
+### SCORE and STUDIO (§17, §19–§21)
+
+| Requirement | Status | Notes |
+|---|---|---|
+| Quantization, two timelines, ties, meter rules | Done | `Score.cs` |
+| Pickup bar, swing, tuplets beyond eighth triplets | Open | |
+| MusicXML (XSD-valid), MIDI type 1, JSON, text chart | Done | |
+| MusicXML opened in MuseScore | Open | Manual check never done |
+| Verovio view | Done | Re-engraved only when the tab opens |
+| Accidental policy, courtesy accidentals, transposing instruments | Open | |
+| Library, playback, peak mipmap | Done | S1 |
+| Non-destructive editor | Partial | Trim, cut, clip gain, fades, normalize, undo; no split, copy / paste, mute region, gain envelope |
+| Stage cache keyed by options + upstream | Done | Per stage key (edits, stems, inserts, taps) |
+| Built-in effects (gain, HP / LP, EQ, gate) + compressor | Done | S4, then the lunchbox (S11) |
+| Separation 2 / 4 / 6 stems | Partial | 4 and 6 stems; no 2-stem option |
+| Per-stem transcription, YIN + MPM cross-check | Partial | Viterbi decoders; no MPM; YourMT3+ and Basic Pitch for instruments |
+| Key suggestion, tempo map, corrections kept across re-runs | Done | S6 |
+| Choir by section (experimental) | Done | S9, synthetic only |
+| VST3: scan, render, latency, state, editor | Done | S8; Linux editor only checked |
+| Mix-down and stems to WAV | Done | ENTREGAR |
+| Themes dark + light; languages PT-BR + EN (§22.7) | Partial | Dark only; labels mixed PT / EN |
+
+### GUI (§22)
+
+| Requirement | Status | Notes |
+|---|---|---|
+| Rack modules, edit mode, presets per mode | Done | Reorder by buttons, not drag; one preset per mode |
+| Stage mode, shortcuts, one action table | Done | |
+| MIDI controllers via the action table (open item in the spec) | Done | Playground: RtMidi, MIDI learn |
+| Zero allocation per frame in the C# render loop | Open | Text still allocates outside the cached strings; no check |
+| ABI layout check at load | Done | Refuses a mismatched core |
+
+## Decisions that changed the spec
+
+Each one came from the user, after the spec was written.
+
+- **2026-10-02:** STUDIO is built in studio order (S1–S9), not M7–M11. Key and meter belong to the
+  user and never move by themselves. The STUDIO look is Dissonância's own rack, with a DAW's
+  workflow.
+- **2026-10-15:** STUDIO REC records through the core's recorder. The rack shows signal flow like
+  a desk or a pedalboard.
+- **2026-10-19:**
+  - Five LIVE modes: Música completa, Melodia, Acústico, Acústico + voz, Piano.
+  - Melodia runs Basic Pitch on the CPU. This is a neural model in LIVE.
+  - ML ships natively (ONNX, ggml); Python is a dev tool only.
+- **2026-10-20:**
+  - Nothing is hosted: each machine fetches upstream files at pinned versions and builds its own.
+  - LIVE chords come from perceived notes and an HMM, not from chroma templates.
+  - LIVE leads with the harmony (triads); STUDIO shows the detail (sevenths, slash chords).
+- **2026-10-21:**
+  - STUDIO's chain is a lunchbox patched with cables. The cables are the mixer graph.
+  - STUDIO renders about 1 s ahead for quality.
+  - LIVE has a playground: pads, sampler, sequencer, song timeline, pedalboard, MIDI.
 
 ## Architecture as built
 
 ```mermaid
 flowchart LR
-    subgraph RT["Real-time (C++, no allocation)"]
-        CB["Audio callback<br/>miniaudio duplex"] -->|mono| AR[(analysis ring<br/>ma_pcm_rb)]
-        CB -->|take frames| RR[(recorder ring<br/>8 s)]
-        CB -->|click on input clock| OUT[output]
-        AR -->|notify when 1 hop unread<br/>and analysis waits| AT["Analysis thread<br/>FTZ/DAZ, RT priority"]
+    subgraph RT["LIVE real time (C++, no allocation)"]
+        CB["Audio callback<br/>miniaudio duplex"] -->|mono| AR[(analysis ring)]
+        CB -->|take frames| RR[(recorder ring)]
+        CB -->|block copy| AT2[(audio tap)]
+        PG["Playground render<br/>pads · sampler · song · pedalboard"] --> CB
+        CB -->|click + playground| OUT[output]
+        AR --> AT["Analysis thread"]
     end
-    AT --> V["VoicePipeline<br/>decimate · HP · YIN · tracker"]
-    AT --> C["ChromaFrontEnd<br/>half-band · CQT · onsets · gating · bass · tuning"]
-    C --> T["ChordTracker<br/>matcher · context · arpeggio"]
-    V --> TB[[Triple buffer<br/>LiveSnapshot]]
-    T --> TB
-    V --> EQ[[SPSC event queue<br/>4096, sequence numbers]]
-    T --> EQ
-    RR --> REC["Recorder thread<br/>WAV float32 + JSON sidecar"]
-    TB -->|ana_read_snapshot| GUI["C# Avalonia GUI<br/>rack, plasma display"]
-    EQ -->|ana_drain_events| GUI
+    AT --> V["Voice: YIN tracker"]
+    AT --> N["NoteFrontEnd → ChordHmm<br/>chord played + harmony"]
+    AT --> K["Key, tempo heard, bass, melody line"]
+    V & N & K --> TB[[Triple buffer<br/>LiveSnapshot]]
+    V & N --> EQ[[SPSC events]]
+    RR --> REC["Recorder: WAV + JSON sidecar"]
+    AT2 --> BP["Basic Pitch (C#, ONNX)<br/>Melodia"]
+    TB --> GUI["C# Avalonia rack"]
+    EQ --> GUI
+    REC --> ST["STUDIO: player, MixGraph rendered ahead,<br/>Demucs, decoders, YourMT3+, VST3 helper"]
+    ST --> SC["SCORE: lead sheet, Verovio, exports"]
 ```
 
-Only the pipeline chosen on START exists in a session (`voice_` for mono modes,
-`chroma_` + `chords_` for chord modes). Nothing switches at runtime.
+The session builds only the pipeline its mode needs: `voice_` for mono modes, the notes front end
+and the chord tracker for chord modes. Nothing switches at run time.
 
 ## Code map
 
 | Path | What it does |
 |---|---|
 | `core/include/dissonancia.h` | The whole C ABI: POD structs with explicit padding, `extern "C"` functions |
-| `core/src/api.cpp` | ABI entry points: handle, device list, start/stop, snapshot, events, REC, metronome, layout export |
-| `core/src/engine.{hpp,cpp}` | Session lifecycle, audio callback, notify rule, analysis loop, meters, metronome, REC, take log, sidecar |
-| `core/src/lockfree.hpp` | Triple buffer and SPSC queue (preallocated, never allocate) |
-| `core/src/rt.{hpp,cpp}` | Denormals off, thread priority (MMCSS / SCHED_FIFO / QoS), real-time scope flag, monotonic clock |
-| `core/src/live_config.hpp` | Mode × quality table: rates, hops, windows, ranges, computed T_low |
-| `core/src/voice.{hpp,cpp}` | Pipeline A: FIR decimator, high-pass, YIN, median-of-3, note tracker, events |
-| `core/src/theory.hpp` | Speller: key signature, chromatic spelling by direction, minor raised 6/7, letter octave, clef shift |
-| `core/src/halfband.hpp` | IIR polyphase half-band decimator, analytic response, computed group delay |
-| `core/src/cqt.{hpp,cpp}` | Octave-decimated CQT, 11 tuning sets, chroma with leakage removal, tuning estimator, onset gating |
-| `core/src/bass.{hpp,cpp}` | Onset detector (spectral flux) and bass tracker (YIN preview + CQT confirmation) |
-| `core/src/player.{hpp,cpp}` | STUDIO player: file decoded to memory, own output device, loop, min/max peak mipmap |
-| `core/src/post.{hpp,cpp}` | STUDIO offline analysis job: whole file through the mode's pipeline, progress, cancel, take JSON out |
-| `core/src/decode.{hpp,cpp}` | STUDIO whole-take chord decoding: Viterbi over the matcher's scores, segment labels, onset snap, metronome grid |
-| `core/src/sidecar.hpp` | Take JSON event writer shared by the REC sidecar and the offline result |
-| `app/Studio.cs` | STUDIO native wrappers (player, job), take project cache, library, edit list |
-| `app/StudioSeparation.cs` | STUDIO S3: Demucs weights (download + SHA-256), the dz_separate process, stem waveforms |
-| `app/EditList.cs` | S2 edit list (trim, cut, clip gain, fades, normalize) |
-| `core/tools/dz_separate.cpp` | Separation helper: Demucs v4 via demucs.cpp, one WAV per stem, progress on stdout |
-| `core/src/mixdsp.hpp` | S4 strip and master DSP: RBJ biquads, 12/24 dB filters, gate, soft-knee compressor, limiter, constant-power pan |
-| `app/StudioMix.cs` | S4 mix model per take (strips by channel name, master), native mirrors |
-| `app/StudioRack.cs` | STUDIO tab as a 19" rack: DS-T transport, DS-L library, DS-A track recorder with the edit keys, DS-C chain + analyser |
-| `core/src/tempo.{hpp,cpp}` | Tempo heard (onset-envelope autocorrelation + beat phase): beat marks on the scope only |
-| `core/src/chords.{hpp,cpp}` | Chord matcher (180 harmonic-aware templates, Occam, key/cadence context, bass), tracker, slash spelling |
-| `core/src/abi_check.cpp` | `static_assert` sizes/offsets, compiled with `-Wpadded -Werror` |
-| `core/tests/` | Catch2 tests + `rt_trap.cpp` (operator new aborts inside a real-time scope) |
-| `app/Native.cs` | P/Invoke mirrors, layout check, `NativeCore`, `NativeLiveSource`, text cache |
-| `app/LiveModel.cs` | `Session`, `LiveFrame` (view model), `ILiveSource`, `FakeLiveSource` (design data) |
-| `app/Rack.cs` | Rack modules: input VU under glass, scope, analyzer display, instrument, timeline, transport, status, stage |
-| `app/Plasma.cs` | Gas-plasma look: 5×7 dot-matrix font, glow, lamps, pixel grid |
-| `app/Theory.cs` | GUI-side pitch/key/clef helpers |
-| `app/Program.cs` | Window, tabs (START / LIVE / STUDIO placeholder / SCORE), START options, shortcuts |
+| `core/src/api.cpp` | ABI entry points |
+| `core/src/engine.{hpp,cpp}` | LIVE session: callback, notify rule, analysis loop, meters, metronome, REC, sidecar |
+| `core/src/lockfree.hpp`, `rt.{hpp,cpp}` | Triple buffer, SPSC queue; denormals, thread priority, real-time scope |
+| `core/src/live_config.hpp` | Mode × quality table |
+| `core/src/noise_gate.hpp` | Adaptive silence gate (minimum statistics) |
+| `core/src/voice.{hpp,cpp}`, `theory.hpp` | Voice pipeline (YIN, tracker); speller |
+| `core/src/halfband.hpp`, `cqt.{hpp,cpp}` | IIR half-band, octave-decimated CQT, chroma, tuning |
+| `core/src/bass.{hpp,cpp}` | Onsets, bass preview + confirmation |
+| `core/src/notes.{hpp,cpp}` | NoteFrontEnd (perceived notes) and ChordHmm (LIVE lag decoder, STUDIO whole-take decode) |
+| `core/src/chords.{hpp,cpp}` | Templates, matcher, tracker (chroma and notes paths), Roman numerals, cadences, key tracker |
+| `core/src/tempo.{hpp,cpp}` | Tempo heard (display only) |
+| `core/src/playground.{hpp,cpp}`, `pedals.hpp` | Pads, sampler, sequencer, song timeline, overdub, bounce; six stompboxes on a patched board |
+| `core/src/player.{hpp,cpp}` | STUDIO player: decode, edits, MixGraph rendered ahead, bounce |
+| `core/src/mixdsp.hpp`, `loudness.hpp` | Strip and master DSP; BS.1770 / R128 loudness, true peak |
+| `core/src/post.{hpp,cpp}`, `decode.{hpp,cpp}`, `sidecar.hpp` | Offline analysis job; whole-take chord and note decoders; take JSON |
+| `core/src/beats.{hpp,cpp}` | Beat tracking (Ellis DP) |
+| `core/src/choir.{hpp,cpp}` | Multi-f0 and SATB assignment (experimental) |
+| `core/src/abi_check.cpp` | `static_assert` layout, `-Wpadded -Werror` |
+| `core/tools/dz_wav.cpp` | Any WAV through the LIVE or STUDIO path (dev measurement) |
+| `core/tools/dz_separate.cpp` | Demucs v4 helper process |
+| `core/vst3/` | `dz_plugin` VST3 host helper (scan, render, params, editor) and the `DZ Test Gain` fixture |
+| `core/tests/` | Catch2 cases; `rt_trap.cpp` aborts on allocation in a real-time scope |
+| `app/Program.cs` | Window, tabs, START options, shortcuts |
+| `app/Native.cs`, `LiveModel.cs` | P/Invoke mirrors and layout check; `Session`, `LiveFrame`, `FakeLiveSource` |
+| `app/Rack.cs`, `Modules.cs`, `RackCatalog.cs`, `RackLayout.cs`, `Plasma.cs` | LIVE rack, module catalog, presets, plasma look |
+| `app/LiveSong.cs`, `LiveTranscriber.cs`, `BasicPitch.cs` | Música completa (key, meter, form); Melodia's neural notes |
+| `app/Playground.cs`, `PlaygroundModules.cs`, `SongMidi.cs`, `SampleBank.cs` | Playground state and units; MIDI file import / export; VCSL sounds |
+| `app/Cables.cs` | Rope cables shared by the lunchbox and the pedalboard |
+| `app/Studio.cs`, `StudioRack.cs` | STUDIO wrappers, project cache, library; the STUDIO rack |
+| `app/EditList.cs`, `StudioSeparation.cs`, `StudioMix.cs`, `StudioPatch.cs`, `StudioLunchbox.cs`, `StudioMeters.cs`, `StudioPlugins.cs` | Edits, Demucs, mix model, patch graph, lunchbox, meters, VST3 |
+| `app/YourMt3.cs`, `TorchCheckpoint.cs`, `Accel.cs` | YourMT3+ native; checkpoint reader; GPU detection and Setup |
+| `app/Review.cs`, `LeadSheet.cs`, `Score.cs`, `Verovio.cs`, `SvgRaster.cs` | Review, lead sheet, score writers, engraving |
+| `tests/score/` | Runnable checks for SCORE, rack presets, fretboard, playground, MIDI |
+| `tools/loopback/` | Loopback test and evaluation scripts (GuitarSet, picking, mix, latency, choir) |
+| `tools/yourmt3/` | YourMT3+ ONNX export and parity checks (dev only) |
+| `tools/shot/` | Headless screenshots |
 
 ## What each part does
+
+The sections below are the engineering record. They are grouped by part, not strictly by date.
 
 ### M0 — skeleton
 - miniaudio duplex (or capture-only) device, 5 ms period requested, real rate
@@ -281,8 +425,8 @@ notes, a sung melody with passing and neighbour tones, kick/snare/hi-hat),
 - `DISSONANCIA_TAKES` overrides the takes folder (tools, tests).
 - Flow (decision 2026-10-02): LIVE → STUDIO → SCORE. TRANSPORT's button goes
   to STUDIO; the score is made from the take treated there (normalize, trim,
-  EQ, Demucs separation). STUDIO is not built yet: it offers a SCORE preview
-  of the raw take.
+  EQ, Demucs separation). Without a STUDIO result, a REC take's raw
+  sidecar is the SCORE preview.
 
 ### STUDIO S1 — session (first part: library and playback)
 - Core player (`ana_player_*`, its own audio context and output device,
@@ -486,7 +630,7 @@ notes, a sung melody with passing and neighbour tones, kick/snare/hi-hat),
 - SCORE from STUDIO uses the offline result; without one, a REC take's raw
   sidecar is the preview.
 
-### GUI (prototype, C# / Avalonia 12.1, .NET 10)
+### GUI (C# / Avalonia 12.1, .NET 10)
 - START: mode, quality, key cascade, clef, meter, BPM, count-in, audio
   device/rate/period/exclusive/click output.
 - LIVE rack: VU under glass with a peak LED ladder, scrolling scope,
@@ -543,6 +687,87 @@ notes, a sung melody with passing and neighbour tones, kick/snare/hi-hat),
 - Fixed on the way: the simulated voice computed its phase as 2π·f(t)·t with
   vibrato inside f, so its pitch drifted with time; the phase is integrated now.
 
+### STUDIO S8 — VST3 inserts, out-of-process (`core/vst3/`)
+- VST3 SDK 3.8.0 (MIT), four pinned tarballs, only the SDK libraries built. Optional
+  (`DZ_WITH_VST3`); the `dz_plugin` helper ships next to the app.
+- Scan: standard VST3 folders plus `DISSONANCIA_VST3_PATH` and folders added with + PASTA; one
+  process per bundle, 15 s timeout, cache by modification time.
+- Render: offline (kOffline, float32, 1024-frame blocks), state in / out, parameters applied over
+  the state, plugin latency compensated sample for sample; tails past the take's end are cut.
+- Parameters as knobs (eight a page); the plugin's own editor in a native window of the helper
+  (X11 checked under Xvfb; Win32 written, not built; no macOS).
+- In the lunchbox an insert renders offline in the serial run straight from a track's SAI;
+  elsewhere it is a wire and the module says so (live VST3 is S11 phase 4).
+- Not done: tails, automation, VST3 on the master, instruments, macOS editor.
+
+### STUDIO S9 — choir by section (`core/src/choir.cpp`, EXPERIMENTAL)
+- Klapuri multi-f0 per 20 ms frame, then a Viterbi over S / A / T / B assignments with range
+  priors and a voice-leading cost; unison notes flagged with half the confidence.
+- CORO on the analyser's mode key; open score (S, A, T 8vb, B), MIDI per section.
+- Tuned on synthetic sets only. Not done: closed score, chords from the four voices, repeated
+  notes on one pitch, score-informed separation.
+
+### LIVE modes (2026-10-19)
+- Five `LiveMode`s mapped onto the core's pipelines: **Música completa** (key, meter and 4-bar
+  form of the song so far, `LiveSong.cs`), **Melodia** (every line heard: CQT multi-f0 up to 4
+  voices, and Basic Pitch on the CPU over a core audio tap `ana_read_audio`), **Acústico**,
+  **Acústico + voz**, **Piano**. Rack presets per mode.
+- Adaptive silence gate in both pipelines (minimum statistics over ~5 s, +6 dB, capped at
+  −30 dBFS): room noise no longer shows as notes.
+- Predominant melody line in the chord modes (harmonic salience over the CQT).
+- Key heard (`KeyTracker`): pitch-class energy with a 45 s decay against Temperley profiles,
+  changing only after another key leads for 4 s. Shown, and used as the tonal prior when no key is
+  set; never written into the session.
+
+### LIVE chords from perceived notes (2026-10-20, `core/src/notes.cpp`)
+- `NoteFrontEnd`: A-weighted STFT, peaks masked by louder neighbours on the Bark scale, virtual
+  pitch, notes judged per register (bass, middle, treble), audibility floor, 2-hop persistence;
+  up to 4 notes per hop.
+- `ChordHmm`: each chord explains the notes heard, weighted by recency, sustain (treble only) and
+  register; sticky changes; key as a prior; Viterbi with a fixed lag. `ChordTracker::process_notes`
+  emits the same events as before (same-root renames in place, majority bass for inversions).
+- Two readings: the **chord played** (every quality, lag 0.3 s + 0.1 s hold, ~0.5 s to the
+  screen) and the **harmony** (major / minor triads, lag 0.6 s, ~1 s to the screen). Música
+  completa leads with the harmony; the timeline records it.
+- STUDIO decodes the same model over the whole take (`ChordHmm::decode`); a settled bass that
+  holds 0.3 s inside a chord makes a slash chord.
+- The old chroma path stays for its tests and for `dz_wav`.
+- Latency is measured from a change to the screen (`tools/loopback/latency.py`), because the
+  backdated events hid the wait.
+
+### LIVE playground (2026-10-21, `core/src/playground.cpp`, `app/Playground*.cs`)
+- Rendered in the LIVE duplex callback after the click, on the metronome grid, sample-accurate;
+  samples decoded off the audio thread, published by pointer, freed two callbacks later.
+- Units: DS-P pads (16 one-shot WAVs) and sampler (one WAV repitched from its root), DS-Q
+  sequencer, DS-T timeline, DS-B pedalboard, DS-I MIDI controller (RtMidi 6.0.0, MIDI learn),
+  DS-X metrics (latency, input, CPU, losses, tuning, tempo, confidence; one plotted over 30 s).
+- Song: blocks of 1–64 bars (pad pattern, sampler notes, audio loop) × repeats; launches and
+  edits take effect on the next bar; REC overdubs the block playing (input into its loop, round
+  trip compensated; hits and notes quantized to the sixteenth); BOUNCE → STUDIO.
+- Pedalboard: drive, octave, chorus, tempo delay, reverb, filter; stereo, per sample, no added
+  latency; cables between ENTRADA, PADS, SAÍDA, GRAVAR and each pedal. Normalled: REC records the
+  input dry; the input reaches the output only through a cable.
+- MIDI files: a block is MIDI (pad n = note 35 + n on channel 10, sampler notes on channel 1).
+  Export with a marker per block; import back block for block, quantized to the sixteenth, and
+  the metronome takes the file's tempo.
+- Sounds: VCSL (CC0) kit and four instruments, ~13 MB, fetched by Setup at a pinned commit.
+- Not done: note editor for sampler notes, time-stretched loops (a loop keeps its tempo and is
+  marked amber), pedals tested on a real input with monitoring.
+
+### Native ML and Setup (2026-10-19 .. 20)
+- **Basic Pitch** (ONNX, 230 KB, CPU): LIVE Melodia, and STUDIO notes of each instrument stem.
+- **YourMT3+** (`app/YourMt3.cs`): multi-instrument transcription in STUDIO, ported to C#
+  (spectrogram, resampler, greedy decoder, detokenizer); 32/32 notes against the authors' Python.
+  The repo ships the graphs without weights; each machine builds `yourmt3.weights` (189 MB) from
+  the authors' checkpoint (Hugging Face, pinned revision and SHA-256) with
+  `app/TorchCheckpoint.cs`. Speed for a 13 s take: CPU ~8 s, CUDA ~2.2 s, DirectML ~6 s; a 24 s
+  take in 1.9 s on CUDA with IOBinding and batches of 8.
+- **Accel / Setup** (`app/Accel.cs`, SYSTEM on START): detects OS, CPU, RAM, GPU and driver;
+  installs the matching onnxruntime build (CUDA on Linux x64, DirectML on Windows, CoreML on
+  macOS — CoreML untested), checks the GPU against the CPU in a child process, falls back to the
+  CPU. Also fetches the Demucs weights and the VCSL sounds. A failure is remembered and not
+  retried at every start.
+
 ## Measurements
 
 From the test suite (synthetic signals, sample clock) and loopback runs on
@@ -577,11 +802,16 @@ item).
 | Live loopback, pipeline | capture 15 ms (reported), processing median 4.8–5.1 ms, CPU ≤ 2.5 %, 0 xruns, 0 recorder gaps, 0 event gaps |
 | STUDIO S9 choir by section (EXPERIMENTAL), synthetic | 3 chorales × 8 chords: S 18, A 18, T 21, B 19 of 24; `choir.py` (two singers per section, vowels, breath, room, 16 chords): S 15, A 12, T 12, B 11 of 16 (78 %), 91 notes for 64 sung; 0.85 s for 17 s of audio |
 | STUDIO S8 VST3 | DZ Test Gain: +6.00 dB sample-exact, state round trip identical, 64-sample latency compensated (aligned), editor under Xvfb: edit → state |
+| GuitarSet comping (180 takes, MIREX majmin) | LIVE 34 → 69 % (chroma templates → notes + HMM), STUDIO 39 → 71 %; per style (STUDIO) singer-songwriter 86, rock 77, bossa nova 71, jazz 62, funk 54 %. On screen (not backdated) LIVE 49.5 % |
+| LIVE latency, change → screen (`latency.py`) | first pitch 30 ms, stable note 50 ms, bass settled 220 ms, chord played ~0.5 s, harmony ~1 s |
+| Chords from notes, synthetic | fingerpicking 93–97 %, band mix 93 %, guitar + voice 92.5 % |
+| YourMT3+ (13 s take) | 32/32 notes vs the authors' Python; CPU ~8 s, CUDA ~2.2 s, DirectML ~6 s |
 | STUDIO metering | 1 kHz at −23 dBFS → −23.0 LUFS integrated; gated −36/−23/−36 → −23 ±0.2; 20 s −20 + 20 s −30 → LRA 10 ±1; fs/4 at 45° → true peak −6.0 dBTP (sample peak −9.0) |
 
 ## Tests
 
-`core/build/dz_tests`: 28 Catch2 cases. Every real-time path runs inside an
+`core/build/dz_tests`: 71 Catch2 cases (5952 assertions), including the mixer graph,
+the player ring, the playground, beats, tempo, choir and the decoders. Every real-time path runs inside an
 `RtScope`, and the test binary's `operator new` aborts there, so any heap
 allocation in the callback or the analysis steady state fails the run.
 
@@ -611,32 +841,44 @@ allocation in the callback or the analysis steady state fails the run.
 
 ## Open items
 
-- M0: RealtimeSanitizer CI (needs Clang ≥ 20); metronome on a different output
-  device (per-beat re-anchoring); rtkit on Linux; page-fault counter; reference
-  machine; loopback latency calibration (the capture figure is reported, not
-  measured).
-- Voice: SIMD / FFT YIN only if a measurement asks; legato repeated notes need
-  an attack detector in the voice pipeline.
-- Chords: NNLS chroma (M7c); guitar voicing tie-break; fretboard dots from real
-  data.
-- GUI: text rendering still allocates per frame outside the cached strings
-  (spec §22.7); rack reorder is by buttons, not drag and drop; one user preset
-  per mode (no named presets / NextPreset yet); capo and alternate tunings for
-  the fretboard.
-- SCORE: open an exported take in MuseScore once (manual acceptance); no
-  CI yet for the XSD/Verovio checks; triplets only as eighth triplets; no
-  tempo detection (the session BPM is used); the page is re-engraved only
-  when the tab opens (no reflow on resize).
-- Windows build and run not yet verified (developed on WSL2).
-- Voice: legato pitch changes are dated where the tracker settles (≈ 28 ms late);
-  backdating them to the pitch crossing would remove it.
-- The loopback runs use synthetic instruments; a real guitar and voice through
-  a microphone are still to be measured.
+Grouped by what they block. [`ROADMAP.md`](ROADMAP.md) orders them.
+
+**Release blockers (nothing shipped can be trusted without them)**
+- No CI. The broken `tests/score` build of 2026-10-21 went unnoticed for a commit.
+- Windows and macOS never built or run. Win32 VST3 editor written, never compiled. CoreML untested.
+- No installer or packaging; the app runs from `dotnet run` next to a local core build.
+- No reference machine; every CPU and latency figure is from the dev machine under WSLg.
+
+**Validation**
+- Real instruments and voice through a microphone: only informal use (about 80 % by the user's
+  ear). No annotated real recordings in the corpus.
+- MuseScore round trip of an exported MusicXML (manual check).
+- Choir on a real choir; playground pedals on a real input with monitoring.
+
+**LIVE**
+- Weak spots: funk (54 % STUDIO), mixes with loud drums.
+- Legato repeated notes need an attack detector in the voice pipeline.
+- Guitar tuning, capo and A4 have no START controls.
+- RealtimeSanitizer, rtkit, page-fault counter, metronome on another output device, loopback
+  latency calibration.
+- C# render loop still allocates for text; no allocation check.
+
+**Playground**
+- Note editor for sampler notes; time-stretch for loops at another tempo.
+
+**STUDIO**
+- S11 phase 4: VST3 played live (shared memory, plugin delay compensation).
+- S11 phase 5: oversampled compressor / limiter, look-ahead true-peak limiter, linear-phase EQ.
+- Editor: split, copy / paste, mute region, gain envelope. Separation: 2-stem option.
+- Score: pickup bar, swing, other tuplets, accidental policy, transposing instruments, reflow on
+  resize.
+- VST3: tails, automation, master bus, instruments, macOS editor.
+
+**GUI**
+- Rack reorder by drag; named presets; light theme; one UI language (labels mix PT and EN).
 
 ## Knowledge graph
 
-`graph/` holds a [graphify](https://github.com/safishamsi/graphify) knowledge
-graph of the code and docs: [`graph/GRAPH_REPORT.md`](graph/GRAPH_REPORT.md)
-(god nodes, communities, surprising links) and `graph/graph.html`
-(interactive; open it in a browser). Rebuild with `/graphify .` or
-`graphify update .` for code-only changes.
+`docs/graph/` holds a [graphify](https://github.com/safishamsi/graphify) graph of the code and
+docs (`GRAPH_REPORT.md`, `graph.html`). It predates the LIVE modes and the playground. Rebuild
+with `graphify update .`.
