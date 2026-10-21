@@ -231,6 +231,13 @@ Check(LeadSheet.Harmony([Ch(0, 2, "Am"), Ch(2, 4, "E7")], new KeyOption(0, true)
     Check(new ChannelMix { EqOn = true }.UnitNative("eq", 7, true).Kind == 0, "mix graph: a rendered module is a wire");
 }
 
+// LIVE playground: the native mirrors are the core's sizes; a pattern step toggles one bit.
+Check(System.Runtime.CompilerServices.Unsafe.SizeOf<PlaygroundConfigNative>() == 172 && System.Runtime.CompilerServices.Unsafe.SizeOf<PlaygroundStatusNative>() == 152,
+    "playground: PlaygroundConfig 172, PlaygroundStatus 152 bytes, as the core");
+Check(RackCatalog.WithPlayground(RackCatalog.Default(LiveMode.Acoustic), true).Take(3).Select(e => e.Module).SequenceEqual(RackCatalog.Playground)
+      && !RackCatalog.WithPlayground(RackCatalog.WithPlayground(RackCatalog.Default(LiveMode.Acoustic), true), false).Any(e => RackCatalog.Playground.Contains(e.Module)),
+    "playground: PLAYGROUND puts its units on top of the rack and takes them out again");
+
 // DS-C lunchbox: what the cables reach, the serial run from SAI (rendered with its inserts), loops.
 {
     CableLink L(string f, string t) => new() { From = f, To = t };

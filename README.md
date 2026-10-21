@@ -37,6 +37,13 @@ Latency, from a change to the screen (`tools/loopback/latency.py`): first
 pitch 30 ms, stable note 50 ms, bass settled 220 ms, chord played ~0.5 s,
 harmony ~1 s. CPU about 1 %.
 
+**Playground** (PLAYGROUND above the rack): 16 pads of your WAVs (click, or a MIDI pad
+controller on notes 36–51), a sampler that plays one WAV on every other MIDI note (repitched from
+its root), a 16-step sequencer on the metronome's grid (sample-accurate with the click and the
+input), and a MIDI controller slot with MIDI learn (sequencer, REC, metronome, volumes). It plays
+through the LIVE output; MIDI input is RtMidi (ALSA / WinMM / CoreMIDI). **Métricas**: the
+pipeline's latency, input, CPU, losses, tuning, tempo and confidence as lit keys, one plotted.
+
 ## STUDIO
 
 ```

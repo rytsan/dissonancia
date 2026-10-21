@@ -13,6 +13,7 @@ public sealed class RackView : DockPanel
     readonly StackPanel _rows = new() { Margin = new Thickness(8, 0, 8, 8) };
     readonly StackPanel _pinned = new() { Margin = new Thickness(8, 0, 8, 8) };   // Transport + Status, never scrolled away
     readonly ToggleButton _editButton = new() { Content = "EDIT RACK", Focusable = false, Padding = new Thickness(10, 3) };
+    readonly ToggleButton _playButton = new() { Content = "PLAYGROUND", Focusable = false, Padding = new Thickness(10, 3) };
     readonly ComboBox _catalog = new() { MinWidth = 260, Focusable = false };
     readonly StackPanel _editTools;
     readonly TextBlock _hint = new() { Foreground = Ui.Label, VerticalAlignment = VerticalAlignment.Center };
@@ -33,9 +34,10 @@ public sealed class RackView : DockPanel
         reset.Click += (_, _) => { RackCatalog.Reset(Mode); _entries = RackCatalog.Default(Mode); Rebuild(); };
         _editTools = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, IsVisible = false, Children = { _catalog, add, reset } };
         _editButton.IsCheckedChanged += (_, _) => { _editTools.IsVisible = Editing; Rebuild(); };
-        foreach (var c in new Control[] { _editButton, add, reset, _catalog })
+        _playButton.Click += (_, _) => SetPlayground(_playButton.IsChecked == true);
+        foreach (var c in new Control[] { _editButton, _playButton, add, reset, _catalog })
             if (c is TemplatedControl t) { t.Foreground = Ui.LabelBright; t.Background = Ui.Face; t.BorderBrush = Ui.Label; t.BorderThickness = new Thickness(1); }
-        var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(8, 6), Children = { _editButton, _editTools, _hint } };
+        var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(8, 6), Children = { _editButton, _playButton, _editTools, _hint } };
         SetDock(bar, Dock.Top);
         SetDock(_pinned, Dock.Bottom);
         Children.Add(bar);
@@ -50,6 +52,9 @@ public sealed class RackView : DockPanel
         _editButton.IsChecked = false;
         Rebuild();
     }
+
+    /// The playground's units in the rack (PLAYGROUND key).
+    public void SetPlayground(bool on) => Edit(l => { var n = RackCatalog.WithPlayground(l, on); l.Clear(); l.AddRange(n); });
 
     public void ToggleEdit() { if (!_locked) _editButton.IsChecked = !Editing; }
 
@@ -105,6 +110,7 @@ public sealed class RackView : DockPanel
             IsEnabled = RackCatalog.Applies(k, Mode) && _entries.All(x => x.Module != k),
         }).ToList();
         _hint.Text = Editing ? $"preset saved for {Mode} as JSON" : "";
+        _playButton.IsChecked = _entries.Any(e => RackCatalog.Playground.Contains(e.Module));
     }
 
     Control Cell(RackEntry e, int i)

@@ -5,7 +5,7 @@ namespace Dissonancia;
 // Modular rack (spec §22.4): a fixed catalog of view-only modules, full or half width, heights in
 // rack units, one preset per mode saved as JSON. Changing the rack never touches the analysis.
 
-public enum ModuleKind { Input, Scope, Analyzer, Tuner, Fretboard, Keyboard, Waterfall, Timeline, Transport, Status }
+public enum ModuleKind { Input, Scope, Analyzer, Tuner, Fretboard, Keyboard, Waterfall, Timeline, Transport, Status, Metrics, Pads, Sequencer, Midi }
 
 public sealed record RackEntry(ModuleKind Module, bool Half, int HeightU);
 
@@ -16,7 +16,8 @@ public static class RackCatalog
     public static string Name(ModuleKind k) => k switch
     {
         ModuleKind.Input => "Analog VU + peak LEDs", ModuleKind.Analyzer => "Analyzer display (chord + note)",
-        ModuleKind.Waterfall => "CQT waterfall", ModuleKind.Timeline => "Chord timeline", _ => k.ToString(),
+        ModuleKind.Waterfall => "CQT waterfall", ModuleKind.Timeline => "Chord timeline", ModuleKind.Metrics => "Métricas do LIVE",
+        ModuleKind.Pads => "Playground: pads + sampler", ModuleKind.Sequencer => "Playground: sequencer", ModuleKind.Midi => "Playground: controlador MIDI", _ => k.ToString(),
     };
 
     /// REC access and the ms readout must always be on screen.
@@ -34,6 +35,9 @@ public static class RackCatalog
         ModuleKind.Analyzer => (3, 5),
         ModuleKind.Timeline => (1, 2),
         ModuleKind.Input or ModuleKind.Fretboard or ModuleKind.Keyboard => (2, 3),
+        ModuleKind.Metrics or ModuleKind.Midi => (1, 2),
+        ModuleKind.Pads => (3, 4),
+        ModuleKind.Sequencer => (2, 4),
         _ => (1, 4),
     };
 
@@ -54,7 +58,16 @@ public static class RackCatalog
             LiveMode.Piano => [new(ModuleKind.Keyboard, false, 2), new(ModuleKind.Waterfall, false, 2), new(ModuleKind.Timeline, false, 1)],
             _ => [new(ModuleKind.Waterfall, false, 2), new(ModuleKind.Timeline, false, 1)],
         };
-        return [.. top, .. middle, new(ModuleKind.Transport, false, 1), new(ModuleKind.Status, false, 1)];
+        return [.. top, .. middle, new(ModuleKind.Metrics, false, 1), new(ModuleKind.Transport, false, 1), new(ModuleKind.Status, false, 1)];
+    }
+
+    /// The playground's units (creation: pads, sequencer, MIDI), added and taken out together.
+    public static readonly ModuleKind[] Playground = [ModuleKind.Pads, ModuleKind.Sequencer, ModuleKind.Midi];
+    public static List<RackEntry> WithPlayground(List<RackEntry> l, bool on)
+    {
+        var r = l.Where(e => !Playground.Contains(e.Module)).ToList();
+        if (on) r.InsertRange(0, [new(ModuleKind.Pads, false, 3), new(ModuleKind.Sequencer, false, 2), new(ModuleKind.Midi, false, 1)]);   // on top: the section in front
+        return r;
     }
 
     static string PresetPath(LiveMode mode) =>

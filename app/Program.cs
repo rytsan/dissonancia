@@ -91,7 +91,9 @@ public sealed class MainWindow : Window
             [ModuleKind.Tuner] = new TunerModule(), [ModuleKind.Fretboard] = new FretboardModule(), [ModuleKind.Keyboard] = new KeyboardModule(),
             [ModuleKind.Waterfall] = new WaterfallModule(), [ModuleKind.Timeline] = new TimelineModule(),
             [ModuleKind.Transport] = transport, [ModuleKind.Status] = new StatusModule(),
+            [ModuleKind.Metrics] = new MetricsModule(), [ModuleKind.Pads] = new PadsModule(), [ModuleKind.Sequencer] = new SequencerModule(), [ModuleKind.Midi] = new MidiModule(),
         };
+        Playground.Current.Command += c => { if (c == "rec") _source.ToggleRec(Clock()); else if (c == "metro") _source.ToggleMetronome(); };
         _modules = [.. catalog.Values, _stage];
         foreach (var m in _modules) { m.Frame = _frame; m.Session = _session; }
         _rack = new RackView(catalog);
@@ -109,6 +111,7 @@ public sealed class MainWindow : Window
             ["EditRack"] = _rack.ToggleEdit,
             ["Score"] = () => ShowScore(),
             ["Studio"] = () => _tabs.SelectedItem = _studioTab,
+            ["Playground"] = () => _rack.SetPlayground(true),
             ["StudioOpenFirst"] = () => _studio.OpenFirst(),
             ["StudioOpenSeparated"] = () => _studio.OpenSeparated(),
             ["StudioAnalyze"] = () => _studio.AnalyzeCurrent(),
@@ -171,6 +174,7 @@ public sealed class MainWindow : Window
         if (_lastFrame > 0) _frame.DisplayMs = (float)((now - _lastFrame) * 1000);   // measured frame interval
         _lastFrame = now;
         _source.Read(_frame, now);
+        Playground.Current.Poll();
         SyncRack();
         if (_tabs.SelectedItem == _studioTab) _studio.Tick();
         if (_tabs.SelectedItem == _liveTab)
@@ -193,6 +197,7 @@ public sealed class MainWindow : Window
             try
             {
                 _source = _core.Start(_session);
+                Playground.Current.Attach(_core.Handle, _session.ClickOutput);   // the pads at this input's rate, the pattern, the MIDI port
                 _startStatus.Text = "";
             }
             catch (InvalidOperationException e)
@@ -211,7 +216,7 @@ public sealed class MainWindow : Window
         if (_source is not NativeLiveSource)
         {
             if (_core is null) return $"núcleo nativo ausente ({_coreError})";
-            try { _source = _core.Start(_session); }
+            try { _source = _core.Start(_session); Playground.Current.Attach(_core.Handle, _session.ClickOutput); }
             catch (InvalidOperationException e) { _source = new FakeLiveSource(_session); return "a entrada não abriu: " + e.Message; }
         }
         _source.ToggleRec(Clock());
@@ -267,6 +272,7 @@ public sealed class MainWindow : Window
     public void Step(double now)
     {
         _source.Read(_frame, now);
+        Playground.Current.Poll();
         SyncRack();
         foreach (var m in _modules) m.InvalidateVisual();
         _rack.CountIn.InvalidateVisual();

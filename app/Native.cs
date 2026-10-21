@@ -244,6 +244,7 @@ static partial class Ana
 public sealed class NativeCore : IDisposable
 {
     readonly nint _h;
+    internal nint Handle => _h;
 
     readonly LiveTranscriber? _transcriber;   // Melodia's neural notes; null without the model
 
