@@ -409,6 +409,10 @@ void Engine::process_hop(const float* x, uint32_t n) {
     s.bass = cout_.bass;
     s.melody = cout_.melody;
     std::memcpy(s.voices, cout_.voices, sizeof s.voices);
+    if (chroma_) {   // chord modes: every note heard is a perceived note (NoteFrontEnd), highest first
+        std::fill(s.voices, s.voices + 8, int8_t(-1));
+        for (int i = 0; i < cout_.notes.count; i++) s.voices[i] = cout_.notes.midi[cout_.notes.count - 1 - i];
+    }
     s.lastOnsetSeconds = chroma_ && cout_.lastOnset >= 0 ? cout_.lastOnset - compensationMs() / 1000.0 : -1;
     s.context = contextOut_;
     s.songKey = chout_.key;

@@ -6,7 +6,9 @@ using Avalonia.Platform;
 
 namespace Dissonancia;
 
-/// Guitar fretboard with the most likely shape of the chord (spec §22.3, "likely shape").
+/// Guitar fretboard: the most likely shape of the chord (spec §22.3, "likely shape"), and every note
+/// heard lit where it is most likely played (on the shape when it is one of its notes, else the string
+/// nearest the shape's position); a picked note glows for a moment after it was last heard.
 public sealed class FretboardModule : RackModule
 {
     public FretboardModule() { Title = "FRETBOARD"; }
@@ -16,6 +18,8 @@ public sealed class FretboardModule : RackModule
     static readonly IPen Fret = new ImmutablePen(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF9A948A)), 1.5);
     static readonly IBrush StringBrush = new ImmutableSolidColorBrush(Color.FromUInt32(0xFFCFC7B8));
     static readonly IPen OpenRing = new ImmutablePen(Ui.Green as IImmutableBrush, 2);
+    const double GlowSeconds = 0.4;
+    readonly double[] _heard = new double[128];   // when each note was last heard (s)
 
     protected override void DrawContent(DrawingContext ctx, Rect r)
     {
@@ -29,19 +33,50 @@ public sealed class FretboardModule : RackModule
         foreach (var m in new[] { 3, 5, 7, 9, 12 })
             ctx.DrawEllipse(Ui.Label, null, new Point(board.X + (m - 0.5) * fw, board.Bottom + 10), 3, 3);
         string[] names = ["E", "A", "D", "G", "B", "e"];
+        double StringY(int s) => board.Bottom - (s + 0.5) * board.Height / 6;
+        Point At(int s, int fret) => fret == 0 ? new Point(board.X - 13, StringY(s)) : new Point(board.X + (fret - 0.5) * fw, StringY(s));
         int lowest = Array.FindIndex(f.Frets, x => x >= 0);
         for (int s = 0; s < 6; s++)
         {
-            double y = board.Bottom - (s + 0.5) * board.Height / 6;
+            double y = StringY(s);
             ctx.DrawLine(new ImmutablePen(StringBrush as IImmutableBrush, 2.2 - s * 0.25), new Point(board.X, y), new Point(board.Right, y));
             Ui.Text(ctx, names[s], r.X + 6, y - 8, 12, Ui.LabelBright, Ui.SansBold, Ui.Align.Center);
             if (f.Frets.Length == 0) continue;
             int fret = s < f.Frets.Length ? f.Frets[s] : -1;
             if (fret < 0) Ui.Text(ctx, "×", board.X - 14, y - 9, 14, Ui.Red, Ui.SansBold, Ui.Align.Center);
-            else if (fret == 0) ctx.DrawEllipse(null, OpenRing, new Point(board.X - 13, y), 6, 6);
-            else ctx.DrawEllipse(s == lowest ? Ui.Amber : Ui.Green, null, new Point(board.X + (fret - 0.5) * fw, y), 9, 9);
+            else if (fret == 0) ctx.DrawEllipse(null, OpenRing, At(s, 0), 6, 6);
+            else ctx.DrawEllipse(s == lowest ? Ui.Amber : Ui.Green, null, At(s, fret), 9, 9);
         }
-        Ui.Text(ctx, "likely shape", board.Right, r.Bottom - 14, 10, Ui.Label, null, Ui.Align.Right);
+
+        // The notes heard: on the shape's string when the shape plays that note, else the string whose
+        // fret is nearest the shape's position (frets 0-12), one note per string.
+        double now = Environment.TickCount64 / 1000.0;
+        for (int i = 0; i < f.VoiceCount; i++) if (f.Voices[i] is >= 0 and < 128) _heard[f.Voices[i]] = now;
+        var tuning = Theory.StandardTuning;
+        var fretted = f.Frets.Where(x => x > 0).ToArray();
+        double pos = fretted.Length > 0 ? fretted.Average() : 0;
+        var used = new bool[6];
+        for (int midi = 127; midi >= tuning[0]; midi--)
+        {
+            double age = now - _heard[midi];
+            if (_heard[midi] == 0 || age > GlowSeconds) continue;
+            int best = -1;
+            for (int s = 0; s < 6 && best < 0; s++)
+                if (!used[s] && s < f.Frets.Length && f.Frets[s] >= 0 && tuning[s] + f.Frets[s] == midi) best = s;
+            if (best < 0)
+                for (int s = 0; s < 6; s++)
+                {
+                    int fr = midi - tuning[s];
+                    if (used[s] || fr < 0 || fr > frets) continue;
+                    if (best < 0 || Math.Abs(fr - pos) < Math.Abs(midi - tuning[best] - pos)) best = s;
+                }
+            if (best < 0) continue;
+            used[best] = true;
+            var p = At(best, midi - tuning[best]);
+            byte alpha = (byte)(255 * (1 - age / GlowSeconds));
+            ctx.DrawEllipse(new ImmutableSolidColorBrush(Color.FromArgb((byte)(alpha * 0.35), 255, 255, 255)), new ImmutablePen(new ImmutableSolidColorBrush(Color.FromArgb(alpha, 255, 255, 255)), 2.5), p, 12, 12);
+        }
+        Ui.Text(ctx, "likely shape · ○ notes heard", board.Right, r.Bottom - 14, 10, Ui.Label, null, Ui.Align.Right);
     }
 }
 

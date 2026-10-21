@@ -204,6 +204,10 @@ void ChordMatcher::describe(int root, ChordQuality q, int bassPc, ChordCandidate
     symbol(root, q, c.symbol);
     c.expectedCount = uint8_t(d.n);
     for (int i = 0; i < d.n; i++) c.expected[i] = int8_t((root + d.iv[i]) % 12);
+    // Chords named from notes (the HMM): the chord's tones are what it was heard as (the fretboard's
+    // and the keyboard's notes).
+    std::memcpy(c.detected, c.expected, sizeof c.detected);
+    c.detectedCount = c.expectedCount;
     if (bassPc >= 0 && (anyBass || contains(c.expected, d.n, bassPc))) {
         c.hasBass = 1;
         c.bassPitchClass = int8_t(bassPc);
