@@ -57,11 +57,18 @@ and GuitarSet beats; intonation uses vocadito and Dagstuhl.
 
 ## Phase 3 — AI feedback (R4)
 
-1. Decide on a local or an API model (open decision below).
-2. A prompt contract: the JSON in, feedback that cites the metrics out, in Portuguese.
-3. A test with fixed JSON files: every claim cites a value in the JSON; a low-confidence value is
-   never stated as fact.
-4. A COACH unit in LIVE: after REC (or on request), the feedback with its exercises.
+1. `dz_coach`: a helper process on llama.cpp, built from a pinned release. It loads the GGUF base
+   model the user downloaded and chose.
+2. The document prompt, as in R4.7:
+   - worked examples;
+   - the fact lines from the JSON;
+   - the session JSON;
+   - the opening of the feedback, continued by the model under a GBNF grammar.
+3. The checker: every number and bar in the output must exist in the JSON; otherwise the claim is
+   dropped, or the output is generated again.
+4. A test with fixed JSON files, run on each model the user tries. It scores citations,
+   inventions, and what it says about low confidence.
+5. A COACH unit in LIVE: after REC (or on request), the feedback with its exercises.
 
 Exit: on ten real sessions of the user's, the user judges the feedback right and useful.
 
@@ -80,11 +87,14 @@ when they serve the coach. Likely first:
 
 ## Open decisions
 
-1. **AI model.** Local (llama.cpp, GGUF from upstream; private and offline, needs a few GB and a
-   decent CPU / GPU) or an API with the user's key (better feedback, needs a network)?
-   Recommendation: design the contract for both; start with the API to settle the prompt, then
-   test a local model against the same JSON.
-2. **RWC licence.** Its audio is CC BY-NC 4.0: fine for evaluation, never redistributed. The
-   annotations' licence is still to be checked.
+Decided 2026-10-21:
+- **AI model:** local, a base model (not instruct or thinking), downloaded by the user under its own
+  license.
+- **Use:** a non-commercial study and proof of concept, so RWC's CC BY-NC audio fits.
+
+Still open:
+1. **RWC annotations' licence** (they are kept apart from the audio).
+2. **Portuguese from a base model.** Small base models write weaker Portuguese than English. Measure
+   it on the test set; the fact lines carry the content either way.
 3. **What "≥ 90 %" covers.** Harmony on a full band (RWC Pop) and on a solo guitar (GuitarSet)
    are different problems. Should the target hold on both, or on the full band first?

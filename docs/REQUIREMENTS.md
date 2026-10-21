@@ -5,6 +5,10 @@ says what is built; [`ROADMAP.md`](ROADMAP.md) says in what order the rest gets 
 
 ## The idea
 
+This is a study and a proof of concept, not a commercial product (2026-10-21). Non-commercial
+data and models are fine; each keeps its own license, which the user accepts when fetching it.
+
+
 **Dissonância is a music coach that needs no reference.** You play or sing, with or without a song
 behind you. It hears what a trained musician would hear and measures it:
 - the harmony and the chord played;
@@ -95,11 +99,23 @@ it rests on.
   - a concrete exercise for each (for example, "bar 5–8: changes to D are 120 ms late — loop them
     at 70 bpm").
 - R4.4: Language: Portuguese by default.
-- R4.5: The model is a decision to make (see ROADMAP "Open decisions"):
-  - **local** (llama.cpp / GGUF, fetched from upstream at a pinned version; P4), or
-  - an **API** the user configures with their own key.
-
-  Either way the app works without it: the metrics stand alone.
+- R4.5: The model is **local and a base model**: pre-trained only, not instruct or thinking
+  (decision 2026-10-21). It continues a document; it is not a chat.
+  - The user downloads the model and accepts its license; a model is a separate contract. The app
+    points to a GGUF file of the user's choice, and nothing is fetched or bundled by us.
+  - Inference runs in llama.cpp, built locally from a pinned release (P4). Like `dz_separate`, it
+    runs in its own helper process (`dz_coach`), so a crash never touches the app.
+  - Without a model, the app works and the metrics stand alone.
+- R4.7: How a base model is held to the facts:
+  - **The prompt is a document**: a few worked examples (session JSON → feedback written by us),
+    then this session's JSON, then the start of the feedback. The model continues it.
+  - **The facts are given, not recalled**: the app turns the JSON into short Portuguese fact lines
+    (metric, value, confidence) placed before the feedback, so the model rephrases and orders
+    them rather than inventing.
+  - **Decoding is constrained** (a llama.cpp GBNF grammar) to the feedback's sections.
+  - **The output is checked**: every number and bar it mentions must exist in the JSON. A claim that
+    fails the check is dropped; if too much is dropped, the output is generated again.
+  - Each model the user tries is scored with the R4.6 test set before it is trusted.
 - R4.6: The prompt and the JSON-to-text contract are versioned, and a test keeps them aligned
   (fixed JSON in, required citations out).
 
@@ -108,7 +124,7 @@ it rests on.
 | Corpus | What it gives | License | Use |
 |---|---|---|---|
 | GuitarSet | 360 solo guitar takes, chords, notes, beats | CC BY 4.0 | chords, bass, picking (in use) |
-| RWC Music Database (re-released 2026) | real pop / jazz recordings; chord, beat, structure annotations kept apart | audio CC BY-NC 4.0; annotations: check | **harmony over a full band (R1.1, R1.8)** |
+| RWC Music Database (re-released 2026) | real pop / jazz recordings; chord, beat, structure annotations kept apart | audio CC BY-NC 4.0 (fits: this is a non-commercial study); annotations: check | **harmony over a full band (R1.1, R1.8)** |
 | vocadito | 40 solo singing excerpts, f0 and notes | CC BY 4.0 | melody and intonation (R1.5, R2.4) |
 | Dagstuhl ChoirSet | close-mic choir singers, f0, beats | check | intonation, choir |
 | AAM (Artificial Audio Multitracks) | 3000 generated tracks with chords, beats, keys, stems | check | volume testing only (synthetic) |
