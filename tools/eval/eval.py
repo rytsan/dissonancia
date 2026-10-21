@@ -106,8 +106,8 @@ def vocadito():
     for f in sorted(os.listdir(audio)):
         if not f.endswith(".wav"): continue
         b = f[:-4]
-        fp = next((os.path.join(f0, g) for g in os.listdir(f0) if g.startswith(b)), None)
-        if fp: items.append((b, os.path.join(audio, f), "voice", fp))
+        fp = os.path.join(f0, b + "_f0.csv")
+        if os.path.exists(fp): items.append((b, os.path.join(audio, f), "voice", fp))
     return items
 
 CORPORA = {"synthetic": synthetic, "guitarset": guitarset, "rwc-pop": rwc_pop, "vocadito": vocadito}

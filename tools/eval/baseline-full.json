@@ -1,0 +1,45 @@
+{
+ "synthetic": {
+  "items": 7,
+  "harmony_majmin": 89.25271193250302,
+  "harmony_delay_med": 0.5599999999999996,
+  "harmony_delay_p90": 1.1600000000000001,
+  "harmony_changes": 1.1523809523809523,
+  "chord_majmin": 87.3041382081157,
+  "chord_delay_med": 0.379999999999999,
+  "chord_delay_p90": 2.3999999999999986,
+  "chord_changes": 1.0857142857142856,
+  "take_majmin": 90.83402146985962,
+  "chord_exact": 48.32126899541086
+ },
+ "guitarset": {
+  "items": 180,
+  "harmony_majmin": 73.44114849087607,
+  "harmony_delay_med": 0.6691978609625675,
+  "harmony_delay_p90": 1.7518248175182487,
+  "harmony_changes": 2.7056883759274526,
+  "chord_majmin": 71.95364524777307,
+  "chord_delay_med": 0.568717948717949,
+  "chord_delay_p90": 2.1428571428571423,
+  "chord_changes": 3.286067600989283,
+  "take_majmin": 76.32226844384073,
+  "chord_exact": 46.308124561271015
+ },
+ "rwc-pop": {
+  "items": 100,
+  "harmony_majmin": 54.913866911170885,
+  "harmony_delay_med": 0.7949999999999937,
+  "harmony_delay_p90": 1.8689999999999998,
+  "harmony_changes": 1.3111941566162733,
+  "chord_majmin": 58.650956056033564,
+  "chord_delay_med": 0.6465000000000032,
+  "chord_delay_p90": 1.801000000000002,
+  "chord_changes": 1.741039578732801,
+  "take_majmin": 57.5787228873382,
+  "chord_exact": 32.918637730777895
+ },
+ "vocadito": {
+  "items": 40,
+  "melody_rpa": 76.3956715358303
+ }
+}

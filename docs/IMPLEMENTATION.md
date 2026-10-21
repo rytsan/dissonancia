@@ -777,6 +777,24 @@ notes, a sung melody with passing and neighbour tones, kick/snare/hi-hat),
   CPU. Also fetches the Demucs weights and the VCSL sounds. A failure is remembered and not
   retried at every start.
 
+## Baseline (phase 0, 2026-10-21)
+
+`python3 tools/eval/eval.py` (corpora from `tools/eval/corpora.py`). Harmony and chord are scored on
+screen from 0.5 s after each reference change; delay is from the change to the screen; "changes" is
+shown changes per reference change; "take" is the backdated labels. Stored in
+`tools/eval/baseline-full.json`; CI checks the synthetic row against `tools/eval/baseline.json`.
+
+| Corpus | Harmony | Delay (med / p90) | Changes | Chord | Exact | Chord delay | Take | Melody RPA |
+|---|---|---|---|---|---|---|---|---|
+| Synthetic (7) | 89.3 % | 0.56 / 1.16 s | ×1.15 | 87.3 % | 48.3 % | 0.38 s | 90.8 % | — |
+| GuitarSet comping (180) | 73.4 % | 0.67 / 1.75 s | ×2.71 | 72.0 % | 46.3 % | 0.57 s | 76.3 % | — |
+| RWC-Pop, full band (100) | 54.9 % | 0.79 / 1.87 s | ×1.31 | 58.7 % | 32.9 % | 0.65 s | 57.6 % | — |
+| vocadito, solo voice (40) | — | — | — | — | — | — | — | 76.4 % |
+
+Targets (REQUIREMENTS R1): harmony ≥ 90 % within 0.5 s, changes ≤ ×1.2, chord exact ≥ 70 %, melody
+≥ 90 %. `dz_wav` ran in C major until this baseline; the GuitarSet figures above it (69 %, 66 %) carry
+that bias.
+
 ## Measurements
 
 From the test suite (synthetic signals, sample clock) and loopback runs on

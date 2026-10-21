@@ -23,6 +23,9 @@ The targets are on real music, so the measurement has to exist before the tuning
 
 Exit: one command gives the R1 table, and CI runs on every push.
 
+**Done 2026-10-21.** Baseline in IMPLEMENTATION.md: harmony 54.9 % on RWC-Pop and 73.4 % on GuitarSet,
+against the 90 % target; melody 76.4 % on vocadito.
+
 ## Phase 1 — Psychoacoustic hearing (R1)
 
 Each step is a separate change, measured against the baseline and kept only if it helps.
