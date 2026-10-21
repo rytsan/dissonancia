@@ -821,11 +821,21 @@ void ChordTracker::process_notes(const NoteFrame& notes, const ChromaVector& chr
         for (int i = 0; i < notes.count && len < int(sizeof out.preview.explanation) - 4; i++)
             len += std::snprintf(w + len, sizeof out.preview.explanation - size_t(len), " %s", names[notes.midi[i] % 12]);
     }
+    // The chord's bass: the lowest note heard most often while it sounds; an inversion only when that
+    // is not the root most of the time (an alternating thumb is still root position). The fifth needs
+    // more: a 6/4 is rare under a guitar, while a root whose fundamental the front end misses (a G2 in a
+    // full strum) leaves the fifth as the lowest note heard.
+    auto chordBass = [&](int root) {
+        int best = -1, total = 0;
+        for (int p = 0; p < 12; p++) {
+            total += bassCount_[p];
+            if (best < 0 || bassCount_[p] > bassCount_[best]) best = p;
+        }
+        const double need = (best - root + 12) % 12 == 7 ? 0.75 : 0.6;
+        return total > 0 && best != root && bassCount_[best] > need * total ? best : root;
+    };
     if (active_ && !sounding) {   // silence ends the chord at the last sound
-        int best = cur_.c.rootPitchClass, total = 0;
-        for (int p = 0; p < 12; p++) { total += bassCount_[p]; if (bassCount_[p] > bassCount_[best]) best = p; }
-        if (!(total > 0 && bassCount_[best] > 0.6 * total)) best = cur_.c.rootPitchClass;
-        matcher_.describe(cur_.c.rootPitchClass, cur_.c.quality, best, cur_.c);
+        matcher_.describe(cur_.c.rootPitchClass, cur_.c.quality, chordBass(cur_.c.rootPitchClass), cur_.c);
         emit(out, AnalyzerEventType::ChordEnded, cur_, lastAudible_);
         emit_cadence(out, previous_, cur_, true);
         active_ = false;
@@ -834,17 +844,8 @@ void ChordTracker::process_notes(const NoteFrame& notes, const ChromaVector& chr
         hmm_.reset();
         harmony_.reset();
     }
-    // The chord's bass: the lowest note heard most often while it sounds; an inversion only when that
-    // is not the root most of the time (an alternating thumb is still root position).
-    auto chordBass = [&](int root) {
-        int best = -1, total = 0;
-        for (int p = 0; p < 12; p++) {
-            total += bassCount_[p];
-            if (best < 0 || bassCount_[p] > bassCount_[best]) best = p;
-        }
-        return total > 0 && best != root && bassCount_[best] > 0.6 * total ? best : root;
-    };
     if (active_ && notes.count) bassCount_[notes.midi[0] % 12]++;
+    if (std::getenv("DZ_DBG")) std::fprintf(stderr, "t %.2f n%d low %d act %d cur %d d %d\n", t, notes.count, notes.count ? notes.midi[0] : -1, active_, curState_, hmm_.decided());
     const int d = hmm_.decided();
     // A change counts once the decision has held it for 0.1 s: the lagged decision may revise itself
     // hop to hop at a boundary, and a 20 ms chord is never what was played.
@@ -855,7 +856,7 @@ void ChordTracker::process_notes(const NoteFrame& notes, const ChromaVector& chr
         // the previous chord still ringing). Renamed in place; no change, no new chord.
         matcher_.describe(ChordHmm::root(d), ChordHmm::quality(d), chordBass(ChordHmm::root(d)), cur_.c);
         curState_ = d;
-    } else if (sounding && held && (!active_ || d != curState_)) {
+    } else if (sounding && held && (!active_ || (d != curState_ && t - shownSince_ >= kDwellSeconds))) {
         const double start = std::max(pendingSince_ - lagSeconds, active_ ? cur_.start + hop_ : 0.0);
         if (active_) {
             matcher_.describe(cur_.c.rootPitchClass, cur_.c.quality, chordBass(cur_.c.rootPitchClass), cur_.c);
@@ -870,6 +871,7 @@ void ChordTracker::process_notes(const NoteFrame& notes, const ChromaVector& chr
         history_ = {c.rootPitchClass, c.quality, history_.currentRoot, history_.currentQuality};
         active_ = true;
         curLatencyMs_ = float((frameEnd - start) * 1000);
+        shownSince_ = t;
         emit(out, AnalyzerEventType::ChordConfirmed, cur_, start);
         emit_cadence(out, previous_, cur_, false);
     }
@@ -879,13 +881,21 @@ void ChordTracker::process_notes(const NoteFrame& notes, const ChromaVector& chr
     // What a player waits from a change to the screen (tools/loopback/latency.py measures it).
     out.latencyMs = float((lagSeconds + kHoldSeconds + kFrontEndSeconds) * 1000);
     out.confirmElapsedMs = 0;
-    // The harmony underneath: its own HMM is slow to change, so a passing Em between two Ds stays the
-    // chord played. No hold on top: a hold of 0.8 s made the harmony ~2.4 s late without steadying it
-    // (a hold steadies only from ~0.6 s up; tools/loopback/latency.py).
+    // The harmony underneath: triads only, a short memory (quick to follow a change) and a dwell of its
+    // own (a new root waits 0.8 s after the last one), which keeps a passing chord from flickering in
+    // without delaying the change. A new third on the same root (Dm read before the F# came) is a
+    // correction and shows at once. Before (long memory, 0.6 s lag): ~1.1 s to the screen; now ~0.55 s
+    // with as few changes (tools/loopback/latency.py, GuitarSet).
     const int h = harmony_.decided();
     out.harmonyLatencyMs = float((harmony_.lag_hops() * hop_ + kFrontEndSeconds) * 1000);
     if (!sounding) harmonyShown_ = -1;
-    else if (h >= 0) harmonyShown_ = h;
+    else if (h >= 0 && h != harmonyShown_) {
+        const bool newRoot = harmonyShown_ < 0 || ChordHmm::root(h) != ChordHmm::root(harmonyShown_);
+        if (!newRoot || t - harmonySince_ >= kHarmonyDwellSeconds) {
+            if (newRoot) harmonySince_ = t;
+            harmonyShown_ = h;
+        }
+    }
     std::memset(out.harmony, 0, sizeof out.harmony);
     if (harmonyShown_ >= 0) matcher_.symbol(ChordHmm::root(harmonyShown_), ChordHmm::quality(harmonyShown_), out.harmony);
 }

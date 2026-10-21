@@ -56,8 +56,8 @@ public:
     static const ChordQuality kQuality[kQualities];
 
     struct Params {
-        double lag = 0.3;          // decision delay (s); what is on screen is right more often with less (latency.py)
-        float stay = 0.99f;        // per hop (20 ms): a chord lasts ~2 s on average
+        double lag = 0.2;          // decision delay (s): the screen waits on the memory more than on this; less costs the take's labels (GuitarSet)
+        float stay = 0.97f;        // per hop (20 ms): quick to change; the tracker's dwell steadies what is shown
         float tau = 0.3f;          // memory of a note (s)
         float evidence = 0.2f;     // per-hop weight of the notes against the cost of a change
         float newBass = 0.2f;      // what remains of the old notes when a new bass arrives
@@ -66,8 +66,8 @@ public:
     // The chord played: every quality, quick.
     static Params played() { return {}; }
     // The harmony underneath (the "campo harmonico" a listener sums up: G ... D ...): triads only,
-    // slow to change, long memory; passing chords, inversions and colours fold into it.
-    static Params harmony() { return {0.6, 0.998f, 1.0f, 0.1f, 0.5f, true}; }
+    // a short memory, a dwell in the tracker; passing chords, inversions and colours fold into it.
+    static Params harmony() { return {0.3, 0.998f, 0.3f, 0.2f, 0.2f, true}; }
 
     explicit ChordHmm(double hopSeconds, Params p = played());
     void reset();

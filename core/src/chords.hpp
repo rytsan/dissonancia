@@ -163,9 +163,14 @@ private:
     int bassCount_[12]{};            // lowest note per hop while the current chord sounds (notes path)
     int pendingState_ = -1;          // the HMM's decision, and since when it has held (notes path)
     double pendingSince_ = 0;
-    static constexpr double kHoldSeconds = 0.1;
+    double shownSince_ = 0;          // when the chord played on screen took over
+    static constexpr double kHoldSeconds = 0;     // no hold: the dwell below steadies it without the wait
+    // Once a chord is on screen, another root must wait this long: a quick decoder flickers between
+    // neighbours at a change, and a dwell steadies it without delaying the first change (GuitarSet).
+    static constexpr double kDwellSeconds = 0.4, kHarmonyDwellSeconds = 0.8;
     static constexpr double kFrontEndSeconds = 0.12;   // half the notes' STFT window + the two hops a note must last
     int harmonyShown_ = -1;
+    double harmonySince_ = 0;
     double quietSince_ = -1;         // silence start (< 0: sounding), for the accumulator's gaps
     bool lastSparse_ = false;        // the last sounding frame had <= 2 notes (a picked note)
     float acc_[12]{};                // arpeggio accumulator (decaying max-hold of chroma energy)
