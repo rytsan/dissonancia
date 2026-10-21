@@ -281,24 +281,20 @@ void Player::render(float* out, uint32_t n, uint32_t outChannels) {
     for (uint32_t i = 0; i < n; i++) {
         if (b > 0 && pos >= b) pos = a;
         if (pos >= total) { playing_.store(false, std::memory_order_release); break; }
-        float L = 0, R = 0;
+        float L = 0, R = 0, tl[ANA_MAX_TRACKS], tr[ANA_MAX_TRACKS];
         for (int t = 0; t < nt; t++) {
-            float l, r;
-            sample(t, pos, l, r);
-            mix::Strip& s = strips_[t];
-            s.tap(l, r, stage[t]);
+            sample(t, pos, tl[t], tr[t]);
+            strips_[t].tap(tl[t], tr[t], stage[t]);
             if (t == mon) {
                 const size_t k = size_t(w % ANA_SCOPE_FRAMES) * 2;
-                ringTrack_[k].store(l, std::memory_order_relaxed);
-                ringTrack_[k + 1].store(r, std::memory_order_relaxed);
+                ringTrack_[k].store(tl[t], std::memory_order_relaxed);
+                ringTrack_[k + 1].store(tr[t], std::memory_order_relaxed);
             }
-            s.out(l, r);
-            if (s.p.mute || (anySolo && !s.p.solo)) l = r = 0;
-            const float m = std::max(std::fabs(l), std::fabs(r));
-            pk[t] = std::max(pk[t], m);
-            sq[t] += 0.5f * (l * l + r * r);
-            L += l; R += r;
         }
+        mix::route(strips_, nt, anySolo, tl, tr, [&](int t, float l, float r) {
+            pk[t] = std::max(pk[t], std::max(std::fabs(l), std::fabs(r)));
+            sq[t] += 0.5f * (l * l + r * r);
+        }, L, R);
         bus_.run(L, R);
         loud_.run(L, R);
         {
@@ -446,15 +442,12 @@ int Player::bounce(const char* path) const {
     bus.set(mp, rate_);
     std::vector<float> y(size_t(n) * 2, 0.f);
     for (uint64_t i = 0; i < n; i++) {
-        float L = 0, R = 0;
+        float L = 0, R = 0, tl[ANA_MAX_TRACKS], tr[ANA_MAX_TRACKS];
         for (int t = 0; t < nt; t++) {
-            float l, r;
-            sample(t, i, l, r);
-            s[size_t(t)].tap(l, r);
-            s[size_t(t)].out(l, r);
-            if (s[size_t(t)].p.mute || (anySolo && !s[size_t(t)].p.solo)) continue;
-            L += l; R += r;
+            sample(t, i, tl[t], tr[t]);
+            s[size_t(t)].tap(tl[t], tr[t]);
         }
+        mix::route(s.data(), nt, anySolo, tl, tr, [](int, float, float) {}, L, R);
         bus.run(L, R);
         y[2 * i] = L; y[2 * i + 1] = R;
     }

@@ -170,6 +170,33 @@ struct Strip {
     void out(float& l, float& r) const { l *= fader * panL * 1.4142f; r *= fader * panR * 1.4142f; }   // centre = unity
 };
 
+// After every track's tap (tl, tr): the tracks sent into another (a patchbay return) go through
+// their own fader and pan into it, before its fader; then every track to the master through its
+// fader and pan, unless muted or another is soloed. `level(t, l, r)` sees what each track gives.
+template <class Level>
+inline void route(const Strip* s, int nt, bool anySolo, float* tl, float* tr, Level level, float& L, float& R) {
+    auto silent = [&](int t) { return s[t].p.mute || (anySolo && !s[t].p.solo); };
+    for (int t = 0; t < nt; t++) {
+        const int to = int(s[t].p.sendTo) - 1;
+        if (to < 0 || to >= nt || to == t || s[to].p.sendTo) continue;   // one hop: a return that sends on is not followed
+        float l = tl[t], r = tr[t];
+        s[t].out(l, r);
+        if (silent(t)) l = r = 0;
+        level(t, l, r);
+        tl[to] += l; tr[to] += r;
+        tl[t] = tr[t] = 0;
+    }
+    for (int t = 0; t < nt; t++) {
+        const int to = int(s[t].p.sendTo) - 1;
+        if (to >= 0 && to < nt && to != t && !s[to].p.sendTo) continue;   // already in its return
+        float l = tl[t], r = tr[t];
+        s[t].out(l, r);
+        if (silent(t)) l = r = 0;
+        level(t, l, r);
+        L += l; R += r;
+    }
+}
+
 struct Bus {
     MasterParams p{};
     Eq eq;

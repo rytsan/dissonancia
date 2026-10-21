@@ -242,19 +242,25 @@ Check(LeadSheet.Harmony([Ch(0, 2, "Am"), Ch(2, 4, "E7")], new KeyOption(0, true)
     }
 }
 
-// DS-C lunchbox: the chain the cables make.
+// DS-C lunchbox: the tracks' routes the cables make.
 {
     CableLink L(string f, string t) => new() { From = f, To = t };
-    string R(params CableLink[] k) { var (o, a, b, e) = ChannelMix.Route(k); return e ?? string.Join(",", o!) + (a is null ? "" : $" ∥{a}-{b}"); }
-    Check(R(L("src", "eq:in"), L("eq:out", "trim:in"), L("trim:out", "dst")) == "eq,trim", "lunchbox: cables in series make the order, wherever the modules sit");
-    Check(R(L("src", "dst")) == "", "lunchbox: source straight to out is a wire");
-    Check(R(L("src", "trim:in"), L("trim:out", "gate:in"), L("gate:out", "comp:in"), L("comp:out", "dst"), L("trim:out", "dst")) == "trim,gate,comp ∥gate-comp",
-        "lunchbox: an output on two cables, one straight to where the run comes back, is the parallel path");
-    Check(R(L("src", "eq:in"), L("eq:out", "trim:in")).Contains("não está ligado"), "lunchbox: a module whose output goes nowhere: no sound path");
-    Check(R(L("src", "eq:in"), L("eq:out", "trim:in"), L("trim:out", "eq:in")).Contains("laço"), "lunchbox: a loop is no path");
-    Check(R(L("src", "vst:a:in"), L("vst:a:out", "dst"), L("src", "dst")).Contains("VST3"), "lunchbox: no insert in the parallel path");
-    var dc = new ChannelMix { Chain = ["trim", "gate", "comp"], ParallelFirst = "gate", ParallelLast = "comp", ParallelMix = 0.5f, Cables = [] };
-    Check(R([.. dc.DefaultCables()]) == "trim,gate,comp ∥gate-comp", "lunchbox: a take from before the lunchbox gets the cables of its chain");
+    BoxModule Mod(string id, string type) => new() { Id = id, Type = type };
+    var box = new List<BoxModule> { Mod("eq1", "eq"), Mod("trim1", "trim"), Mod("gate1", "gate"), Mod("comp1", "comp"), Mod("eq2", "eq"), Mod("vst:a", "vst") };
+    string R(string track, params CableLink[] k)
+    {
+        var r = Patchbay.Route(k, box, ["mix", "vocals", "bass"], id => id)[track];
+        return r.Error ?? string.Join(",", r.Modules) + (r.First is null ? "" : $" ∥{r.First}-{r.Last}") + (r.SendTo is null ? "" : $" >{r.SendTo}");
+    }
+    Check(R("vocals", L("vocals.sai:out", "eq1:in"), L("eq1:out", "trim1:in"), L("trim1:out", "vocals.volta:in")) == "eq1,trim1", "lunchbox: a track's SAI through modules to its VOLTA");
+    Check(R("mix", L("vocals.sai:out", "eq1:in"), L("eq1:out", "vocals.volta:in")) == "", "lunchbox: a track with no cable on its SAI goes straight through (normalled)");
+    Check(R("vocals", L("vocals.sai:out", "trim1:in"), L("trim1:out", "gate1:in"), L("gate1:out", "comp1:in"), L("comp1:out", "vocals.volta:in"), L("trim1:out", "vocals.volta:in")) == "trim1,gate1,comp1 ∥gate1-comp1",
+        "lunchbox: an output on two cables round a run of modules is the parallel path");
+    Check(R("vocals", L("vocals.sai:out", "eq1:in"), L("eq1:out", "bass.volta:in")) == "eq1 >bass", "lunchbox: ending at another track's VOLTA sends the track into it");
+    Check(R("vocals", L("vocals.sai:out", "eq1:in")).Contains("não está ligada"), "lunchbox: a module whose output goes nowhere: no route");
+    Check(R("vocals", L("vocals.sai:out", "eq1:in"), L("eq1:out", "eq2:in"), L("eq2:out", "vocals.volta:in")).Contains("dois"), "lunchbox: two modules of a kind on a track: not yet");
+    Check(R("bass", L("vocals.sai:out", "eq1:in"), L("eq1:out", "vocals.volta:in"), L("bass.sai:out", "eq1:in")).Contains("duas faixas"), "lunchbox: a module on two tracks: not yet");
+    Check(R("vocals", L("vocals.sai:out", "vst:a:in"), L("vst:a:out", "vocals.volta:in"), L("vocals.sai:out", "vocals.volta:in")).Contains("VST3"), "lunchbox: no insert in a parallel path");
 }
 
 string Shape(int[] pcs, int bass) => string.Join(" ", Theory.LikelyShape(pcs, bass).Select(f => f < 0 ? "x" : f.ToString()));

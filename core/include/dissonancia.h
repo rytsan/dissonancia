@@ -375,7 +375,7 @@ struct ChannelParams {
     // processed one is added to it at parallelMix (0 = no parallel path, the units are in series).
     uint8_t order[5];
     uint8_t parallelFrom, parallelTo;
-    uint8_t _pad0;
+    uint8_t sendTo;                    // 0: to the master; k: into track k-1, before its fader (a patchbay return)
     float parallelMix;
 };
 

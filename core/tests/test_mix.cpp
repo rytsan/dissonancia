@@ -263,3 +263,29 @@ TEST_CASE("mix: the chain as patched — order, units left out, a parallel path;
     std::remove("dz_mix_order.wav");
     std::remove("dz_mix_chain.wav");
 }
+
+TEST_CASE("mix: a track sent into another (patchbay return) goes through that track's fader") {
+    Player p;
+    REQUIRE(p.load(wav("dz_mix_send_a.wav", sine(220, 0.25)).c_str()) == ANA_OK);
+    REQUIRE(p.add_track(wav("dz_mix_send_b.wav", sine(880, 0.25)).c_str()) == 1);
+    auto c0 = defaults(), c1 = defaults();
+    c0.mute = 1;      // the take's own signal muted
+    c1.sendTo = 1;    // the stem into track 0
+    p.set_channel(0, c0);
+    p.set_channel(1, c1);
+    CHECK(peak_db(play(p), 4800) < -80);   // into a muted track: silent
+    c0.mute = 0; c0.faderDb = -60;         // the take's fader carries both
+    p.set_channel(0, c0);
+    CHECK(peak_db(play(p), 4800) < -50);
+    c0.faderDb = 0; c0.trimDb = -90;       // the trim is before the return: only the stem is heard
+    p.set_channel(0, c0);
+    auto y = play(p);
+    int zc = 0;
+    for (size_t i = 4800 + 1; i < y.size() / 2; i++) zc += (y[2 * i] >= 0) != (y[2 * i - 2] >= 0);
+    CHECK(zc == Approx(1760 * 0.9).margin(40));
+    REQUIRE(p.bounce("dz_mix_send.wav") == ANA_OK);
+    Player bnc;
+    REQUIRE(bnc.load("dz_mix_send.wav") == ANA_OK);
+    CHECK(peak_db(play(bnc), 4800) == Approx(20 * std::log10(0.25)).margin(0.3));
+    for (const char* f : {"dz_mix_send_a.wav", "dz_mix_send_b.wav", "dz_mix_send.wav"}) std::remove(f);
+}
