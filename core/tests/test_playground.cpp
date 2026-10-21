@@ -237,3 +237,92 @@ TEST_CASE("playground song: blocks on a timeline from the next bar, a launch on 
     e.stop();
     for (auto f : {"dz_pad0.wav", "dz_loop.wav", "dz_bounce.wav"}) std::remove(f);
 }
+
+TEST_CASE("pedalboard: the input monitored through pedals, a tempo delay, the pads through a cable, what REC records, a loop silent") {
+    Engine e;
+    REQUIRE(e.start(session(), headless(), nullptr, nullptr) == ANA_OK);
+    auto& pg = e.playground();
+    std::string err;
+    uint64_t pos = 0;
+    auto pedal = [](uint16_t id, PedalKind k, std::initializer_list<float> knobs, bool on = true) {
+        PedalParams p{};
+        p.id = id; p.kind = k; p.on = on;
+        int i = 0;
+        for (float v : knobs) p.knob[i++] = v;
+        return p;
+    };
+    // Nothing patched: the input does not reach the output.
+    auto x = [](uint64_t f) { return 0.3f * float(std::sin(2 * kPi * 200 * double(f) / 48000)); };
+    auto y = run_in(e, 4800, pos, x);
+    CHECK(first_sound(y) == y.size());
+    // ENTRADA -> drive (bypassed) -> SAÍDA: the input as it is.
+    Pedalboard b{};
+    b.pedal[0] = pedal(1, PedalKind::Drive, {0.5f, 0.5f, 0.8f, 1}, false);
+    b.pedals = 1;
+    b.cable[0] = {0, 8, {}, 1};
+    b.cable[1] = {9, 2, {}, 1};
+    b.cables = 2;
+    REQUIRE(pg.pedalboard(b, err) == ANA_OK);
+    const uint64_t p0 = pos;
+    y = run_in(e, 4800, pos, x);
+    double worst = 0;
+    for (size_t i = 0; i < y.size(); i++) worst = std::max(worst, double(std::fabs(y[i] - x(p0 + i))));
+    CHECK(worst < 1e-5);
+    // A delay of 4 sixteenths (120 bpm: 24000 frames), no feedback, wet only above the dry: a click comes back once.
+    b.pedal[0] = pedal(2, PedalKind::Delay, {3 / 15.f, 0, 1, 1});
+    REQUIRE(pg.pedalboard(b, err) == ANA_OK);
+    const uint64_t c0 = pos + 100;
+    y = run_in(e, 48000, pos, [&](uint64_t f) { return f == c0 ? 1.f : 0.f; });
+    auto o = onsets(y, 100);
+    REQUIRE(o.size() == 2);
+    CHECK(o[0] + (c0 - 100) == c0);
+    CHECK(o[1] + (c0 - 100) == Approx(double(c0 + 24000)).margin(1));
+    // The pads through a cable at half: PADS -> SAÍDA x 0.5 (the pads no longer go straight out).
+    REQUIRE(pg.load(0, wav("dz_pad0.wav", tone(1000, 0.02)).c_str(), 48000, err) == ANA_OK);
+    b.pedals = 0;
+    b.cable[0] = {1, 2, {}, 0.5f};
+    b.cables = 1;
+    REQUIRE(pg.pedalboard(b, err) == ANA_OK);
+    pg.hit(0, 1.f);
+    y = run_in(e, 4800, pos, [](uint64_t) { return 0.f; });
+    float pk = 0;
+    for (float v : y) pk = std::max(pk, std::fabs(v));
+    CHECK(pk == Approx(0.25).margin(0.01));
+    // GRAVAR: ENTRADA -> a low-pass at its lowest -> GRAVAR; a 4 kHz input records (almost) silent.
+    SongDef sd;
+    sd.block(1, 1, {});
+    sd.order = {{0, 1}};
+    REQUIRE(sd.send(pg) == ANA_OK);
+    b.pedal[0] = pedal(3, PedalKind::Filter, {0, 0, 0, 0});
+    b.pedals = 1;
+    b.cable[0] = {0, 8, {}, 1};
+    b.cable[1] = {9, 3, {}, 1};
+    b.cables = 2;
+    REQUIRE(pg.pedalboard(b, err) == ANA_OK);
+    REQUIRE(pg.record(true, e.beat_frames_now() * 4) == ANA_OK);
+    pg.play(0, true);
+    auto hi = [](uint64_t f) { return 0.5f * float(std::sin(2 * kPi * 4000 * double(f) / 48000)); };
+    run_in(e, (pos / 96000 + 1) * 96000 - pos + 96000, pos, hi);
+    REQUIRE(pg.record(false, 0) == ANA_OK);
+    y = run_in(e, 96000, pos, [](uint64_t) { return 0.f; });   // the loop played back: filtered
+    pk = 0;
+    for (size_t i = 1000; i < y.size(); i++) pk = std::max(pk, std::fabs(y[i]));
+    CHECK(pk < 0.5f * 0.01f);
+    pg.stop();
+    // A loop: a pedal fed by its own output is silent; ENTRADA -> SAÍDA still plays.
+    b.pedal[0] = pedal(4, PedalKind::Drive, {0, 0.5f, 0.8f, 0});
+    b.cable[0] = {9, 8, {}, 1};
+    b.cable[1] = {9, 2, {}, 1};
+    b.cable[2] = {0, 2, {}, 1};
+    b.cables = 3;
+    REQUIRE(pg.pedalboard(b, err) == ANA_OK);
+    const uint64_t p1 = pos;
+    y = run_in(e, 4800, pos, x);
+    worst = 0;
+    for (size_t i = 0; i < y.size(); i++) worst = std::max(worst, double(std::fabs(y[i] - x(p1 + i))));
+    CHECK(worst < 1e-5);
+    b.cable[0] = {2, 8, {}, 1};   // from an input jack: refused
+    CHECK(pg.pedalboard(b, err) == ANA_ERR_ARG);
+    e.stop();
+    std::remove("dz_pad0.wav");
+}

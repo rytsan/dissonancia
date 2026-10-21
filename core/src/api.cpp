@@ -187,6 +187,15 @@ int32_t ana_pg_song(AnalyzerHandle* h, const PgBlock* blocks, int32_t nb, const 
         return r;
     });
 }
+int32_t ana_pedalboard_set(AnalyzerHandle* h, const Pedalboard* b) {
+    if (!h || !b) return ANA_ERR_ARG;
+    return guarded(h, [&] {
+        std::string err;
+        int32_t r = h->engine.playground().pedalboard(*b, err);
+        if (r < 0) h->error = err;
+        return r;
+    });
+}
 void ana_pg_play(AnalyzerHandle* h, int32_t entry, uint8_t loop) { if (h) h->engine.playground().play(entry, loop != 0); }
 void ana_pg_stop(AnalyzerHandle* h) { if (h) h->engine.playground().stop(); }
 int32_t ana_pg_record(AnalyzerHandle* h, uint8_t on) {

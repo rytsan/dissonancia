@@ -16,6 +16,7 @@
 
 #include "dissonancia.h"
 #include "lockfree.hpp"
+#include "pedals.hpp"
 
 namespace dz {
 
@@ -38,6 +39,7 @@ public:
     size_t recorded(PgRecorded* out, size_t cap) { return rec_.pop_many(out, cap); }
     int loop_file(uint32_t id, const char* path, bool save, uint32_t rate, std::string& error);
     int bounce(const char* path, uint32_t rate, double beatFrames, int beatsPerBar, std::string& error);
+    int pedalboard(const Pedalboard& b, std::string& error);
     // Any thread that is the only one calling it (the API thread, the MIDI thread: one queue each).
     void midi_from_api(uint8_t s, uint8_t d1, uint8_t d2) { push(s, d1, d2); }
     void midi_from_device(uint8_t s, uint8_t d1, uint8_t d2);
@@ -61,6 +63,16 @@ public:
         uint8_t at(int pad, int step) const { return steps[size_t(pad) * size_t(bars) * ANA_PG_STEPS_PER_BAR + size_t(step)]; }
     };
     struct Song { std::vector<Block> blocks; std::vector<PgEntry> order; uint64_t gen = 0; };
+    // A published pedalboard: the pedals' settings, their DSP (kept by id), the cables by the jack
+    // they go into, the pedals in an order where each comes after what feeds it.
+    struct Board {
+        Pedalboard p{};
+        Pedal* dsp[ANA_PEDALS]{};
+        int order[ANA_PEDALS]{}, norder = 0;
+        int inStart[ANA_PEDALS + 3]{}, inList[ANA_PEDAL_CABLES]{};   // nodes: the pedals, SAÍDA, GRAVAR
+        bool padsPatched = false, recPatched = false;
+        uint64_t gen = 0;
+    };
 
 private:
     struct Cmd { int kind, entry; bool loop; };
@@ -83,6 +95,8 @@ private:
         double stepOrigin = -1, stepFrames = 0;
         uint64_t barStart = 0;
         int stepInBar = -1;
+        float pad[2 * 512];        // the pads and sampler of the block being rendered
+        Pedal* dsp[ANA_PEDALS]{};  // a bounce's own pedals (the live deck uses the board's)
         int noteStep[128];         // REC: a held note's start (sixteenths in the block), -1 = none
         int64_t noteAbs[128]{};    // ... its sixteenth from the origin (its length when it is let go)
         uint8_t noteVel[128]{};
@@ -93,6 +107,8 @@ private:
     void render_deck(Deck& d, float* buf, uint32_t n, const float* in, uint32_t inCh, uint64_t p0, uint64_t origin, double beatFrames, int bpb, bool live);
     void on_step(Deck& d, uint64_t at, int stepsPerBar, double barFrames, bool live);
     void retire_free();
+    // One frame through the board: the input and the pads in; the output (stereo) and what REC records out.
+    void board_frame(const Board& b, Pedal* const* dsp, float in, const float* pads, float* out, float& rec, double beatFrames, bool live);
 
     std::atomic<Sample*> slot_[ANA_PADS + 1]{};
     std::mutex apiMutex_;                                   // API thread only (load, song, loops)
@@ -100,6 +116,14 @@ private:
     std::vector<std::pair<Song*, uint64_t>> retiredSongs_;  // freed once the callback holds a later one
     std::vector<std::pair<Loop*, uint64_t>> retiredLoops_;
     std::map<uint32_t, Loop*> loops_;                       // by block id (API thread)
+    std::map<uint16_t, Pedal*> pedals_;                     // by pedal id (API thread)
+    std::atomic<Board*> board_{nullptr};
+    std::atomic<uint64_t> boardAdopted_{0};
+    std::vector<std::pair<Board*, uint64_t>> retiredBoards_;
+    std::vector<std::pair<Pedal*, uint64_t>> retiredPedals_;
+    uint64_t boardGen_ = 0;
+    std::atomic<float> inPeak_{0}, outPeak_{0}, pedalPeak_[ANA_PEDALS]{};
+    const Board* bounceBoard_ = nullptr;                    // a bounce's board (apiMutex_ held, the board kept)
     std::vector<PgBlock> lastBlocks_;                       // the song as given, to publish it again with new loops
     std::vector<uint8_t> lastSteps_;
     std::vector<PgNote> lastNotes_;

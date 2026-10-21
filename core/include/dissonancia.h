@@ -493,6 +493,32 @@ struct PgRecorded {
     uint8_t _pad0;
 };
 
+// The pedalboard: pedals (stompboxes) patched with cables between jacks, in the playground's
+// callback. Jacks: 0 ENTRADA (out: the input), 1 PADS (out: pads + sampler), 2 SAÍDA (in: to the
+// LIVE output), 3 GRAVAR (in: what REC puts in a block's loop); pedal k: 8 + 2k its IN, 9 + 2k its
+// OUT. Normalled: GRAVAR unpatched records the input dry; PADS unpatched goes to the output as is;
+// nothing of the input reaches the output unless a cable takes it there (no feedback by surprise).
+// Cables into one jack sum, one output on several cables is copied; a loop is left silent.
+constexpr int ANA_PEDALS = 16;
+constexpr int ANA_PEDAL_CABLES = 48;
+enum class PedalKind : uint8_t { Drive, Octave, Chorus, Delay, Reverb, Filter };
+struct PedalParams {
+    uint16_t id;                       // the same while the pedal exists: it keeps its state
+    PedalKind kind;
+    uint8_t on;                        // bool; off = true bypass
+    float knob[4];                     // 0..1 each; what they are depends on the kind (see the app)
+};
+struct PedalCable {
+    uint8_t from, to;                  // jack ids (above)
+    uint8_t _pad0[2];
+    float gain;                        // linear
+};
+struct Pedalboard {
+    PedalParams pedal[ANA_PEDALS];
+    PedalCable cable[ANA_PEDAL_CABLES];
+    int32_t pedals, cables;
+};
+
 struct PlaygroundStatus {
     uint32_t hits[ANA_PADS + 1];       // triggers so far ([16]: sampler notes), for the pads' flash
     float seconds[ANA_PADS + 1];       // loaded length, 0 = empty
@@ -504,6 +530,8 @@ struct PlaygroundStatus {
     int32_t step;                      // the sixteenth in the bar, -1 = stopped
     int32_t queued;                    // the entry that starts on the next bar, -1 = none
     uint8_t playing, recording, looping, starting;   // bool; starting: waits for the next bar
+    float inputDb, outputDb;           // the pedalboard's ENTRADA and SAÍDA since the last read
+    float pedalDb[ANA_PEDALS];         // each pedal's output since the last read
 };
 
 // ---------------------------------------------------------------- functions
@@ -545,6 +573,7 @@ ANA_API void ana_pad_hit(AnalyzerHandle* h, int32_t pad, float velocity);
 ANA_API void ana_midi_send(AnalyzerHandle* h, uint8_t status, uint8_t data1, uint8_t data2);
 ANA_API void ana_playground_set(AnalyzerHandle* h, const PlaygroundConfig* c);
 ANA_API void ana_playground_status(AnalyzerHandle* h, PlaygroundStatus* out);
+ANA_API int32_t ana_pedalboard_set(AnalyzerHandle* h, const Pedalboard* board);   // heard from the next callback
 // The song (copied): heard from the next bar. steps: per block 16 x bars x 16 velocities.
 ANA_API int32_t ana_pg_song(AnalyzerHandle* h, const PgBlock* blocks, int32_t blockCount, const uint8_t* steps, int32_t stepCount,
                             const PgNote* notes, int32_t noteCount, const PgEntry* order, int32_t orderCount);

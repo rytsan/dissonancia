@@ -38,6 +38,10 @@ Playground::~Playground() {
     for (auto& r : retiredSongs_) delete r.first;
     for (auto& [id, l] : loops_) delete l;
     for (auto& r : retiredLoops_) delete r.first;
+    delete board_.exchange(nullptr);
+    for (auto& r : retiredBoards_) delete r.first;
+    for (auto& [id, p] : pedals_) delete p;
+    for (auto& r : retiredPedals_) delete r.first;
 }
 
 void Playground::start(uint32_t rate, uint32_t outLatencyFrames, uint32_t roundTripFrames) {
@@ -46,6 +50,9 @@ void Playground::start(uint32_t rate, uint32_t outLatencyFrames, uint32_t roundT
         for (int k = 0; k <= kSampler; k++) { delete slot_[k].exchange(nullptr); seconds_[k] = 0; }
         for (auto& [id, l] : loops_) delete l;
         loops_.clear();
+        delete board_.exchange(nullptr);   // delay lines sized for the old rate: the app sends the board again
+        for (auto& [id, p] : pedals_) delete p;
+        pedals_.clear();
     }
     for (auto& r : retired_) delete r.first;
     retired_.clear();
@@ -79,6 +86,17 @@ void Playground::retire_free() {   // apiMutex_ held
     });
     std::erase_if(retiredLoops_, [&](auto& r) {
         if (!idle && adopted < r.second) return false;
+        delete r.first;
+        return true;
+    });
+    const uint64_t boardAt = boardAdopted_.load(std::memory_order_acquire);
+    std::erase_if(retiredBoards_, [&](auto& r) {
+        if (!idle && boardAt < r.second) return false;
+        delete r.first;
+        return true;
+    });
+    std::erase_if(retiredPedals_, [&](auto& r) {
+        if (!idle && boardAt < r.second) return false;
         delete r.first;
         return true;
     });
@@ -127,6 +145,10 @@ void Playground::status(PlaygroundStatus& out) const {
     out.queued = queued_.load(std::memory_order_relaxed);
     const uint8_t f = flags_.load(std::memory_order_relaxed);
     out.playing = f & 1; out.recording = f >> 1 & 1; out.looping = f >> 2 & 1; out.starting = f >> 3 & 1;
+    auto take = [](const std::atomic<float>& a) { const float v = const_cast<std::atomic<float>&>(a).exchange(0, std::memory_order_relaxed); return v > 0 ? 20 * std::log10(v) : -120.f; };
+    out.inputDb = take(inPeak_);
+    out.outputDb = take(outPeak_);
+    for (int k = 0; k < ANA_PEDALS; k++) out.pedalDb[k] = take(pedalPeak_[k]);
 }
 
 // ---------------------------------------------------------------- the song
@@ -206,6 +228,98 @@ int Playground::loop_file(uint32_t id, const char* path, bool save, uint32_t rat
     if (l) loops_[id] = l;
     std::string e;
     return publish(e);
+}
+
+// ---------------------------------------------------------------- the pedalboard
+
+int Playground::pedalboard(const Pedalboard& in, std::string& error) {
+    if (in.pedals < 0 || in.pedals > ANA_PEDALS || in.cables < 0 || in.cables > ANA_PEDAL_CABLES) { error = "pedalboard out of range"; return ANA_ERR_ARG; }
+    auto jackOut = [&](int j) { return j == 0 || j == 1 || (j >= 9 && j < 8 + 2 * in.pedals && (j - 8) % 2 == 1); };
+    auto jackIn = [&](int j) { return j == 2 || j == 3 || (j >= 8 && j < 8 + 2 * in.pedals && (j - 8) % 2 == 0); };
+    for (int c = 0; c < in.cables; c++)
+        if (!jackOut(in.cable[c].from) || !jackIn(in.cable[c].to) || !std::isfinite(in.cable[c].gain)) { error = "a cable between jacks that are not there"; return ANA_ERR_ARG; }
+    for (int k = 0; k < in.pedals; k++) if (uint8_t(in.pedal[k].kind) > uint8_t(PedalKind::Filter)) { error = "no such pedal"; return ANA_ERR_ARG; }
+    std::lock_guard lock(apiMutex_);
+    auto b = std::make_unique<Board>();
+    b->p = in;
+    b->gen = ++boardGen_;
+    // The pedals' DSP by id: kept (with its state) while the pedal is there and of the same kind.
+    std::map<uint16_t, Pedal*> keep;
+    for (int k = 0; k < in.pedals; k++) {
+        const PedalParams& pp = in.pedal[k];
+        auto it = pedals_.find(pp.id);
+        Pedal* d = it != pedals_.end() && it->second->kind == pp.kind ? it->second : new Pedal(pp.kind, rate_);
+        keep[pp.id] = d;
+        b->dsp[k] = d;
+    }
+    for (auto& [id, d] : pedals_) {
+        bool used = false;
+        for (auto& [kid, kd] : keep) used |= kd == d;
+        if (!used) retiredPedals_.push_back({d, b->gen});
+    }
+    pedals_ = keep;
+    // The order: Kahn over the pedals; a pedal on a loop is left out (silent).
+    auto node = [](int jack) { return jack == 2 ? ANA_PEDALS : jack == 3 ? ANA_PEDALS + 1 : (jack - 8) / 2; };
+    int indeg[ANA_PEDALS]{};
+    for (int c = 0; c < in.cables; c++) if (in.cable[c].from >= 9 && in.cable[c].to >= 8) indeg[node(in.cable[c].to)]++;
+    int queue[ANA_PEDALS], qh = 0, qt = 0;
+    for (int k = 0; k < in.pedals; k++) if (indeg[k] == 0) queue[qt++] = k;
+    while (qh < qt) {
+        const int k = queue[qh++];
+        b->order[b->norder++] = k;
+        for (int c = 0; c < in.cables; c++)
+            if (in.cable[c].from == 9 + 2 * k && in.cable[c].to >= 8 && --indeg[node(in.cable[c].to)] == 0) queue[qt++] = node(in.cable[c].to);
+    }
+    for (int c = 0; c < in.cables; c++) {
+        b->inStart[node(in.cable[c].to) + 1]++;
+        b->padsPatched |= in.cable[c].from == 1;
+        b->recPatched |= in.cable[c].to == 3;
+    }
+    for (int n = 0; n < ANA_PEDALS + 2; n++) b->inStart[n + 1] += b->inStart[n];
+    int fill[ANA_PEDALS + 2];
+    std::copy(b->inStart, b->inStart + ANA_PEDALS + 2, fill);
+    for (int c = 0; c < in.cables; c++) b->inList[fill[node(in.cable[c].to)]++] = c;
+    Board* old = board_.exchange(b.release(), std::memory_order_acq_rel);
+    if (old) retiredBoards_.push_back({old, boardGen_});
+    retire_free();
+    return ANA_OK;
+}
+
+void Playground::board_frame(const Board& b, Pedal* const* dsp, float in, const float* pads, float* out, float& rec, double beatFrames, bool live) {
+    float val[ANA_PEDALS][2]{};
+    auto src = [&](int jack, float& l, float& r) {
+        if (jack == 0) l = r = in;
+        else if (jack == 1) { l = pads[0]; r = pads[1]; }
+        else { l = val[(jack - 9) / 2][0]; r = val[(jack - 9) / 2][1]; }
+    };
+    auto gather = [&](int n, float& L, float& R) {
+        L = R = 0;
+        for (int i = b.inStart[n]; i < b.inStart[n + 1]; i++) {
+            const PedalCable& c = b.p.cable[b.inList[i]];
+            float l, r;
+            src(c.from, l, r);
+            L += c.gain * l; R += c.gain * r;
+        }
+    };
+    for (int i = 0; i < b.norder; i++) {
+        const int k = b.order[i];
+        float L, R;
+        gather(k, L, R);
+        if (b.p.pedal[k].on) dsp[k]->run(L, R, b.p.pedal[k].knob, beatFrames);
+        val[k][0] = L; val[k][1] = R;
+        if (live) { const float pk = std::max(std::fabs(L), std::fabs(R)); if (pk > pedalPeak_[k].load(std::memory_order_relaxed)) pedalPeak_[k].store(pk, std::memory_order_relaxed); }
+    }
+    float L, R;
+    gather(ANA_PEDALS, L, R);
+    out[0] += L; out[1] += R;
+    if (!b.padsPatched) { out[0] += pads[0]; out[1] += pads[1]; }
+    if (b.recPatched) { float a, c; gather(ANA_PEDALS + 1, a, c); rec = 0.5f * (a + c); }
+    else rec = in;
+    if (live) {
+        if (std::fabs(in) > inPeak_.load(std::memory_order_relaxed)) inPeak_.store(std::fabs(in), std::memory_order_relaxed);
+        const float o = std::max(std::fabs(L), std::fabs(R));
+        if (o > outPeak_.load(std::memory_order_relaxed)) outPeak_.store(o, std::memory_order_relaxed);
+    }
 }
 
 // ---------------------------------------------------------------- MIDI and voices
@@ -294,8 +408,10 @@ void Playground::render_deck(Deck& d, float* buf, uint32_t n, const float* in, u
     const int spb = std::clamp(bpb * 4, 1, ANA_PG_STEPS_PER_BAR);
     const double sf = beatFrames / 4, barFrames = beatFrames * bpb;
     uint32_t i = 0;
+    const Board* board = live ? board_.load(std::memory_order_acquire) : bounceBoard_;
     auto run = [&](uint32_t upto) {
         const float rel = 1.f / (0.03f * float(rate_));
+        std::fill(d.pad + 2 * i, d.pad + 2 * upto, 0.f);
         for (auto& v : d.voice) {
             if (!v.s) continue;
             const float gl = gain_[v.slot][0] * v.gain, gr = gain_[v.slot][1] * v.gain;
@@ -304,10 +420,18 @@ void Playground::render_deck(Deck& d, float* buf, uint32_t n, const float* in, u
                 if (k + 1 >= v.s->frames) { v.s = nullptr; break; }
                 const float f = float(v.pos - double(k)), *x = v.s->lr.data() + 2 * k;
                 if (v.release && (v.env -= rel) <= 0) { v.s = nullptr; break; }
-                buf[2 * j] += v.env * gl * (x[0] + f * (x[2] - x[0]));
-                buf[2 * j + 1] += v.env * gr * (x[1] + f * (x[3] - x[1]));
+                d.pad[2 * j] += v.env * gl * (x[0] + f * (x[2] - x[0]));
+                d.pad[2 * j + 1] += v.env * gr * (x[1] + f * (x[3] - x[1]));
                 v.pos += v.rate;
             }
+        }
+        // The pedalboard: the input and the pads in, the output and what REC records out.
+        float recSig[512];
+        for (uint32_t j = i; j < upto; j++) {
+            float x = 0;
+            if (in) { for (uint32_t c = 0; c < inCh; c++) x += in[size_t(j) * inCh + c]; x /= float(inCh); }
+            if (board) board_frame(*board, live ? board->dsp : d.dsp, x, d.pad + 2 * j, buf + 2 * j, recSig[j], beatFrames, live);
+            else { buf[2 * j] += d.pad[2 * j]; buf[2 * j + 1] += d.pad[2 * j + 1]; recSig[j] = x; }
         }
         // The block's audio loop: played, and overdubbed while REC (what the input brings now was
         // played to what the output gave a round trip ago).
@@ -319,11 +443,7 @@ void Playground::render_deck(Deck& d, float* buf, uint32_t n, const float* in, u
                 for (uint32_t j = i; j < upto; j++) {
                     const size_t idx = size_t(std::min(d.bar, b.bars - 1)) * perBar + size_t(p0 + j - d.barStart);
                     if (idx < L) { buf[2 * j] += loopGain_ * l->mono[idx]; buf[2 * j + 1] += loopGain_ * l->mono[idx]; }
-                    if (rec) {
-                        float x = 0;
-                        for (uint32_t c = 0; c < inCh; c++) x += in[size_t(j) * inCh + c];
-                        l->mono[(idx + L - roundTrip_ % L) % L] += x / float(inCh);
-                    }
+                    if (rec) l->mono[(idx + L - roundTrip_ % L) % L] += recSig[j];
                 }
             }
         }
@@ -368,6 +488,7 @@ void Playground::render(float* out, uint32_t frames, uint32_t ch, const float* i
         }
     }
     Deck& d = live_;
+    if (const Board* b = board_.load(std::memory_order_acquire)) boardAdopted_.store(b->gen, std::memory_order_release);
     for (auto& v : d.voice) if (v.s && v.s != slot_[v.slot].load(std::memory_order_acquire)) v.s = nullptr;
 
     for (Cmd c; cmd_.pop_many(&c, 1);) {
@@ -470,11 +591,17 @@ int Playground::bounce(const char* path, uint32_t rate, double beatFrames, int b
     d->song = s;
     d->once = d->starting = true;
     d->queued = 0;
+    // The pads through the board as live (the input silent), on pedals of the bounce's own.
+    bounceBoard_ = board_.load(std::memory_order_acquire);
+    std::vector<std::unique_ptr<Pedal>> own;
+    if (bounceBoard_)
+        for (int k = 0; k < bounceBoard_->p.pedals; k++) { own.push_back(std::make_unique<Pedal>(bounceBoard_->p.pedal[k].kind, rate)); d->dsp[k] = own.back().get(); }
     std::vector<float> y(size_t(total) * 2, 0.f);
     for (uint64_t p = 0; p < total; p += 512) {
         const uint32_t n = uint32_t(std::min<uint64_t>(512, total - p));
         render_deck(*d, y.data() + p * 2, n, nullptr, 0, p, 0, beatFrames, beatsPerBar, false);
     }
+    bounceBoard_ = nullptr;
     for (float& v : y) v *= master_;
     return write_wav(path, y, 2, rate);
 }

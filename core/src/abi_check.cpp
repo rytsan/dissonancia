@@ -20,4 +20,4 @@ static_assert(sizeof(LiveSnapshot) == 18096 && offsetof(LiveSnapshot, chord) == 
 static_assert(offsetof(LiveSnapshot, beatInBar) == 96 && offsetof(LiveSnapshot, pitch) == 104);
 static_assert(offsetof(LiveSnapshot, note) == 136 && offsetof(LiveSnapshot, chroma) == 200);
 static_assert(offsetof(LiveSnapshot, cqtMagnitude) == 408 && offsetof(LiveSnapshot, waveMin) == 1712 && offsetof(LiveSnapshot, songKey) == 1672 && offsetof(LiveSnapshot, harmonySymbol) == 1688 && offsetof(LiveSnapshot, melody) == 1608);
-static_assert(sizeof(PlaygroundConfig) == 144 && sizeof(PlaygroundStatus) == 172 && sizeof(PgBlock) == 20 && sizeof(PgNote) == 8 && sizeof(PgEntry) == 8 && sizeof(PgRecorded) == 12);
+static_assert(sizeof(PlaygroundConfig) == 144 && sizeof(PlaygroundStatus) == 244 && sizeof(PedalParams) == 20 && sizeof(PedalCable) == 8 && sizeof(Pedalboard) == 712 && sizeof(PgBlock) == 20 && sizeof(PgNote) == 8 && sizeof(PgEntry) == 8 && sizeof(PgRecorded) == 12);
