@@ -795,6 +795,31 @@ Targets (REQUIREMENTS R1): harmony ≥ 90 % within 0.5 s, changes ≤ ×1.2, cho
 ≥ 90 %. `dz_wav` ran in C major until this baseline; the GuitarSet figures above it (69 %, 66 %) carry
 that bias.
 
+### Phase 1 so far
+
+`eval.py --compare before.json after.json` pairs two runs item by item: the change per figure, a 95 %
+bootstrap interval over songs and takes, and how many items got better or worse. A change whose
+interval holds 0 is noise and is not counted as a gain.
+
+| Step | RWC-Pop harmony | GuitarSet harmony | Kept |
+|---|---|---|---|
+| Equal loudness at 75 phon (ISO 226) instead of A-weighting | +3.9 pts [+3.2, +4.5], 88 songs up / 8 down | noise | yes |
+| ... at 60 / 90 phon | +0.3 / +5.8 pts | noise / exact −4.5 | 75: playing level, no loss |
+| Six notes per hop | +4.4 pts | chord −1.6, take −1.3 (worse) | no |
+| The bass searched apart, own slot when missed; register threshold 0.5 → 0.4 | **+7.1 pts [+5.7, +8.7] in all, 87 up / 10 down** | noise (+1.1) | yes |
+
+After steps 1–2 (2026-10-22), `tools/eval/baseline-full.json`:
+
+| Corpus | Harmony | Delay (med / p90) | Changes | Chord | Exact | Chord delay | Take | Melody RPA |
+|---|---|---|---|---|---|---|---|---|
+| Synthetic (7) | 87.5 % | 0.64 / 1.18 s | ×1.14 | 90.6 % | 38.2 % | 0.36 s | 90.1 % | — |
+| GuitarSet comping (180) | 74.5 % | 0.68 / 1.75 s | ×2.72 | 72.5 % | 41.9 % | 0.55 s | 75.3 % | — |
+| RWC-Pop, full band (100) | 62.1 % | 0.68 / 1.71 s | ×1.42 | 62.3 % | 31.9 % | 0.57 s | 62.4 % | — |
+| vocadito, solo voice (40) | — | — | — | — | — | — | — | 76.4 % |
+
+Cost: more notes heard means more 7, add9 and maj7 on screen, so the exact symbol fell (GuitarSet
+46.3 → 41.9 %). The quality choice (R1.4) is tuned again in step 7.
+
 ## Measurements
 
 From the test suite (synthetic signals, sample clock) and loopback runs on

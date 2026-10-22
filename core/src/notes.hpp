@@ -1,9 +1,10 @@
 // Perceived notes and chords from them (prototypes: tools/loopback/psynotes.py, hmmchords.py).
 //
 // NoteFrontEnd: what a listener hears as notes, per hop, on the live (decimated) signal. A Hann
-// STFT (~180 ms), A-weighted; peaks that the louder ones around them mask (spreading on the Bark
-// scale) do not count; notes by virtual pitch (subharmonic summation of the audible peaks, the best
-// note taken and its partials removed, three times), kept when strong within their own register
+// STFT (~180 ms), weighted by the 75-phon equal-loudness contour (ISO 226); peaks that the louder
+// ones around them mask (spreading on the Bark scale) do not count; notes by virtual pitch (subharmonic summation of the audible peaks, the best
+// note taken and its partials removed, four times; the bass searched apart on every peak and given
+// the last slot when the search missed it), kept when strong within their own register
 // (bass / middle / treble, so a soft treble string is not judged against the thumb's bass), heard
 // for two hops (an attack's or a damping's noise lasts one), and nothing below the audibility
 // floor (30 dB under the recent loudest frame).
@@ -41,7 +42,7 @@ public:
 private:
     int n_ = 0, pos_ = 0;
     double rate_ = 0;
-    std::vector<float> ring_, window_, aweight_, bark_;
+    std::vector<float> ring_, window_, loudw_, bark_;
     std::vector<std::complex<float>> buf_, twiddle_;
     std::vector<int> bitrev_;
     std::vector<float> db_;

@@ -31,15 +31,21 @@ against the 90 % target; melody 76.4 % on vocadito.
 Each step is a separate change, measured against the baseline and kept only if it helps.
 
 1. **Equal loudness at playing level** (ISO 226, ~70–80 phon) instead of A-weighting. A-weighting
-   costs a G2 −19 dB; a listener at that level hears the bass well.
+   costs a G2 −19 dB; a listener at that level hears the bass well. **Done 2026-10-22**: 75 phon,
+   RWC-Pop harmony +3.9 pts.
 2. **Bass by virtual pitch.** A low root is heard through its harmonics, so the bass register is
-   searched apart and does not compete with the treble for the note slots.
-3. **More notes per hop** (6 for a full strum), with the bass slot reserved.
+   searched apart and does not compete with the treble for the note slots. **Done 2026-10-22**: the
+   bass takes the last slot when the greedy search missed it; with step 1, RWC-Pop harmony
+   54.9 → 62.1 % and 0.79 → 0.68 s. Chord exact on GuitarSet fell 46 → 42 % (more extensions).
+3. **More notes per hop** (6 for a full strum), with the bass slot reserved. Tried 2026-10-22 without
+   the bass slot: worse on GuitarSet chord and take; to try again after step 5.
 4. **Temporal masking**: forward masking after an attack, for picking and damped strings.
 5. **Harmonic / percussive split** (median filter over the STFT already computed) before the
    notes, for songs with drums (RWC).
 6. **Temporal integration of loudness** (~200 ms) feeding the HMM's memory, instead of a fixed
    decay. This is closer to what a listener "sums up" as the harmony.
+Each step is judged with `eval.py --compare` (paired per song, 95 % interval), not by the totals.
+
 7. **Retune** lag, memory and dwell on the corpus (the sweep from 2026-10-21) after each step above.
 
 Exit: R1.1–R1.3 on RWC and GuitarSet. If a classical model stalls well below 90 %, weigh a small

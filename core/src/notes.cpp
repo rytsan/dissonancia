@@ -9,10 +9,32 @@ namespace {
 constexpr double kPi = 3.14159265358979323846;
 constexpr int kLowMidi = 40, kHighMidi = 88;           // E2 .. E6, candidate fundamentals
 constexpr int kBassTop = 52, kTrebleBottom = 67;       // registers: [40,52) bass, [52,67) middle, [67,89) treble
-constexpr float kRegister = 0.5f, kGlobal = 0.15f;     // strong within its register / against the frame's best
+constexpr float kRegister = 0.4f, kGlobal = 0.15f;     // strong within its register / against the frame's best (0.4: a G2 heard at 75 phon would hide the B2 beside it at 0.5)
 constexpr float kFloorDb = 30, kFadeDbPerSecond = 21.5f;
 constexpr float kAbsoluteFloorDb = -10;   // ~-70 dBFS for a full-scale sine (|X| = n/4 at 4096): silence
 constexpr int kMaxPeaks = 256;
+constexpr double kPhon = 75;   // music at playing level (ISO 226); A-weighting (the 40-phon contour) cost RWC-Pop 3.9 points
+
+// ISO 226:2003 equal-loudness contours: the level (dB SPL) at f that sounds as loud as `phon` at 1 kHz
+double iso226(double f, double phon) {
+    static const double fr[] = {20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630, 800,
+                                1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500};
+    static const double af[] = {0.532, 0.506, 0.480, 0.455, 0.432, 0.409, 0.387, 0.367, 0.349, 0.330, 0.315, 0.301, 0.288, 0.276, 0.267,
+                                0.259, 0.253, 0.250, 0.246, 0.244, 0.243, 0.243, 0.243, 0.242, 0.242, 0.245, 0.254, 0.271, 0.301};
+    static const double lu[] = {-31.6, -27.2, -23.0, -19.1, -15.9, -13.0, -10.3, -8.1, -6.2, -4.5, -3.1, -2.0, -1.1, -0.4, 0.0,
+                                0.3, 0.5, 0.0, -2.7, -4.1, -1.0, 1.7, 2.5, 1.2, -2.1, -7.1, -11.2, -10.7, -3.1};
+    static const double tf[] = {78.5, 68.7, 59.5, 51.1, 44.0, 37.5, 31.5, 26.5, 22.1, 17.9, 14.4, 11.4, 8.6, 6.2, 4.4,
+                                3.0, 2.2, 2.4, 3.5, 1.7, -1.3, -4.2, -6.0, -5.4, -1.5, 6.0, 12.6, 13.9, 12.3};
+    auto lp = [&](int i) {
+        const double a = 4.47e-3 * (std::pow(10.0, 0.025 * phon) - 1.15) + std::pow(0.4 * std::pow(10.0, (tf[i] + lu[i]) / 10 - 9), af[i]);
+        return 10 / af[i] * std::log10(a) - lu[i] + 94;
+    };
+    f = std::clamp(f, fr[0], fr[28]);
+    int i = 0;
+    while (i < 27 && fr[i + 1] < f) i++;
+    const double x = std::log(f / fr[i]) / std::log(fr[i + 1] / fr[i]);
+    return lp(i) + x * (lp(i + 1) - lp(i));
+}
 }  // namespace
 
 // ---------------------------------------------------------------- notes
@@ -26,13 +48,13 @@ void NoteFrontEnd::init(double rate) {
     window_.resize(size_t(n_));
     for (int i = 0; i < n_; i++) window_[size_t(i)] = float(0.5 - 0.5 * std::cos(2 * kPi * i / n_));
     const int bins = n_ / 2 + 1;
-    aweight_.resize(size_t(bins));
+    loudw_.resize(size_t(bins));
+
     bark_.resize(size_t(bins));
     db_.resize(size_t(bins));
     for (int k = 0; k < bins; k++) {
-        double f = std::max(1.0, k * rate / n_), f2 = f * f;
-        double ra = 12194.0 * 12194 * f2 * f2 / ((f2 + 20.6 * 20.6) * std::sqrt((f2 + 107.7 * 107.7) * (f2 + 737.9 * 737.9)) * (f2 + 12194.0 * 12194));
-        aweight_[size_t(k)] = float(20 * std::log10(std::max(ra, 1e-9)) + 2.0);
+        const double f = std::max(1.0, k * rate / n_);
+        loudw_[size_t(k)] = float(iso226(1000, kPhon) - iso226(f, kPhon) + 2.0);
         bark_[size_t(k)] = float(13 * std::atan(0.00076 * f) + 3.5 * std::atan((f / 7500) * (f / 7500)));
     }
     buf_.resize(size_t(n_));
@@ -72,7 +94,7 @@ void NoteFrontEnd::analyse(double hopSeconds, NoteFrame& out) {
     const int bins = n_ / 2 + 1;
     float top = -200;
     for (int k = 0; k < bins; k++) {
-        db_[size_t(k)] = 10 * std::log10(std::norm(buf_[size_t(k)]) + 1e-12f) + aweight_[size_t(k)];
+        db_[size_t(k)] = 10 * std::log10(std::norm(buf_[size_t(k)]) + 1e-12f) + loudw_[size_t(k)];
         top = std::max(top, db_[size_t(k)]);
     }
     runMax_ = std::max(top, runMax_ - kFadeDbPerSecond * float(hopSeconds));
@@ -102,36 +124,54 @@ void NoteFrontEnd::analyse(double hopSeconds, NoteFrame& out) {
             loud[na] = std::pow(10.f, 0.03f * (b - top));   // loudness ~ intensity^0.3, relative
             na++;
         }
-        // virtual pitch: subharmonic summation, three times, each note's partials removed
+        // virtual pitch: subharmonic summation, the best note taken and its partials removed, kMax times
         bool alive[kMaxPeaks];
         std::fill(alive, alive + na, true);
         int found[NoteFrame::kMax];
         float sal[NoteFrame::kMax];
         int nf = 0;
-        for (int it = 0; it < NoteFrame::kMax; it++) {
-            float best = 0;
-            int bm = -1;
-            for (int m = kLowMidi; m <= kHighMidi; m++) {
-                const float f0 = 440.f * std::pow(2.f, (m - 69) / 12.f);
-                float s = 0;
-                bool low = false;
-                for (int i = 0; i < na; i++) {
-                    if (!alive[i]) continue;
-                    const float h = freq[i] / f0, hn = std::round(h);
-                    if (hn < 1 || hn > 10 || std::fabs(1200 * std::log2(h / hn)) >= 35) continue;
-                    s += loud[i] / std::sqrt(hn);
-                    low |= hn <= 2;   // its fundamental or octave heard: no missing-fundamental guess
-                }
-                if (low && s > best) best = s, bm = m;
+        // salience of m from the peaks still unexplained; lowest: the partial number it must be heard at
+        auto salience = [&](int m, float lowest) {
+            const float f0 = 440.f * std::pow(2.f, (m - 69) / 12.f);
+            float s = 0;
+            bool low = false;
+            for (int i = 0; i < na; i++) {
+                if (!alive[i]) continue;
+                const float h = freq[i] / f0, hn = std::round(h);
+                if (hn < 1 || hn > 10 || std::fabs(1200 * std::log2(h / hn)) >= 35) continue;
+                s += loud[i] / std::sqrt(hn);
+                low |= hn <= lowest;
             }
+            return low ? s : 0.f;
+        };
+        auto best = [&](int lo, int hi, float lowest, float& bs) {
+            int bm = -1;
+            bs = 0;
+            for (int m = lo; m < hi; m++)
+                if (const float s = salience(m, lowest); s > bs) bs = s, bm = m;
+            return bm;
+        };
+        // The bass apart, on every peak: a listener follows the lowest voice on its own, and in the
+        // greedy search below an octave above it (G3 over G2, their shared partials beating with D3's)
+        // can win and take its partials away. Its fundamental must be heard (no octave-below guess).
+        float bassSal;
+        const int bass = best(kLowMidi, kBassTop, 1, bassSal);
+        while (nf < NoteFrame::kMax) {   // the rest: its fundamental or octave heard, no missing-fundamental guess
+            float bs;
+            const int bm = best(kLowMidi, kHighMidi + 1, 2, bs);
             if (bm < 0) break;
             found[nf] = bm;
-            sal[nf++] = best;
+            sal[nf++] = bs;
             const float f0 = 440.f * std::pow(2.f, (bm - 69) / 12.f);
             for (int i = 0; i < na; i++) {
                 const float h = freq[i] / f0, hn = std::round(h);
                 if (hn >= 1 && hn <= 10 && std::fabs(1200 * std::log2(h / hn)) < 35) alive[i] = false;
             }
+        }
+        if (bass >= 0 && std::find(found, found + nf, bass) == found + nf) {   // missed: it takes the last slot
+            if (nf == NoteFrame::kMax) nf--;
+            found[nf] = bass;
+            sal[nf++] = bassSal;
         }
         float gmax = 0;
         for (int i = 0; i < nf; i++) gmax = std::max(gmax, sal[i]);

@@ -9,6 +9,7 @@
 #
 #   python3 tools/eval/eval.py [corpus ...] [--limit N] [--json out.json] [--check baseline.json]
 #   corpora: synthetic (generated, no download), guitarset, rwc-pop, vocadito (tools/eval/corpora.py)
+#   python3 tools/eval/eval.py --compare before.json after.json   (paired, per item, 95 % interval)
 #   --check: exit 1 when a figure falls more than 1 point (or 50 ms) below the baseline
 import json, os, statistics, subprocess, sys, tempfile
 from concurrent.futures import ThreadPoolExecutor
@@ -192,6 +193,10 @@ def evaluate(name, limit):
         return score_melody(ref, ev) if mode == "voice" else score_chords(ref, ev)
     with ThreadPoolExecutor(os.cpu_count() or 4) as ex: rs = list(ex.map(one, items))
     out = {"items": len(items)}
+    # per item, for --compare: (score, weight) of each figure
+    if name == "vocadito": out["per_item"] = {it[0]: {"melody_rpa": [r["rpa"], r["_n"]]} for it, r in zip(items, rs)}
+    else: out["per_item"] = {it[0]: {f"{lab}_majmin": [r[k]["majmin"], r[k]["_n"]] for k, lab in (("harmony", "harmony"), ("shown", "chord"), ("chord", "take"))}
+                             | {"chord_exact": [r["shown"].get("exact"), 1]} for it, r in zip(items, rs)}
     if name == "vocadito":
         tot = sum(r["_n"] for r in rs)
         out["melody_rpa"] = sum((r["rpa"] or 0) * r["_n"] for r in rs) / tot if tot else None
@@ -217,7 +222,29 @@ def show(name, r):
     print(f"{name:10s} {r['items']:4d}  harmony {f(r['harmony_majmin'])} delay {f(r['harmony_delay_med'], 's')} p90 {f(r['harmony_delay_p90'], 's')} changes {f(r['harmony_changes'], 'x')}"
           f"  | chord {f(r['chord_majmin'])} exact {f(r['chord_exact'])} delay {f(r['chord_delay_med'], 's')} changes {f(r['chord_changes'], 'x')}  | take {f(r['take_majmin'])}")
 
+def compare(a_path, b_path, rounds=2000):
+    """Paired comparison of two --json runs: the change per figure with a 95 % bootstrap interval over
+    items (songs, takes), and how many items got better / worse. A change whose interval holds 0 is noise."""
+    import random
+    a, b = json.load(open(a_path)), json.load(open(b_path))
+    rng = random.Random(1)
+    for n in a:
+        if n not in b or "per_item" not in a[n]: continue
+        pa, pb = a[n]["per_item"], b[n]["per_item"]
+        keys = [k for k in pa if k in pb]
+        for fig in next(iter(pa.values())):
+            rows = [(pb[k][fig][0] - pa[k][fig][0], pa[k][fig][1]) for k in keys
+                    if pa[k][fig][0] is not None and pb[k][fig][0] is not None and pa[k][fig][1]]
+            if not rows: continue
+            mean = lambda rs: sum(d * w for d, w in rs) / sum(w for _, w in rs)
+            boot = sorted(mean([rows[rng.randrange(len(rows))] for _ in rows]) for _ in range(rounds))
+            lo, hi = boot[int(0.025 * rounds)], boot[int(0.975 * rounds)]
+            up = sum(d > 0.5 for d, _ in rows); down = sum(d < -0.5 for d, _ in rows)
+            verdict = "better" if lo > 0 else "worse" if hi < 0 else "noise"
+            print(f"{n:10s} {fig:15s} {mean(rows):+5.1f} pts  [{lo:+5.1f}, {hi:+5.1f}]  items +{up} -{down} of {len(rows)}  {verdict}")
+
 if __name__ == "__main__":
+    if sys.argv[1:2] == ["--compare"]: compare(sys.argv[2], sys.argv[3]); sys.exit(0)
     args, names, limit, jout, check = sys.argv[1:], [], None, None, None
     while args:
         a = args.pop(0)
@@ -234,7 +261,7 @@ if __name__ == "__main__":
         base, bad = json.load(open(check)), []
         for n, r in results.items():
             for k, v in base.get(n, {}).items():
-                if v is None or r.get(k) is None or k == "items": continue
+                if v is None or r.get(k) is None or k in ("items", "per_item"): continue
                 worse = (r[k] - v > 0.05) if "delay" in k else (r[k] - v > 0.05) if "changes" in k else (v - r[k] > 1.0)
                 if worse: bad.append(f"{n} {k}: {r[k]:.2f} (baseline {v:.2f})")
         if bad: print("REGRESSION\n  " + "\n  ".join(bad)); sys.exit(1)
