@@ -3,11 +3,11 @@
 // NoteFrontEnd: what a listener hears as notes, per hop, on the live (decimated) signal. A Hann
 // STFT (~180 ms), weighted by the 75-phon equal-loudness contour (ISO 226); peaks that the louder
 // ones around them mask (spreading on the Bark scale) do not count; notes by virtual pitch
-// (subharmonic summation of the audible peaks, the best note taken and its partials removed, four times; the bass searched apart on every peak and given
-// the last slot when the search missed it), kept when strong within their own register
-// (bass / middle / treble, so a soft treble string is not judged against the thumb's bass), heard
-// for two hops (an attack's or a damping's noise lasts one), and nothing below the audibility
-// floor (30 dB under the recent loudest frame).
+// (subharmonic summation of the audible peaks, the best note taken and its partials removed, four
+// times; the bass searched apart on every peak and given the last slot when the search missed it),
+// kept when strong within their own register (bass / middle / treble, so a soft treble string is
+// not judged against the thumb's bass), heard for two hops (an attack's or a damping's noise lasts
+// one), and nothing below the audibility floor (30 dB under the recent loudest frame).
 //
 // ChordHmm: chords as a hidden Markov model over those notes. Each chord explains the notes heard
 // lately — a chord tone is likely, any other note not — each note weighted by how recently it
