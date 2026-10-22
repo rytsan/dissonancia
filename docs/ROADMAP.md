@@ -41,12 +41,15 @@ Each step is a separate change, measured against the baseline and kept only if i
    the bass slot: worse on GuitarSet chord and take; to try again after step 5.
 4. **Temporal masking**: forward masking after an attack, for picking and damped strings.
 5. **Harmonic / percussive split** (median filter over the STFT already computed) before the
-   notes, for songs with drums (RWC).
+   notes, for songs with drums (RWC). Tried 2026-10-22 as a causal time median: +0.8 at best, and a
+   clean change passes through a third chord. Dropped; drums are not RWC's main error.
 6. **Temporal integration of loudness** (~200 ms) feeding the HMM's memory, instead of a fixed
    decay. This is closer to what a listener "sums up" as the harmony.
 Each step is judged with `eval.py --compare` (paired per song, 95 % interval), not by the totals.
 
 7. **Retune** lag, memory and dwell on the corpus (the sweep from 2026-10-21) after each step above.
+   First pass 2026-10-22: harmony dwell 0.4 s, memory 0.2 s, +4 pts on RWC-Pop and GuitarSet (66.1 %,
+   78.5 %), delay 0.56 s. Open: the change ratio (×1.63 on RWC-Pop) and the exact symbol.
 
 Exit: R1.1–R1.3 on RWC and GuitarSet. If a classical model stalls well below 90 %, weigh a small
 neural model in LIVE, as Melodia already runs Basic Pitch.

@@ -68,7 +68,7 @@ public:
     static Params played() { return {}; }
     // The harmony underneath (the "campo harmonico" a listener sums up: G ... D ...): triads only,
     // a short memory, a dwell in the tracker; passing chords, inversions and colours fold into it.
-    static Params harmony() { return {0.3, 0.998f, 0.3f, 0.2f, 0.2f, true}; }
+    static Params harmony() { return {0.3, 0.998f, 0.2f, 0.2f, 0.2f, true}; }
 
     explicit ChordHmm(double hopSeconds, Params p = played());
     void reset();

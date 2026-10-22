@@ -807,18 +807,26 @@ interval holds 0 is noise and is not counted as a gain.
 | ... at 60 / 90 phon | +0.3 / +5.8 pts | noise / exact −4.5 | 75: playing level, no loss |
 | Six notes per hop | +4.4 pts | chord −1.6, take −1.3 (worse) | no |
 | The bass searched apart, own slot when missed; register threshold 0.5 → 0.4 | **+7.1 pts [+5.7, +8.7] in all, 87 up / 10 down** | noise (+1.1) | yes |
+| Harmonic / percussive split: each bin clipped to its median over the last K hops (causal) | K 5: +0.8; K 9: noise; K 15: −0.8 | K 9–15 worse | no: small, and a clean change passes through a third chord |
+| Retune (step 7): harmony dwell 0.8 → 0.4 s, memory 0.3 → 0.2 s | +4.1 pts [+3.7, +4.5], 97 up / 0 down | +4.0 pts, 147 up / 12 down | yes |
 
-After steps 1–2 (2026-10-22), `tools/eval/baseline-full.json`:
+Why the retune: on RWC-Pop, from 0.5 to 1.5 s after a change the screen was right 56 % of the time
+and still showed the previous chord 15 % of the time; after 1.5 s it was right 71 %. Lag, not
+hearing, was the larger error. Wrong roots split between the relative and mediant chords (sharing
+two notes, ~10 %), the parallel third (~6 %) and the fifth neighbours (~8 %).
+
+After steps 1, 2 and the first retune (2026-10-22), `tools/eval/baseline-full.json`:
 
 | Corpus | Harmony | Delay (med / p90) | Changes | Chord | Exact | Chord delay | Take | Melody RPA |
 |---|---|---|---|---|---|---|---|---|
-| Synthetic (7) | 87.5 % | 0.64 / 1.18 s | ×1.14 | 90.6 % | 38.2 % | 0.36 s | 90.1 % | — |
-| GuitarSet comping (180) | 74.5 % | 0.68 / 1.75 s | ×2.72 | 72.5 % | 41.9 % | 0.55 s | 75.3 % | — |
-| RWC-Pop, full band (100) | 62.1 % | 0.68 / 1.71 s | ×1.42 | 62.3 % | 31.9 % | 0.57 s | 62.4 % | — |
+| Synthetic (7) | 91.5 % | 0.60 / 0.96 s | ×1.18 | 90.6 % | 38.2 % | 0.36 s | 90.1 % | — |
+| GuitarSet comping (180) | 78.5 % | 0.61 / 1.62 s | ×3.11 | 72.5 % | 41.9 % | 0.55 s | 75.3 % | — |
+| RWC-Pop, full band (100) | 66.1 % | 0.56 / 1.63 s | ×1.63 | 62.3 % | 31.9 % | 0.57 s | 62.4 % | — |
 | vocadito, solo voice (40) | — | — | — | — | — | — | — | 76.4 % |
 
 Cost: more notes heard means more 7, add9 and maj7 on screen, so the exact symbol fell (GuitarSet
-46.3 → 41.9 %). The quality choice (R1.4) is tuned again in step 7.
+46.3 → 41.9 %), and the quicker harmony changes more often (RWC-Pop ×1.42 → ×1.63 against R1.3's
+×1.2). Both are open for the rest of step 7.
 
 ## Measurements
 

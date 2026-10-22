@@ -882,10 +882,11 @@ void ChordTracker::process_notes(const NoteFrame& notes, const ChromaVector& chr
     out.latencyMs = float((lagSeconds + kHoldSeconds + kFrontEndSeconds) * 1000);
     out.confirmElapsedMs = 0;
     // The harmony underneath: triads only, a short memory (quick to follow a change) and a dwell of its
-    // own (a new root waits 0.8 s after the last one), which keeps a passing chord from flickering in
+    // own (a new root waits 0.4 s after the last one), which keeps a passing chord from flickering in
     // without delaying the change. A new third on the same root (Dm read before the F# came) is a
-    // correction and shows at once. Before (long memory, 0.6 s lag): ~1.1 s to the screen; now ~0.55 s
-    // with as few changes (tools/loopback/latency.py, GuitarSet).
+    // correction and shows at once. A 0.8 s dwell and 0.3 s memory held the previous chord on pop
+    // songs, where chords change every bar or half bar: 0.4 s and 0.2 s gained ~4 points on RWC-Pop
+    // and GuitarSet alike (tools/eval, 2026-10-22).
     const int h = harmony_.decided();
     out.harmonyLatencyMs = float((harmony_.lag_hops() * hop_ + kFrontEndSeconds) * 1000);
     if (!sounding) harmonyShown_ = -1;

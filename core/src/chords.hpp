@@ -167,7 +167,7 @@ private:
     static constexpr double kHoldSeconds = 0;     // no hold: the dwell below steadies it without the wait
     // Once a chord is on screen, another root must wait this long: a quick decoder flickers between
     // neighbours at a change, and a dwell steadies it without delaying the first change (GuitarSet).
-    static constexpr double kDwellSeconds = 0.4, kHarmonyDwellSeconds = 0.8;
+    static constexpr double kDwellSeconds = 0.4, kHarmonyDwellSeconds = 0.4;
     static constexpr double kFrontEndSeconds = 0.12;   // half the notes' STFT window + the two hops a note must last
     int harmonyShown_ = -1;
     double harmonySince_ = 0;
