@@ -813,6 +813,24 @@ interval holds 0 is noise and is not counted as a gain.
 | A first guess beside the harmony (its own HMM: no lag or dwell, stay 0.9–0.99, memory 0.05–0.15 s) | 69 % at 0.42 s, changes ×2.3 (harmony: 66 % at 0.56 s, ×1.6) | 81 % at 0.46 s, ×4.4 | no: 0.14 s sooner for half again as many changes |
 | The key's weight on diatonic chords, 0 / 0.3 (today) / 0.6 / 1.0 / 1.5 | 0.3–0.6 best, +1 pt over none; 1.5 worse | +1.5 pts over none | 0.3 kept |
 
+| The key as a Bayesian posterior over 24 keys, from the chords decided (2026-10-23), weight 0.3, modulation 0.1/s | even (+0.4), changes ×1.63 → ×1.51 | +1.3 pts [+0.4, +2.2], ×3.11 → ×2.79 | yes |
+| ... weight 0.5 / 1 / 2 | −0.9 / −7.6 / −23.3 | +1.7 / noise / −8.6 | no: a strong prior locks onto a wrong key and feeds itself |
+
+Other systems on the same ruler (2026-10-23):
+
+| System | GuitarSet harmony | RWC-Pop harmony | Note |
+|---|---|---|---|
+| LIVE today (perceived notes + HMM) | 79.8 %, 0.58 s | 66.5 %, 0.56 s | |
+| The older LIVE chroma tracker | — (chord 42.7 %) | — (chord 30.5 %) | far behind; LIVE no longer uses it |
+| STUDIO whole-take decoder (knows the future) | 82.3 % | 68.9 % | the ceiling of this hearing: +3 pts |
+| Basic Pitch notes under the HMM, aligned (as STUDIO could) | 84.5 %, exact +16 pts | 64.7 % | hears a solo guitar better, a full band not |
+| ... with its live delay (~0.45 s, LiveTranscriber) | 71.3 %, 0.85 s | 49.6 %, 0.92 s | too slow for LIVE |
+
+What this says: on a full band, LIVE is within 3 points of what the same hearing reaches knowing the
+whole song, so neither more context nor a key model closes the gap to 90 %; the notes heard do. On
+a solo guitar a neural transcriber hears better (exact symbol +16 points) but comes too late for
+LIVE: a STUDIO pass for the session report, not the screen.
+
 Why the guess gains little: lag and dwell are only ~0.05 s of the delay. The rest is the front end
 (the 180 ms window, two hops) and the old notes' memory, which a faster model trades for flicker.
 
@@ -826,13 +844,13 @@ and still showed the previous chord 15 % of the time; after 1.5 s it was right 7
 hearing, was the larger error. Wrong roots split between the relative and mediant chords (sharing
 two notes, ~10 %), the parallel third (~6 %) and the fifth neighbours (~8 %).
 
-After steps 1, 2 and the first retune (2026-10-22), `tools/eval/baseline-full.json`:
+After steps 1, 2, the first retune and the heard key (2026-10-23), `tools/eval/baseline-full.json`:
 
 | Corpus | Harmony | Delay (med / p90) | Changes | Chord | Exact | Chord delay | Take | Melody RPA |
 |---|---|---|---|---|---|---|---|---|
-| Synthetic (7) | 91.5 % | 0.60 / 0.96 s | ×1.18 | 90.6 % | 38.2 % | 0.36 s | 90.1 % | — |
-| GuitarSet comping (180) | 78.5 % | 0.61 / 1.62 s | ×3.11 | 72.5 % | 41.9 % | 0.55 s | 75.3 % | — |
-| RWC-Pop, full band (100) | 66.1 % | 0.56 / 1.63 s | ×1.63 | 62.3 % | 31.9 % | 0.57 s | 62.4 % | — |
+| Synthetic (7) | 90.9 % | 0.56 / 1.02 s | ×1.19 | 93.4 % | 41.3 % | 0.38 s | 90.7 % | — |
+| GuitarSet comping (180) | 79.8 % | 0.58 / 1.69 s | ×2.79 | 73.1 % | 43.3 % | 0.54 s | 75.6 % | — |
+| RWC-Pop, full band (100) | 66.5 % | 0.56 / 1.66 s | ×1.51 | 62.6 % | 32.4 % | 0.56 s | 62.1 % | — |
 | vocadito, solo voice (40) | — | — | — | — | — | — | — | 76.4 % |
 
 Cost: more notes heard means more 7, add9 and maj7 on screen, so the exact symbol fell (GuitarSet

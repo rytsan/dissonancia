@@ -6,6 +6,7 @@
 // offline: the STUDIO whole-take decoder instead of the live tracker; with a bpm, the file is taken
 // to start on a downbeat of that metronome grid (a REC take).
 #include <cmath>
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -140,9 +141,40 @@ int main(int argc, char** argv) {
         }
         if (f) std::fclose(f);
     }
+    // DEV: DZ_NOTES_IN=dir (dir/<wav name>.notes, "start end midi confidence" per line) replaces the
+    // perceived notes, to try another note front end (tools/eval/bpnotes: Basic Pitch) under the HMM.
+    struct InNote { double a, b; int midi; float conf; };
+    std::vector<InNote> notesIn;
+    if (const char* dir = std::getenv("DZ_NOTES_IN")) {
+        std::string name = argv[1];
+        name = name.substr(name.find_last_of('/') + 1);
+        name = std::string(dir) + "/" + name.substr(0, name.find_last_of('.')) + ".notes";
+        FILE* f = std::fopen(name.c_str(), "r");
+        InNote n;
+        while (f && std::fscanf(f, "%lf %lf %d %f", &n.a, &n.b, &n.midi, &n.conf) == 4) notesIn.push_back(n);
+        if (f) std::fclose(f);
+        else std::fprintf(stderr, "no %s\n", name.c_str());
+    }
     size_t inPos = 0;
     for (size_t p = 0; p + hop <= x.size(); p += hop) {
         fe.process(x.data() + p, hop, p + hop, o);
+        if (std::getenv("DZ_NOTES_IN")) {   // the lowest note sounding, then the most confident others
+            static const double lagIn = std::getenv("DZ_NOTES_LAG") ? std::atof(std::getenv("DZ_NOTES_LAG")) : 0;   // the live transcriber's delay
+            const double tn = double(p + hop) / rate - lagIn;
+            std::vector<const InNote*> on;
+            for (const InNote& n : notesIn) if (n.a <= tn && tn < n.b) on.push_back(&n);
+            o.notes = {};
+            o.notes.audible = !on.empty();
+            if (!on.empty()) {
+                std::sort(on.begin(), on.end(), [](auto* a, auto* b) { return a->midi < b->midi; });
+                std::vector<int> pick{on[0]->midi};
+                std::sort(on.begin() + 1, on.end(), [](auto* a, auto* b) { return a->conf > b->conf; });
+                for (size_t i = 1; i < on.size() && pick.size() < size_t(NoteFrame::kMax); i++)
+                    if (std::find(pick.begin(), pick.end(), on[i]->midi) == pick.end()) pick.push_back(on[i]->midi);
+                std::sort(pick.begin(), pick.end());
+                for (int m : pick) o.notes.midi[o.notes.count++] = int8_t(m);
+            }
+        }
         if (!chromaIn.empty()) {
             while (inPos + 1 < chromaIn.size() && chromaIn[inPos + 1].first <= o.chroma.timestampSeconds) inPos++;
             for (int k = 0; k < 12; k++) o.chroma.raw[k] = chromaIn[inPos].second[k];

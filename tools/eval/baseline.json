@@ -1,15 +1,15 @@
 {
  "synthetic": {
   "items": 7,
-  "harmony_majmin": 91.48252310164725,
-  "harmony_delay_med": 0.6000000000000014,
-  "harmony_delay_p90": 0.9600000000000009,
-  "harmony_changes": 1.180952380952381,
-  "chord_majmin": 90.63881076737646,
-  "chord_delay_med": 0.35999999999999943,
-  "chord_delay_p90": 1.08,
+  "harmony_majmin": 90.89995982322218,
+  "harmony_delay_med": 0.5600000000000023,
+  "harmony_delay_p90": 1.0199999999999996,
+  "harmony_changes": 1.1904761904761905,
+  "chord_majmin": 93.37083165930092,
+  "chord_delay_med": 0.379999999999999,
+  "chord_delay_p90": 0.9800000000000004,
   "chord_changes": 1.1523809523809523,
-  "take_majmin": 90.10734929810074,
-  "chord_exact": 38.23386343232928
+  "take_majmin": 90.70189925681255,
+  "chord_exact": 41.32792283826987
  }
 }

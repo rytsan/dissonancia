@@ -72,7 +72,7 @@ public:
 
     explicit ChordHmm(double hopSeconds, Params p = played());
     void reset();
-    // keyOn: a key to prefer (the session's, else a valid estimate); tonic pitch class, minor mode.
+    // keyOn: the session's key (tonic pitch class, minor mode); off, the key is the one heard.
     void step(const NoteFrame& notes, bool keyOn, int keyTonic, bool keyMinor);
     // The whole recording at once (STUDIO): the best chord per frame, from the past and the future.
     static std::vector<int> decode(const std::vector<NoteFrame>& frames, double hopSeconds, Params p, bool keyOn, int keyTonic, bool keyMinor);
@@ -97,6 +97,10 @@ private:
     int best_ = -1, decided_ = -1;
     bool heard_ = false;
     int lastBass_ = -1;
+    // The key heard, when the session sets none: a posterior over 24 keys, updated by the chords
+    // decided and kept through silences.
+    float keyLp_[24]{}, keyBonus_[kStates]{};
+    void key_update();
 };
 
 }  // namespace dz

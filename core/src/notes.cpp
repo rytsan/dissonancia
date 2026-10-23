@@ -216,7 +216,62 @@ uint16_t mask_of(int state) {
 
 ChordHmm::ChordHmm(double hopSeconds, Params p)
     : hop_(hopSeconds), p_(p), lag_(std::max(1, int(std::lround(p.lag / hopSeconds)))), back_(size_t(lag_) * kStates) {
+    std::fill(keyLp_, keyLp_ + 24, -std::log(24.f));
     reset();
+}
+
+namespace {
+// P(chord | key): diatonic chords by how often each degree is played, the rest rare. Keys 0-11
+// major, 12-23 minor (harmonic: its V major).
+float key_lik(int key, int state) {
+    static float t[24][ChordHmm::kStates];
+    static bool init = false;
+    if (!init) {
+        static const int major[7] = {0, 2, 4, 5, 7, 9, 11}, minor[7] = {0, 2, 3, 5, 7, 8, 10};
+        for (int k = 0; k < 24; k++) {
+            const int tonic = k % 12;
+            const bool mi = k >= 12;
+            uint16_t sc = 0;
+            for (int i = 0; i < 7; i++) sc |= uint16_t(1u << ((tonic + (mi ? minor[i] : major[i])) % 12));
+            if (mi) sc |= uint16_t(1u << ((tonic + 11) % 12));
+            for (int s = 0; s < ChordHmm::kStates; s++) {
+                const int d = (ChordHmm::root(s) - tonic + 12) % 12;
+                const bool inside = (mask_of(s) & ~sc) == 0;
+                float w;
+                if (!mi) w = d == 0 ? 1.f : d == 7 ? .9f : d == 5 ? .8f : d == 9 ? .6f : d == 2 ? .5f : d == 4 ? .35f : .1f;
+                else w = d == 0 ? 1.f : d == 7 ? .8f : d == 5 ? .7f : d == 8 ? .6f : d == 3 ? .5f : d == 10 ? .5f : .1f;
+                t[k][s] = inside ? w : 0.08f;
+            }
+        }
+        init = true;
+    }
+    return t[key][state];
+}
+}  // namespace
+
+// The key heard, as a listener sums it up from a few chords: each second of a decided chord is one
+// observation of P(chord | key); some belief drifts back to every key (a modulation). Its weight on
+// the chords is mild: at 1 or more it locks onto a wrong key and feeds itself (RWC-Pop -8 to -23
+// points). At 0.3 against the fixed diatonic bonus on the estimated key, which came only after
+// ~10 s: GuitarSet +1.3 points, RWC-Pop even, fewer changes (x1.63 -> x1.51) (tools/eval, 2026-10-23).
+constexpr float kKeyWeight = 0.3f, kKeyModulationPerSecond = 0.1f;
+
+void ChordHmm::key_update() {
+    if (decided_ >= 0) {
+        const float w = float(hop_);
+        for (int k = 0; k < 24; k++) keyLp_[k] += w * std::log(key_lik(k, decided_));
+    }
+    float mx = -1e30f;
+    for (float l : keyLp_) mx = std::max(mx, l);
+    float p[24], sum = 0;
+    for (int k = 0; k < 24; k++) sum += p[k] = std::exp(keyLp_[k] - mx);
+    const float m = kKeyModulationPerSecond * float(hop_);
+    for (int k = 0; k < 24; k++) p[k] = (1 - m) * p[k] / sum + m / 24, keyLp_[k] = std::log(p[k]);
+    for (int s = 0; s < kStates; s++) {
+        float l = 0;
+        for (int k = 0; k < 24; k++) l += p[k] * key_lik(k, s);
+        keyBonus_[s] = std::log(l);
+    }
 }
 
 void ChordHmm::reset() {
@@ -269,7 +324,8 @@ void ChordHmm::evidence(const NoteFrame& notes, bool keyOn, int keyTonic, bool k
             }
             v += 0.4f * (inSum / float(size) - 1);   // completeness: tones left unheard cost a little
             if (bass >= 0) v += (m >> bass & 1) ? (root(s) == bass ? 0.3f : 0.f) : -1.f;
-            if (keyOn && (m & ~scale) == 0) v += 0.3f;   // diatonic
+            if (keyOn) v += (m & ~scale) == 0 ? 0.3f : 0.f;   // diatonic in the session's key
+            else v += kKeyWeight * keyBonus_[s];
         }
         e[s] = p_.evidence * v + kPrior[s % kQualities] * float(hop_) * 5;
         if (p_.triads && s % kQualities > 1) e[s] = -1e9f;   // only major and minor triads
@@ -278,6 +334,7 @@ void ChordHmm::evidence(const NoteFrame& notes, bool keyOn, int keyTonic, bool k
 
 void ChordHmm::step(const NoteFrame& notes, bool keyOn, int keyTonic, bool keyMinor) {
     float e[kStates];
+    if (!keyOn) key_update();
     evidence(notes, keyOn, keyTonic, keyMinor, e);
     // Viterbi step: stay, or move from the best state
     int prevBest = 0;

@@ -804,7 +804,8 @@ void ChordTracker::process_notes(const NoteFrame& notes, const ChromaVector& chr
     out.key = key_.estimate();
     int tonic = 0;
     bool minor = false;
-    const bool keyOn = matcher_.context_key(tonic, minor);
+    matcher_.context_key(tonic, minor);
+    const bool keyOn = matcher_.key_set();   // else the HMM hears the key itself (sooner than the estimate)
     hmm_.step(notes, keyOn, tonic, minor);
     harmony_.step(notes, keyOn, tonic, minor);
     if (notes.audible) lastAudible_ = t;

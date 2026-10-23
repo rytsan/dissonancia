@@ -9,6 +9,8 @@
 #
 #   python3 tools/eval/eval.py [corpus ...] [--limit N] [--json out.json] [--check baseline.json]
 #   corpora: synthetic (generated, no download), guitarset, rwc-pop, vocadito (tools/eval/corpora.py)
+#   DZ_SYSTEM=chroma|studio   the older LIVE tracker, or the STUDIO whole-take decoder (it knows the future)
+#   DZ_NOTES_IN=dir [DZ_NOTES_LAG=s]   another note front end under the HMM (tools/eval/bpnotes: Basic Pitch)
 #   python3 tools/eval/eval.py --compare before.json after.json   (paired, per item, 95 % interval)
 #   --check: exit 1 when a figure falls more than 1 point (or 50 ms) below the baseline
 import json, os, statistics, subprocess, sys, tempfile
@@ -114,8 +116,16 @@ def vocadito():
 CORPORA = {"synthetic": synthetic, "guitarset": guitarset, "rwc-pop": rwc_pop, "vocadito": vocadito}
 
 # ---------------------------------------------------------------- scoring
+SYSTEM = os.environ.get("DZ_SYSTEM", "notes")   # notes (LIVE today) | chroma (the older LIVE tracker) | studio (whole take)
+
 def run(wav, mode):
-    env = dict(os.environ, DZ_NOTES="1")
+    env = dict(os.environ)
+    if SYSTEM != "chroma": env["DZ_NOTES"] = "1"
+    if SYSTEM == "studio" and mode != "voice":
+        # the whole-take decoder knows the future: every stream is its labels, with no delay
+        out = subprocess.run([DZ, wav, mode, "balanced", "offline"], capture_output=True, text=True, env=env).stdout
+        lab = [(float(f[1]), f[3]) for f in (l.split() for l in out.splitlines()) if f and f[0] == "ended" and len(f) > 3]
+        return {"shown": lab, "harmony": lab, "chord": lab, "note": []}
     out = subprocess.run([DZ, wav, mode], capture_output=True, text=True, env=env).stdout
     ev = {"shown": [], "harmony": [], "chord": [], "note": []}
     for line in out.splitlines():

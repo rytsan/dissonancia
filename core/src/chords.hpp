@@ -78,6 +78,7 @@ public:
     void describe(int root, ChordQuality q, int bassPc, ChordCandidate& out, bool anyBass = false) const;
     // The key the context uses (the session's, else the hinted estimate); false = none.
     bool context_key(int& tonic, bool& minor) const { tonic = ctxTonic_; minor = ctxMinor_; return ctxOn_; }
+    bool key_set() const { return keySet_; }
 
     // The estimated song key as tonal context when the session has none (invalid: no context).
     // Roman numerals and cadences stay with the session key only.
