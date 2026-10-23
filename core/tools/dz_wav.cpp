@@ -168,7 +168,7 @@ int main(int argc, char** argv) {
             if (!on.empty()) {
                 std::sort(on.begin(), on.end(), [](auto* a, auto* b) { return a->midi < b->midi; });
                 std::vector<int> pick{on[0]->midi};
-                std::sort(on.begin() + 1, on.end(), [](auto* a, auto* b) { return a->conf > b->conf; });
+                if (!std::getenv("DZ_NOTES_LOW")) std::sort(on.begin() + 1, on.end(), [](auto* a, auto* b) { return a->conf > b->conf; });
                 for (size_t i = 1; i < on.size() && pick.size() < size_t(NoteFrame::kMax); i++)
                     if (std::find(pick.begin(), pick.end(), on[i]->midi) == pick.end()) pick.push_back(on[i]->midi);
                 std::sort(pick.begin(), pick.end());

@@ -10,7 +10,8 @@
 #   python3 tools/eval/eval.py [corpus ...] [--limit N] [--json out.json] [--check baseline.json]
 #   corpora: synthetic (generated, no download), guitarset, rwc-pop, vocadito (tools/eval/corpora.py)
 #   DZ_SYSTEM=chroma|studio   the older LIVE tracker, or the STUDIO whole-take decoder (it knows the future)
-#   DZ_NOTES_IN=dir [DZ_NOTES_LAG=s]   another note front end under the HMM (tools/eval/bpnotes: Basic Pitch)
+#   DZ_NOTES_IN=dir [DZ_NOTES_LAG=s] [DZ_NOTES_LOW=1]   another note front end under the HMM (tools/eval/bpnotes:
+#                                     Basic Pitch; or aligned MIDI); the lowest note, then the most confident (or lowest)
 #   python3 tools/eval/eval.py --compare before.json after.json   (paired, per item, 95 % interval)
 #   --check: exit 1 when a figure falls more than 1 point (or 50 ms) below the baseline
 import json, os, statistics, subprocess, sys, tempfile

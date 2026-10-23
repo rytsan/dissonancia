@@ -826,6 +826,26 @@ Other systems on the same ruler (2026-10-23):
 | Basic Pitch notes under the HMM, aligned (as STUDIO could) | 84.5 %, exact +16 pts | 64.7 % | hears a solo guitar better, a full band not |
 | ... with its live delay (~0.45 s, LiveTranscriber) | 71.3 %, 0.85 s | 49.6 %, 0.92 s | too slow for LIVE |
 
+Where the full band's error comes from (RWC-Pop, 2026-10-23). The songs were split with Demucs
+(htdemucs, GPU, dev-side) and the stems mixed back; the aligned MIDI of RWC gave perfect notes:
+
+| Input to LIVE | Harmony | Delay | vs the 4 stems remixed |
+|---|---|---|---|
+| The recording (today) | 66.5 % | 0.56 s | |
+| The 4 stems remixed (control: what separation alone changes) | 68.1 % | 0.54 s | — |
+| Without the voice | 71.1 % | 0.50 s | +3.0 |
+| Without the drums | 70.2 % | 0.52 s | +2.1 |
+| Bass + other (no voice, no drums) | 72.9 % | 0.48 s | +4.8 |
+| Other only (no bass either) | 66.7 % | 0.57 s | −1.4: the bass helps |
+| Perfect notes (aligned MIDI, all parts), 4 per hop | 77.0 % (78.8 % without 4 MIDI files that are transposed or misaligned) | 0.32 s | |
+| Perfect notes, 8 per hop | 81.3 % | 0.30 s | |
+
+So the voice and drums cost ~5 points, the hearing of the instruments themselves ~6 more, and the
+chord model ~17 even with perfect notes (4 of them per hop cost 4). 90 % needs the decision layer
+reworked as much as the hearing. Demucs live: one pass costs ~115 ms on an RTX 2080 Ti whatever the
+window (it pads to 7.8 s), copying audio to the GPU 0.25 ms; but the model wants future context, so
+live it would add ~0.5-1.2 s. It belongs to STUDIO.
+
 What this says: on a full band, LIVE is within 3 points of what the same hearing reaches knowing the
 whole song, so neither more context nor a key model closes the gap to 90 %; the notes heard do. On
 a solo guitar a neural transcriber hears better (exact symbol +16 points) but comes too late for
