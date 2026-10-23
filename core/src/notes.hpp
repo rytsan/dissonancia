@@ -63,12 +63,15 @@ public:
         float evidence = 0.2f;     // per-hop weight of the notes against the cost of a change
         float newBass = 0.2f;      // what remains of the old notes when a new bass arrives
         bool triads = false;       // major and minor triads only (the harmony underneath)
+        const float* emission = nullptr;   // learned triad weights (kBandEmission) instead of the hand-set ones
     };
+    static const float kBandEmission[2 * 121];
     // The chord played: every quality, quick.
     static Params played() { return {}; }
     // The harmony underneath (the "campo harmonico" a listener sums up: G ... D ...): triads only,
     // a short memory, a dwell in the tracker; passing chords, inversions and colours fold into it.
-    static Params harmony() { return {0.3, 0.998f, 0.2f, 0.2f, 0.2f, true}; }
+    // band: a full band (GeneralChords), with the emission learned on RWC-Pop.
+    static Params harmony(bool band = false) { return {0.3, 0.998f, 0.2f, 0.2f, 0.2f, true, band ? kBandEmission : nullptr}; }
 
     explicit ChordHmm(double hopSeconds, Params p = played());
     void reset();
@@ -100,6 +103,7 @@ private:
     // The key heard, when the session sets none: a posterior over 24 keys, updated by the chords
     // decided and kept through silences.
     float keyLp_[24]{}, keyBonus_[kStates]{};
+    float reg_[9][12]{};   // memory per register and time scale (the learned emission)
     void key_update();
 };
 

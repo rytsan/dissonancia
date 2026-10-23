@@ -51,6 +51,11 @@ Each step is judged with `eval.py --compare` (paired per song, 95 % interval), n
    First pass 2026-10-22: harmony dwell 0.4 s, memory 0.2 s, +4 pts on RWC-Pop and GuitarSet (66.1 %,
    78.5 %), delay 0.56 s. Open: the change ratio (×1.63 on RWC-Pop) and the exact symbol.
 
+8. **A learned decision layer** (2026-10-23): the harmony's emission fitted on the corpus
+   (`tools/eval/learn.py`), richer inputs (memory per register and time scale). Full band +6.5 pts
+   held out. Next: the same for the chord played (all qualities) and transitions learned from the
+   chord sequences; perfect notes (RWC MIDI) show the chord model costs ~17 pts.
+
 Exit: R1.1–R1.3 on RWC and GuitarSet. If a classical model stalls well below 90 %, weigh a small
 neural model in LIVE, as Melodia already runs Basic Pitch.
 

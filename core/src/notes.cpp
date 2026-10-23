@@ -277,12 +277,19 @@ void ChordHmm::key_update() {
 void ChordHmm::reset() {
     std::fill(mem_, mem_ + 12, 0.f);
     std::fill(age_, age_ + 128, 0.f);
+    for (auto& r : reg_) std::fill(r, r + 12, 0.f);
     lastBass_ = -1;
     std::fill(alpha_, alpha_ + kStates, 0.f);
     filled_ = row_ = 0;
     best_ = decided_ = -1;
     heard_ = false;
 }
+
+// The harmony's emission for a full band (GeneralChords), learned on RWC-Pop by tools/eval/learn.py
+// (RWC Music Database, CC BY-NC 4.0; rwc-annotations). Against the hand-set weights it gained
+// 6.5 points on the songs it was not trained on (2026-10-23); on a solo guitar it did not.
+// tools/eval/learn.py rwc-pop: major then minor; 9 x 12 memory weights (register x time scale, by interval), 12 bass, 1 bias
+const float ChordHmm::kBandEmission[2 * 121] = {0.575f, -0.728f, 1.135f, -0.985f, 1.915f, -0.974f, -0.596f, 0.952f, -0.670f, 0.335f, -0.854f, -0.152f, 2.317f, -0.101f, -2.387f, -0.499f, -1.302f, -1.402f, -0.461f, -0.348f, -0.574f, -1.436f, 0.637f, -1.142f, 2.268f, -2.249f, 0.587f, -1.584f, -0.228f, -0.308f, -1.504f, 1.375f, -2.159f, -1.146f, -1.211f, -0.710f, 0.764f, -0.892f, 0.531f, -1.459f, 0.635f, -0.370f, -0.456f, 0.720f, -1.213f, 0.616f, -0.080f, -0.115f, 1.256f, 0.068f, -1.475f, 1.090f, 0.992f, -0.773f, -0.139f, 0.736f, 0.058f, -2.040f, 0.743f, -0.142f, 0.824f, -2.084f, 1.142f, -3.241f, 1.384f, -0.698f, -1.296f, 2.031f, -1.939f, 0.933f, -1.208f, -0.215f, 0.957f, -0.953f, 0.420f, -1.399f, 1.303f, -0.722f, -0.350f, 1.113f, -1.215f, 0.032f, -0.563f, -0.171f, 0.651f, -0.684f, -0.105f, -0.363f, 0.355f, -0.309f, -1.002f, 0.823f, -0.117f, -0.832f, 0.126f, 0.134f, 0.243f, -0.821f, -0.032f, -0.364f, 0.945f, 0.307f, -0.077f, 1.044f, -0.778f, -0.343f, -0.008f, -0.360f, 0.776f, -0.659f, -0.128f, -0.152f, 0.181f, -0.129f, -0.363f, 0.223f, -0.568f, -0.152f, 0.044f, -0.277f, 1.572f, 0.184f, -1.111f, -0.304f, 0.835f, -0.414f, 0.067f, -0.521f, 0.575f, -1.104f, -0.666f, 0.255f, -0.884f, 2.268f, 0.081f, -1.701f, -1.709f, -0.159f, -3.219f, -0.645f, -0.145f, -0.605f, 0.016f, -1.456f, -0.747f, 3.405f, -1.793f, -0.136f, 1.086f, -2.561f, 0.678f, -1.429f, 0.716f, -1.574f, -2.460f, 0.610f, -1.103f, 0.573f, -1.097f, -0.565f, 1.026f, -1.857f, 0.544f, -0.581f, 0.249f, -0.060f, 0.118f, 0.975f, -0.400f, 0.320f, -0.105f, -0.123f, 0.973f, 0.260f, -2.142f, 0.058f, 0.672f, -2.032f, -1.079f, -0.359f, -0.888f, 1.783f, -1.559f, 0.045f, 0.884f, -1.950f, 1.412f, -2.286f, 2.146f, -0.190f, -0.912f, 1.748f, -0.880f, 1.137f, -1.113f, -0.451f, 0.907f, -1.093f, -0.175f, -1.026f, 1.353f, -0.823f, -0.596f, 0.540f, -0.806f, 0.114f, -0.397f, 0.421f, 0.714f, -0.807f, 0.109f, -0.271f, 0.714f, -0.797f, -0.276f, 0.686f, -0.572f, 0.221f, -0.961f, -0.386f, 2.253f, -0.158f, -0.136f, -0.527f, 0.058f, -0.036f, -1.259f, 0.651f, -0.658f, 0.705f, -0.849f, -0.275f, 0.102f, -0.622f, 0.018f, -0.859f, 0.056f, -0.407f, -0.552f, -0.291f, -0.664f, -1.572f};
 
 void ChordHmm::evidence(const NoteFrame& notes, bool keyOn, int keyTonic, bool keyMinor, float* e) {
     // memory of the notes heard: recency, sustain, register
@@ -302,6 +309,17 @@ void ChordHmm::evidence(const NoteFrame& notes, bool keyOn, int keyTonic, bool k
         mem_[m % 12] = std::max(mem_[m % 12], w);
     }
     heard_ |= notes.count > 0;
+    if (p_.emission) {   // the learned emission's input: memory per register (bass, middle, treble) at 0.1, 0.4, 1.5 s
+        static const float taus[3] = {0.1f, 0.4f, 1.5f};
+        for (int f = 0; f < 9; f++) {
+            const float d = std::exp(-float(hop_) / taus[f % 3]);
+            for (float& x : reg_[f]) x *= d;
+        }
+        for (int i = 0; i < notes.count; i++) {
+            const int m = notes.midi[i], g = m < 52 ? 0 : m < 67 ? 1 : 2;
+            for (int k = 0; k < 3; k++) reg_[g * 3 + k][m % 12] = 1;
+        }
+    }
     const int bass = notes.count > 0 ? notes.midi[0] % 12 : -1;
     float mx = 0;
     for (float v : mem_) mx = std::max(mx, v);
@@ -324,6 +342,14 @@ void ChordHmm::evidence(const NoteFrame& notes, bool keyOn, int keyTonic, bool k
             }
             v += 0.4f * (inSum / float(size) - 1);   // completeness: tones left unheard cost a little
             if (bass >= 0) v += (m >> bass & 1) ? (root(s) == bass ? 0.3f : 0.f) : -1.f;
+            if (p_.emission && s % kQualities <= 1) {   // learned: replaces the hand-set terms above
+                const float* q = p_.emission + (s % kQualities) * 121;
+                const int r = root(s);
+                v = q[120];
+                for (int f = 0; f < 9; f++)
+                    for (int i = 0; i < 12; i++) v += q[f * 12 + i] * reg_[f][(r + i) % 12];
+                if (bass >= 0) v += q[108 + (bass - r + 12) % 12];
+            }
             if (keyOn) v += (m & ~scale) == 0 ? 0.3f : 0.f;   // diatonic in the session's key
             else v += kKeyWeight * keyBonus_[s];
         }

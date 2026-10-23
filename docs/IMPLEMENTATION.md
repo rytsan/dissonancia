@@ -846,6 +846,21 @@ reworked as much as the hearing. Demucs live: one pass costs ~115 ms on an RTX 2
 window (it pads to 7.8 s), copying audio to the GPU 0.25 ms; but the model wants future context, so
 live it would add ~0.5-1.2 s. It belongs to STUDIO.
 
+The decision layer, learned (2026-10-23, `tools/eval/learn.py`). Fitting the hand-set emission's
+own inputs (one memory per pitch class and the bass) gained nothing: on the held-out half it was
+within noise of the hand-set weights. What the model sees was the limit. With a memory per register
+(bass, middle, treble) at three time scales (0.1, 0.4, 1.5 s) and the lowest note, a softmax over
+the 24 triads tied by interval reaches 64 % per hop on RWC-Pop's held-out songs against 50 % for
+the old inputs. As the harmony HMM's emission:
+
+| Trained on | Tested on | Harmony on the held-out half | Kept |
+|---|---|---|---|
+| RWC-Pop even songs | RWC-Pop odd songs | **+6.5 pts [+4.6, +8.7]**, 40 up / 9 down, delay 0.53 s | yes, for GeneralChords (Música completa), trained then on all 100 |
+| GuitarSet even takes | GuitarSet odd takes | −1.0 (noise) | no: the hand-set weights stay for a solo instrument |
+| Both | RWC-Pop / GuitarSet | +6.6 / −3.8 | no |
+
+The synthetic band mixes, never trained on, gained 3.8 points too.
+
 What this says: on a full band, LIVE is within 3 points of what the same hearing reaches knowing the
 whole song, so neither more context nor a key model closes the gap to 90 %; the notes heard do. On
 a solo guitar a neural transcriber hears better (exact symbol +16 points) but comes too late for
@@ -864,13 +879,13 @@ and still showed the previous chord 15 % of the time; after 1.5 s it was right 7
 hearing, was the larger error. Wrong roots split between the relative and mediant chords (sharing
 two notes, ~10 %), the parallel third (~6 %) and the fifth neighbours (~8 %).
 
-After steps 1, 2, the first retune and the heard key (2026-10-23), `tools/eval/baseline-full.json`:
+After steps 1, 2, the first retune, the heard key and the learned band emission (2026-10-23), `tools/eval/baseline-full.json`:
 
 | Corpus | Harmony | Delay (med / p90) | Changes | Chord | Exact | Chord delay | Take | Melody RPA |
 |---|---|---|---|---|---|---|---|---|
-| Synthetic (7) | 90.9 % | 0.56 / 1.02 s | ×1.19 | 93.4 % | 41.3 % | 0.38 s | 90.7 % | — |
+| Synthetic (7) | 94.7 % | 0.48 / 0.86 s | ×1.19 | 93.4 % | 41.3 % | 0.38 s | 90.7 % | — |
 | GuitarSet comping (180) | 79.8 % | 0.58 / 1.69 s | ×2.79 | 73.1 % | 43.3 % | 0.54 s | 75.6 % | — |
-| RWC-Pop, full band (100) | 66.5 % | 0.56 / 1.66 s | ×1.51 | 62.6 % | 32.4 % | 0.56 s | 62.1 % | — |
+| RWC-Pop, full band (100) | 72.6 % | 0.53 / 1.39 s | ×1.53 | 62.6 % | 32.4 % | 0.56 s | 62.1 % | — |
 | vocadito, solo voice (40) | — | — | — | — | — | — | — | 76.4 % |
 
 Cost: more notes heard means more 7, add9 and maj7 on screen, so the exact symbol fell (GuitarSet

@@ -578,7 +578,7 @@ void ChordMatcher::match(const float* energy, const ChordHistory& h, int bassPc,
 
 ChordTracker::ChordTracker(const SessionConfig& s, double hopSeconds, double latencyCompensation)
     : matcher_(s), hop_(hopSeconds), latencyComp_(latencyCompensation),
-      confirmSeconds_(s.quality == AudioQuality::HighPrecision ? 0.6 : 0.4), releaseSeconds_(0.15), key_(hopSeconds), hmm_(hopSeconds), harmony_(hopSeconds, ChordHmm::harmony()) {}
+      confirmSeconds_(s.quality == AudioQuality::HighPrecision ? 0.6 : 0.4), releaseSeconds_(0.15), key_(hopSeconds), hmm_(hopSeconds), harmony_(hopSeconds, ChordHmm::harmony(s.mode == AnalysisMode::GeneralChords)) {}
 
 // Persistence-weighted mean chroma over [from, to]: each pitch class weighs by the share of frames
 // in which it is strong (>= 0.3 of the frame maximum in amplitude). Chord tones ring through the

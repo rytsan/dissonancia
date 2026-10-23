@@ -1,9 +1,9 @@
 {
  "synthetic": {
   "items": 7,
-  "harmony_majmin": 90.89995982322218,
-  "harmony_delay_med": 0.5600000000000023,
-  "harmony_delay_p90": 1.0199999999999996,
+  "harmony_majmin": 94.65648854961832,
+  "harmony_delay_med": 0.48,
+  "harmony_delay_p90": 0.8599999999999994,
   "harmony_changes": 1.1904761904761905,
   "chord_majmin": 93.37083165930092,
   "chord_delay_med": 0.379999999999999,
