@@ -810,6 +810,17 @@ interval holds 0 is noise and is not counted as a gain.
 | Harmonic / percussive split: each bin clipped to its median over the last K hops (causal) | K 5: +0.8; K 9: noise; K 15: −0.8 | K 9–15 worse | no: small, and a clean change passes through a third chord |
 | Retune (step 7): harmony dwell 0.8 → 0.4 s, memory 0.3 → 0.2 s | +4.1 pts [+3.7, +4.5], 97 up / 0 down | +4.0 pts, 147 up / 12 down | yes |
 
+| A first guess beside the harmony (its own HMM: no lag or dwell, stay 0.9–0.99, memory 0.05–0.15 s) | 69 % at 0.42 s, changes ×2.3 (harmony: 66 % at 0.56 s, ×1.6) | 81 % at 0.46 s, ×4.4 | no: 0.14 s sooner for half again as many changes |
+| The key's weight on diatonic chords, 0 / 0.3 (today) / 0.6 / 1.0 / 1.5 | 0.3–0.6 best, +1 pt over none; 1.5 worse | +1.5 pts over none | 0.3 kept |
+
+Why the guess gains little: lag and dwell are only ~0.05 s of the delay. The rest is the front end
+(the 180 ms window, two hops) and the old notes' memory, which a faster model trades for flicker.
+
+Why the key gains little: the live key (R1.7, first measured 2026-10-23 on GuitarSet's key
+annotations) is absent for the first 10 s of 96 % of takes; after 20 s it is right 58 % of the time,
+the relative key 19 %, a fifth away 5 %, wrong 6 %, none 12 %. A prior from it cannot help early,
+and relative and mediant confusions (C, Am, Em) are all diatonic anyway.
+
 Why the retune: on RWC-Pop, from 0.5 to 1.5 s after a change the screen was right 56 % of the time
 and still showed the previous chord 15 % of the time; after 1.5 s it was right 71 %. Lag, not
 hearing, was the larger error. Wrong roots split between the relative and mediant chords (sharing
