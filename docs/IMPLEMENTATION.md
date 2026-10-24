@@ -861,6 +861,12 @@ the old inputs. As the harmony HMM's emission:
 
 The synthetic band mixes, never trained on, gained 3.8 points too.
 
+The ceiling again, with the learned emission (2026-10-24, perfect notes from RWC's aligned MIDI):
+harmony 80.3 % with 4 notes per hop (was 77.0 %), delay 0.33 s, changes ×1.26; 83.4 % with 8 per
+hop (was 81.3 %), changes ×1.22, chord exact 39 %. Median song 82.7 %, top quarter above 86.9 %;
+3 songs under 50 % are bad MIDI files. So with the audio at 72.6 %, the hearing now costs ~8 points
+and the decision layer ~15 even with every note right: 90 % on a full band live needs both.
+
 What this says: on a full band, LIVE is within 3 points of what the same hearing reaches knowing the
 whole song, so neither more context nor a key model closes the gap to 90 %; the notes heard do. On
 a solo guitar a neural transcriber hears better (exact symbol +16 points) but comes too late for
