@@ -53,8 +53,9 @@ Each step is judged with `eval.py --compare` (paired per song, 95 % interval), n
 
 8. **A learned decision layer** (2026-10-23): the harmony's emission fitted on the corpus
    (`tools/eval/learn.py`), richer inputs (memory per register and time scale). Full band +6.5 pts
-   held out. Next: the same for the chord played (all qualities) and transitions learned from the
-   chord sequences; perfect notes (RWC MIDI) reach 80-83 % with it, so the chord model still costs ~15 pts.
+   held out. Transitions learned from the chord sequences: tried 2026-10-24, no gain. Next: the same
+   for the chord played (all qualities), and a richer emission (non-linear); perfect notes (RWC MIDI)
+   reach 80-83 % with it, so the chord model still costs ~15 pts.
 
 Exit: R1.1–R1.3 on RWC and GuitarSet. If a classical model stalls well below 90 %, weigh a small
 neural model in LIVE, as Melodia already runs Basic Pitch.

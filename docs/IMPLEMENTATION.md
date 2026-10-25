@@ -867,6 +867,15 @@ hop (was 81.3 %), changes ×1.22, chord exact 39 %. Median song 82.7 %, top quar
 3 songs under 50 % are bad MIDI files. So with the audio at 72.6 %, the hearing now costs ~8 points
 and the decision layer ~15 even with every note right: 90 % on a full band live needs both.
 
+Transitions learned (2026-10-24): log odds of each change between major and minor triads by root
+interval (IV, V and bVII up common, a minor third up rare), counted on RWC-Pop's even songs and
+added to the Viterbi step's change cost with a weight, tested on the odd songs. Weight 0.5-3: within
+noise (harmony -0.3 to +0.1, changes x1.52-1.58); 8: -8.5 points, flicker, as the common changes
+become cheaper than staying. Only the rare changes penalised (weight 2-5): changes x1.53 -> x1.48,
+harmony -0.1 to -0.3. Perfect notes: 80.3 -> 80.2 %. Dropped. A change is paid once, the emission
+over every hop of the lag, and the heard key and the 1.5 s memory already carry what comes next.
+The ~15 points left with perfect notes are in the emission.
+
 What this says: on a full band, LIVE is within 3 points of what the same hearing reaches knowing the
 whole song, so neither more context nor a key model closes the gap to 90 %; the notes heard do. On
 a solo guitar a neural transcriber hears better (exact symbol +16 points) but comes too late for
