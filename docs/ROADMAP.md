@@ -53,9 +53,10 @@ Each step is judged with `eval.py --compare` (paired per song, 95 % interval), n
 
 8. **A learned decision layer** (2026-10-23): the harmony's emission fitted on the corpus
    (`tools/eval/learn.py`), richer inputs (memory per register and time scale). Full band +6.5 pts
-   held out. Transitions learned from the chord sequences: tried 2026-10-24, no gain. Next: the same
-   for the chord played (all qualities), and a richer emission (non-linear); perfect notes (RWC MIDI)
-   reach 80-83 % with it, so the chord model still costs ~15 pts.
+   held out. Transitions learned from the chord sequences: tried 2026-10-24, no gain. A non-linear emission
+   and a longer memory: no gain. Perfect notes (RWC MIDI) reach 80-83 % live and 88 % offline with each
+   chord's bounds given, so 90 % on a full band is above what the notes say (see open decision 3).
+   Next: the same learned emission for the chord played (all qualities).
 
 Exit: R1.1–R1.3 on RWC and GuitarSet. If a classical model stalls well below 90 %, weigh a small
 neural model in LIVE, as Melodia already runs Basic Pitch.
@@ -116,3 +117,5 @@ Still open:
    it on the test set; the fact lines carry the content either way.
 3. **What "≥ 90 %" covers.** Harmony on a full band (RWC Pop) and on a solo guitar (GuitarSet)
    are different problems. Should the target hold on both, or on the full band first?
+   Measured 2026-10-24: on RWC-Pop even perfect notes with each chord's bounds given reach 88 %, so
+   a full band's target needs restating against that ceiling.

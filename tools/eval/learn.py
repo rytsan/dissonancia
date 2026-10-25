@@ -11,7 +11,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import eval as e
 corpus, split = sys.argv[1], "--split" in sys.argv
 TAUS, DELAY, HOP, SCALE = (0.1, 0.4, 1.5), 0.1, 0.02, 2.0   # SCALE: per-hop logits against the HMM's change cost (swept: 2 best)
-cache = os.path.join(e.DATA, "learn", corpus); os.makedirs(cache, exist_ok=True)
+cache = os.path.join(e.DATA, "learn", corpus + ("-" + os.path.basename(os.environ["DZ_NOTES_IN"].rstrip("/")) if "DZ_NOTES_IN" in os.environ else ""))   # DZ_NOTES_IN: another front end
+os.makedirs(cache, exist_ok=True)
 items = e.CORPORA[corpus]()
 
 def feats(it):

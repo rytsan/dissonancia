@@ -876,6 +876,19 @@ harmony -0.1 to -0.3. Perfect notes: 80.3 -> 80.2 %. Dropped. A change is paid o
 over every hop of the lag, and the heard key and the 1.5 s memory already carry what comes next.
 The ~15 points left with perfect notes are in the emission.
 
+A non-linear emission (2026-10-24): one hidden layer (16 or 64 units, shared by the 12 roots, the
+same inputs), trained on the even songs. Per hop on the odd songs, audio notes 64.2 % / 63.5 %
+against 64.2 % for the linear softmax; perfect notes 76.8 % / 75.9 % against 76.0 %. A longer memory
+(a fourth time scale of 4 s): 64.5 % and 76.2 %. Nothing to gain, so not tried in the HMM.
+
+Where the ceiling is, from the perfect notes alone (RWC-Pop's aligned MIDI): knowing each reference
+chord's start and end, a template triad over all its notes is right 79.8 % of the time (83.3 % with
+the bass weighted), and a softmax learned on the even songs 88.4 % on the odd ones. That is what the
+notes can say with the boundaries given and no causality. LIVE with the same notes reaches 80-83 %.
+So 90 % on a full band is above what the notes reach even offline. The rest is how RWC labels a
+chord that its notes do not spell (a melody over it, an implied chord, its conventions). What is
+left live is ~5-8 points of causality and ~8 of hearing.
+
 What this says: on a full band, LIVE is within 3 points of what the same hearing reaches knowing the
 whole song, so neither more context nor a key model closes the gap to 90 %; the notes heard do. On
 a solo guitar a neural transcriber hears better (exact symbol +16 points) but comes too late for
