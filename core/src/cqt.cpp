@@ -156,7 +156,7 @@ ChromaFrontEnd::ChromaFrontEnd(const SessionConfig& s, uint32_t decimation, doub
         cqt_.ensure_history(bass_->history_samples());
         melody_ = std::make_unique<MelodyTracker>(s, cqt_, hopSeconds_);
         notes_ = std::make_unique<NoteFrontEnd>();
-        notes_->init(nativeRate / (decimate_ ? 2 : 1));
+        notes_->init(nativeRate / (decimate_ ? 2 : 1), s.mode == AnalysisMode::GeneralChords);
     }
     gated_.assign(ANA_MAX_CQT_BINS, 0);
     history_.assign(size_t(ANA_MAX_CQT_BINS) * kMedianHops, 0.f);

@@ -1,13 +1,14 @@
 // Perceived notes and chords from them (prototypes: tools/loopback/psynotes.py, hmmchords.py).
 //
 // NoteFrontEnd: what a listener hears as notes, per hop, on the live (decimated) signal. A Hann
-// STFT (~180 ms), weighted by the 75-phon equal-loudness contour (ISO 226); peaks that the louder
-// ones around them mask (spreading on the Bark scale) do not count; notes by virtual pitch
-// (subharmonic summation of the audible peaks, the best note taken and its partials removed, four
-// times; the bass searched apart on every peak and given the last slot when the search missed it),
-// kept when strong within their own register (bass / middle / treble, so a soft treble string is
-// not judged against the thumb's bass), heard for two hops (an attack's or a damping's noise lasts
-// one), and nothing below the audibility floor (30 dB under the recent loudest frame).
+// STFT (~180 ms; for a full band ~90 ms under 1 kHz and ~45 ms above, per band as ATRAC splits),
+// weighted by the 75-phon equal-loudness contour (ISO 226); peaks that the louder ones around them
+// mask (spreading on the Bark scale) do not count; notes by virtual pitch (subharmonic summation of
+// the audible peaks, the best note taken and its partials removed, four times; the bass searched
+// apart on every peak and given the last slot when the search missed it), kept when strong within
+// their own register (bass / middle / treble, so a soft treble string is not judged against the
+// thumb's bass), heard for two hops (an attack's or a damping's noise lasts one), and nothing below
+// the audibility floor (30 dB under the recent loudest frame).
 //
 // ChordHmm: chords as a hidden Markov model over those notes. Each chord explains the notes heard
 // lately — a chord tone is likely, any other note not — each note weighted by how recently it
@@ -34,18 +35,26 @@ struct NoteFrame {
 
 class NoteFrontEnd {
 public:
-    // rate: the live analysis rate (Hz). Allocates; call off the audio thread.
-    void init(double rate);
+    // rate: the live analysis rate (Hz); band: a full band (shorter windows). Allocates; call off the audio thread.
+    void init(double rate, bool band = false);
     void push(const float* x, uint32_t n);     // live samples, any count
     void analyse(double hopSeconds, NoteFrame& out);   // once per hop, on the newest samples
 
 private:
+    // One resolution per frequency range (as ATRAC splits the bands first): a long window where the
+    // partials are close (the bass), shorter ones above, so the upper partials are heard sooner.
+    struct Band {
+        int n = 0;
+        double top = 0;   // Hz: this band's peaks are below it (and above the band under it)
+        float gain = 0;   // dB to the longest window's scale
+        std::vector<float> window, loudw, bark, db;
+        std::vector<std::complex<float>> buf, twiddle;
+        std::vector<int> bitrev;
+    };
+    std::vector<Band> bands_;
     int n_ = 0, pos_ = 0;
     double rate_ = 0;
-    std::vector<float> ring_, window_, loudw_, bark_;
-    std::vector<std::complex<float>> buf_, twiddle_;
-    std::vector<int> bitrev_;
-    std::vector<float> db_;
+    std::vector<float> ring_;
     float runMax_ = -200;
     bool last_[128]{};
 };

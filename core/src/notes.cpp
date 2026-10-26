@@ -39,34 +39,46 @@ double iso226(double f, double phon) {
 
 // ---------------------------------------------------------------- notes
 
-void NoteFrontEnd::init(double rate) {
+void NoteFrontEnd::init(double rate, bool band) {
     rate_ = rate;
-    n_ = 1;
-    while (n_ * 2 <= rate * 0.19) n_ *= 2;   // ~180 ms (4096 at 22-24 kHz)
+    // Bands (top Hz, window s): one window of ~180 ms; a full band takes ~90 ms under 1 kHz and ~45 ms
+    // above (RWC-Pop harmony +2.8 points, exact +3.9, delay 0.53 -> 0.49 s). A solo guitar lost 2.2
+    // points with it: its bass needs the long window (2026-10-26; 45 ms under 1 kHz: -13 points).
+    const std::vector<std::pair<double, double>> spec = band ? std::vector<std::pair<double, double>>{{1000, 0.1}, {5000, 0.05}}
+                                                             : std::vector<std::pair<double, double>>{{5000, 0.19}};
+    bands_.assign(spec.size(), Band{});
+    n_ = 0;
+    for (size_t b = 0; b < spec.size(); b++) {
+        Band& B = bands_[b];
+        B.top = spec[b].first;
+        B.n = 1;
+        while (B.n * 2 <= rate * spec[b].second) B.n *= 2;   // a power of two: 0.19 -> 4096 at 22-24 kHz (~180 ms)
+        n_ = std::max(n_, B.n);
+        B.window.resize(size_t(B.n));
+        for (int i = 0; i < B.n; i++) B.window[size_t(i)] = float(0.5 - 0.5 * std::cos(2 * kPi * i / B.n));
+        const int bins = B.n / 2 + 1;
+        B.loudw.resize(size_t(bins));
+        B.bark.resize(size_t(bins));
+        B.db.resize(size_t(bins));
+        for (int k = 0; k < bins; k++) {
+            const double f = std::max(1.0, k * rate / B.n);
+            B.loudw[size_t(k)] = float(iso226(1000, kPhon) - iso226(f, kPhon) + 2.0);
+            B.bark[size_t(k)] = float(13 * std::atan(0.00076 * f) + 3.5 * std::atan((f / 7500) * (f / 7500)));
+        }
+        B.buf.resize(size_t(B.n));
+        B.twiddle.resize(size_t(B.n / 2));
+        for (int i = 0; i < B.n / 2; i++) B.twiddle[size_t(i)] = std::polar(1.f, float(-2 * kPi * i / B.n));
+        B.bitrev.resize(size_t(B.n));
+        for (int i = 0, j = 0; i < B.n; i++) {
+            B.bitrev[size_t(i)] = j;
+            int bit = B.n >> 1;
+            for (; j & bit; bit >>= 1) j ^= bit;
+            j |= bit;
+        }
+    }
+    for (Band& B : bands_) B.gain = float(20 * std::log10(double(n_) / B.n));   // a sine's peak bin grows with n
     ring_.assign(size_t(n_), 0.f);
     pos_ = 0;
-    window_.resize(size_t(n_));
-    for (int i = 0; i < n_; i++) window_[size_t(i)] = float(0.5 - 0.5 * std::cos(2 * kPi * i / n_));
-    const int bins = n_ / 2 + 1;
-    loudw_.resize(size_t(bins));
-
-    bark_.resize(size_t(bins));
-    db_.resize(size_t(bins));
-    for (int k = 0; k < bins; k++) {
-        const double f = std::max(1.0, k * rate / n_);
-        loudw_[size_t(k)] = float(iso226(1000, kPhon) - iso226(f, kPhon) + 2.0);
-        bark_[size_t(k)] = float(13 * std::atan(0.00076 * f) + 3.5 * std::atan((f / 7500) * (f / 7500)));
-    }
-    buf_.resize(size_t(n_));
-    twiddle_.resize(size_t(n_ / 2));
-    for (int i = 0; i < n_ / 2; i++) twiddle_[size_t(i)] = std::polar(1.f, float(-2 * kPi * i / n_));
-    bitrev_.resize(size_t(n_));
-    for (int i = 0, j = 0; i < n_; i++) {
-        bitrev_[size_t(i)] = j;
-        int bit = n_ >> 1;
-        for (; j & bit; bit >>= 1) j ^= bit;
-        j |= bit;
-    }
     runMax_ = -200;
     std::fill(last_, last_ + 128, false);
 }
@@ -80,48 +92,58 @@ void NoteFrontEnd::push(const float* x, uint32_t n) {
 
 void NoteFrontEnd::analyse(double hopSeconds, NoteFrame& out) {
     out = {};
-    // windowed FFT of the newest n_ samples (oldest first), bit-reversed in place, radix 2
-    for (int i = 0; i < n_; i++) buf_[size_t(bitrev_[size_t(i)])] = {ring_[size_t((pos_ + i) % n_)] * window_[size_t(i)], 0.f};
-    for (int size = 2; size <= n_; size <<= 1) {
-        const int half = size / 2, step = n_ / size;
-        for (int s = 0; s < n_; s += size)
-            for (int k = 0; k < half; k++) {
-                auto u = buf_[size_t(s + k)], v = buf_[size_t(s + k + half)] * twiddle_[size_t(k * step)];
-                buf_[size_t(s + k)] = u + v;
-                buf_[size_t(s + k + half)] = u - v;
-            }
-    }
-    const int bins = n_ / 2 + 1;
+    // per band, a windowed FFT of its newest samples (oldest first), bit-reversed in place, radix 2
     float top = -200;
-    for (int k = 0; k < bins; k++) {
-        db_[size_t(k)] = 10 * std::log10(std::norm(buf_[size_t(k)]) + 1e-12f) + loudw_[size_t(k)];
-        top = std::max(top, db_[size_t(k)]);
+    for (Band& B : bands_) {
+        const int n = B.n, off = n_ - n;
+        for (int i = 0; i < n; i++) B.buf[size_t(B.bitrev[size_t(i)])] = {ring_[size_t((pos_ + off + i) % n_)] * B.window[size_t(i)], 0.f};
+        for (int size = 2; size <= n; size <<= 1) {
+            const int half = size / 2, step = n / size;
+            for (int s = 0; s < n; s += size)
+                for (int k = 0; k < half; k++) {
+                    auto u = B.buf[size_t(s + k)], v = B.buf[size_t(s + k + half)] * B.twiddle[size_t(k * step)];
+                    B.buf[size_t(s + k)] = u + v;
+                    B.buf[size_t(s + k + half)] = u - v;
+                }
+        }
+        for (int k = 0; k <= n / 2; k++) {
+            B.db[size_t(k)] = 10 * std::log10(std::norm(B.buf[size_t(k)]) + 1e-12f) + B.loudw[size_t(k)] + B.gain;
+            top = std::max(top, B.db[size_t(k)]);
+        }
     }
     runMax_ = std::max(top, runMax_ - kFadeDbPerSecond * float(hopSeconds));
     bool now[128]{};
     if (top >= runMax_ - kFloorDb && top > kAbsoluteFloorDb) {
         out.audible = true;
-        // peaks 60 Hz .. 5 kHz within 60 dB of the loudest
-        int peak[kMaxPeaks], np = 0;
-        const int k0 = std::max(1, int(60.0 * n_ / rate_)), k1 = std::min(bins - 2, int(5000.0 * n_ / rate_));
-        for (int k = k0; k <= k1 && np < kMaxPeaks; k++)
-            if (db_[size_t(k)] > db_[size_t(k - 1)] && db_[size_t(k)] >= db_[size_t(k + 1)] && db_[size_t(k)] > top - 60) peak[np++] = k;
+        // peaks 60 Hz .. 5 kHz within 60 dB of the loudest, each from its band
+        float pdb[kMaxPeaks], pbark[kMaxPeaks], pfreq[kMaxPeaks];
+        int np = 0;
+        double lo = 60;
+        for (const Band& B : bands_) {
+            const int bins = B.n / 2 + 1;
+            const int k0 = std::max(1, int(std::ceil(lo * B.n / rate_))), k1 = std::min(bins - 2, int(B.top * B.n / rate_));
+            for (int k = k0; k <= k1 && np < kMaxPeaks; k++) {
+                const float a = B.db[size_t(k - 1)], b = B.db[size_t(k)], c = B.db[size_t(k + 1)];
+                if (b > a && b >= c && b > top - 60) {
+                    const float p = 0.5f * (a - c) / (a - 2 * b + c + 1e-12f);
+                    pdb[np] = b, pbark[np] = B.bark[size_t(k)], pfreq[np++] = float((k + p) * rate_ / B.n);
+                }
+            }
+            lo = B.top;
+        }
         // masking: a peak counts only above what every other peak spreads over it (Schroeder, -10 dB)
         float freq[kMaxPeaks], loud[kMaxPeaks];
         int na = 0;
         for (int i = 0; i < np; i++) {
-            const int k = peak[i];
             float mask = -1e9f;
             for (int j = 0; j < np; j++) {
                 if (j == i) continue;
-                const float dz = bark_[size_t(k)] - bark_[size_t(peak[j])] + 0.474f;
-                mask = std::max(mask, db_[size_t(peak[j])] + 15.81f + 7.5f * dz - 17.5f * std::sqrt(1 + dz * dz) - 10);
+                const float dz = pbark[i] - pbark[j] + 0.474f;
+                mask = std::max(mask, pdb[j] + 15.81f + 7.5f * dz - 17.5f * std::sqrt(1 + dz * dz) - 10);
             }
-            if (db_[size_t(k)] <= mask) continue;
-            const float a = db_[size_t(k - 1)], b = db_[size_t(k)], c = db_[size_t(k + 1)];
-            const float p = 0.5f * (a - c) / (a - 2 * b + c + 1e-12f);
-            freq[na] = float((k + p) * rate_ / n_);
-            loud[na] = std::pow(10.f, 0.03f * (b - top));   // loudness ~ intensity^0.3, relative
+            if (pdb[i] <= mask) continue;
+            freq[na] = pfreq[i];
+            loud[na] = std::pow(10.f, 0.03f * (pdb[i] - top));   // loudness ~ intensity^0.3, relative
             na++;
         }
         // virtual pitch: subharmonic summation, the best note taken and its partials removed, kMax times

@@ -777,6 +777,29 @@ notes, a sung melody with passing and neighbour tones, kick/snare/hi-hat),
   CPU. Also fetches the Demucs weights and the VCSL sounds. A failure is remembered and not
   retried at every start.
 
+## Time-frequency per band (2026-10-26)
+
+The ATRAC idea (and MP3's window switching): split the frequencies first, and give each band the
+window it needs. One window of ~180 ms was set by the bass (G2 and G#2 are 6 Hz apart), so the upper
+partials waited for it. `NoteFrontEnd` now takes one FFT per band and merges their peaks (each
+scaled to the longest window). CPU was never the limit: the whole LIVE chain runs a 207 s song in
+5 s (2.4 % of one core). Windows are powers of two at 22-24 kHz (0.19 -> 186 ms, 0.1 -> 93 ms,
+0.05 -> 46 ms). Against the baseline (`eval.py --compare`):
+
+| Bands (top: window) | RWC-Pop harmony | delay | GuitarSet harmony |
+|---|---|---|---|
+| 250 Hz: 186 ms, 1 kHz: 93 ms, 5 kHz: 46 ms | +1.7 [+1.1, +2.4] | 0.50 s | noise, 0.55 s |
+| 300 / 500 Hz: 186 ms, above 46 ms | +1.0 / +1.3 | 0.50 s | noise |
+| 250 Hz: 93 ms, 1 kHz: 93 ms, above 46 ms (= 1 kHz: 93, above 46) | **+2.8 [+2.0, +3.5], exact +3.9** | **0.49 s** | -2.2, exact +3.7 |
+| one window of 93 ms | +2.4, exact +5.0 | 0.49 s | -2.0 |
+| one of 46 ms; or 46 ms under 1 kHz | -14.0 / -13.3 | 0.67-0.69 s | -9 / -10 |
+
+Kept: for a full band (GeneralChords), 93 ms under 1 kHz and 46 ms above; a solo instrument keeps
+186 ms (a guitar's bass strings need it). The bass needs about 90 ms; under that it is lost and the
+delay grows. The emission refitted on the new notes: per hop 64.2 -> 67.5 % on held-out songs, but
+in the HMM -1.0 point held out, so the 2026-10-23 one stays. The delay moved only 0.04 s: the window
+is not where most of it is.
+
 ## Coach timing (phase 2, step 1, 2026-10-26)
 
 `core/src/timing.hpp`: per take (POST layer), R2.1-R2.3.
@@ -939,13 +962,13 @@ and still showed the previous chord 15 % of the time; after 1.5 s it was right 7
 hearing, was the larger error. Wrong roots split between the relative and mediant chords (sharing
 two notes, ~10 %), the parallel third (~6 %) and the fifth neighbours (~8 %).
 
-After steps 1, 2, the first retune, the heard key and the learned band emission (2026-10-23), `tools/eval/baseline-full.json`:
+After steps 1, 2, the first retune, the heard key, the learned band emission (2026-10-23) and the band split for a full band (2026-10-26), `tools/eval/baseline-full.json`:
 
 | Corpus | Harmony | Delay (med / p90) | Changes | Chord | Exact | Chord delay | Take | Melody RPA |
 |---|---|---|---|---|---|---|---|---|
-| Synthetic (7) | 94.7 % | 0.48 / 0.86 s | ×1.19 | 93.4 % | 41.3 % | 0.38 s | 90.7 % | — |
-| GuitarSet comping (180) | 79.8 % | 0.58 / 1.69 s | ×2.79 | 73.1 % | 43.3 % | 0.54 s | 75.6 % | — |
-| RWC-Pop, full band (100) | 72.6 % | 0.53 / 1.39 s | ×1.53 | 62.6 % | 32.4 % | 0.56 s | 62.1 % | — |
+| Synthetic (7) | 93.9 % | 0.50 / 0.92 s | ×1.19 | 92.2 % | 52.7 % | 0.38 s | 90.4 % | — |
+| GuitarSet comping (180) | 79.8 % | 0.58 / 1.69 s | ×2.79 | 73.1 % | 43.2 % | 0.54 s | 75.6 % | — |
+| RWC-Pop, full band (100) | 75.4 % | 0.49 / 1.32 s | ×1.48 | 65.5 % | 36.3 % | 0.48 s | 65.2 % | — |
 | vocadito, solo voice (40) | — | — | — | — | — | — | — | 76.4 % |
 
 Cost: more notes heard means more 7, add9 and maj7 on screen, so the exact symbol fell (GuitarSet

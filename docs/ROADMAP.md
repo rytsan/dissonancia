@@ -61,8 +61,8 @@ Each step is judged with `eval.py --compare` (paired per song, 95 % interval), n
 Exit: R1.1–R1.3 on RWC and GuitarSet. If a classical model stalls well below 90 %, weigh a small
 neural model in LIVE, as Melodia already runs Basic Pitch.
 
-**Closed 2026-10-26 at the ceiling.** Harmony on screen: RWC-Pop 72.6 %, GuitarSet 79.8 %, synthetic
-94.7 %; delay 0.53-0.58 s. Perfect notes reach 80-83 % live and 88 % offline with each chord's bounds
+**Closed 2026-10-26 at the ceiling.** Harmony on screen: RWC-Pop 75.4 % (with the band split, ATRAC
+style), GuitarSet 79.8 %, synthetic 93.9 %; delay 0.49-0.58 s. Perfect notes reach 80-83 % live and 88 % offline with each chord's bounds
 given, so the decision layer is near what the notes say; the rest is hearing (~8 points on a full
 band). Open for later: the change ratio (R1.3), the exact symbol (R1.4), melody (R1.5).
 
