@@ -4,7 +4,8 @@ Every REC take writes `<take>.json` next to `<take>.wav` (R3). It is complete wi
 coach (phase 3) reads only this file. Writer: `Engine::write_sidecar` (`core/src/engine.cpp`), with
 `write_events_json` (`core/src/sidecar.hpp`) and `write_take_metrics_json` (`core/src/session.cpp`).
 Checked by `core/tests/test_core.cpp` (a REC take), `core/tests/test_timing.cpp` (timing on
-synthetic strums), `core/tests/test_intonation.cpp` (intonation on a synthetic sung line) and
+synthetic strums), `core/tests/test_dynamics.cpp` (loudness and attacks on synthetic tones),
+`core/tests/test_intonation.cpp` (intonation on a synthetic sung line) and
 `tests/score` (the app loads it, and the older format).
 
 Times are seconds from the take's first downbeat. A number is `null` where there is nothing to
@@ -22,6 +23,7 @@ measure (no attacks in a bar, too few offbeats for a swing).
 | `metrics.timing` | R2.1, R2.3 (below) |
 | `metrics.tempo` | R2.2 (below) |
 | `metrics.intonation` | R2.4 (below); voice and single-line modes only |
+| `metrics.dynamics` | R2.7 (below) |
 | `limits` | the take's known limits (below) |
 
 ### `metrics.timing`
@@ -35,6 +37,7 @@ measure (no attacks in a bar, too few offbeats for a swing).
 - `swing`: the long eighth over the short (1 straight, 2 triplet).
 - `perSixteenth`: `position` (`1`, `e`, `&`, `a`), `count`, `offsetMs`, `accentDb` (level against
   the mean). Positions with no attacks are left out.
+- `accentPerBeatDb`: per beat of the bar, the attacks' level against the mean (`null`: none).
 - `bars`: `bar` (1-based), `matched`, `meanOffsetMs`, `spreadMs`.
 - `evidence`: how it was measured.
 
@@ -60,6 +63,19 @@ attack and release left out) of 5 hops or more.
 - `bars`: per bar of the metronome, by note start: `notes`, `inTuneOwnTuningPct`, `meanAbsCents`.
 - `notesRead`: `start`, `end`, `midi`, `cents`, `scoopCents` (< 0 from below), `driftCents` (the
   steady part's last third against its first), `vibratoHz` and `vibratoCents` (0: none).
+- `evidence`.
+
+### `metrics.dynamics`
+
+- `integratedLufs`, `rangeLu`: EBU R128 (ITU-R BS.1770) over the take.
+- `trendLu`: the fitted change of the bars' loudness over the take (> 0 growing), bars within
+  20 LU of the take only.
+- `attackSpreadDb`: how even the attacks are: their level's standard deviation within each beat of
+  the bar and sixteenth, so an accent pattern played on purpose is not counted. `perSixteenth`:
+  `position`, `count`, `spreadDb`.
+- `bars`: `bar`, `lufs` (`null`: silent).
+- `phrases`: sound with gaps under 0.4 s, 1.5 s or longer: `start`, `end`, `lufs`, `changeLu` (last
+  third against the first), `peakAt` (where the loudest 400 ms falls, 0–1).
 - `evidence`.
 
 ### `limits`

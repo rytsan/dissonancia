@@ -865,6 +865,20 @@ On the annotated notes' own bounds, our pitch track alone is off 1.8 cents (pitc
 7.5 (drift), and finds 53 of the 70 vibratos with 5 extra. The rest of the error is where our notes
 start and end.
 
+## Coach dynamics (phase 2, step 3, 2026-10-26)
+
+`core/src/dynamics.hpp`: per take, R2.7. The STUDIO meter's K-weighting (`loudness.hpp`, BS.1770)
+over the take gives the integrated loudness and range; 100 ms K-weighted blocks give each bar's
+loudness, the trend over the bars, and the phrases (sound with gaps under 0.4 s) with their change
+and where they peak. The attacks' evenness is in `timing_report`: each attack's level, its spread
+within each beat of the bar and sixteenth (the bar's accent pattern is not unevenness), and the
+accent per beat of the bar (R2.3).
+
+Tests (`test_dynamics.cpp`): a 1 kHz tone reads -3.01 LUFS at 0 dBFS (mono); a 1 dB per bar
+crescendo reads 7 LU over 8 bars; a swell and a fade read as two phrases, peaking at their ends;
+plucks with the downbeat 6 dB up read 0 dB of spread and a 6 dB accent, and with 3 dB of random level
+~3 dB of spread. There is no corpus with the truth for these; BS.1770 is the standard they rest on.
+
 ## Session JSON (phase 2, step 4, 2026-10-26)
 
 A REC take's JSON is now `dissonancia-session/1` ([`SESSION.md`](SESSION.md)): the take format plus
