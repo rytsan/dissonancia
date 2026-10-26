@@ -6,6 +6,8 @@
 //   dz_wav file.wav timing [beats.txt]   coach timing (R2.1-R2.3) against the beats in the file (one
 // time per line: a metronome grid), else the beats heard. DEV: DZ_ONSETS_IN=file takes the attacks
 // from it (one time per line) instead of detecting them.
+//   dz_wav file.wav session bpm beatsPerBar [click]   the session JSON's metrics and limits for a
+// take starting on a downbeat (click: the metronome was heard, so it is the grid).
 // offline: the STUDIO whole-take decoder instead of the live tracker; with a bpm, the file is taken
 // to start on a downbeat of that metronome grid (a REC take).
 #include <cmath>
@@ -86,6 +88,12 @@ int main(int argc, char** argv) {
                     r.onsets, r.matched, r.meanOffsetMs, r.spreadMs, r.swing, r.bpm, r.driftBpm, r.tempoSpreadBpm, r.confidence);
         for (int q = 0; q < 4; q++) std::printf("position %d count %d offset %.1f accent %.1f\n", q, r.count[q], r.offsetMs[q], r.accentDb[q]);
         if (std::getenv("DZ_ONSETDUMP")) for (const Onset& o : onsets) std::printf("onset %.4f %.1f\n", o.time, o.level);
+        return 0;
+    }
+    if (mode == "session" && argc > 4) {
+        std::printf("{\n");
+        write_take_metrics_json(stdout, x.data(), x.size(), rate, std::atof(argv[3]), std::atoi(argv[4]), argc > 5, 0, 0);
+        std::printf("}\n");
         return 0;
     }
     if (mode == "choir") {

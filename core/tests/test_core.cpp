@@ -197,6 +197,10 @@ TEST_CASE("REC: count-in, bar-aligned start, WAV + sidecar, metronome locked") {
     CHECK(frames > 48000);
     // The sustained A4 was open at REC stop: flushed as one complete note into the take log.
     CHECK(side.find("\"eventLogComplete\": true") != std::string::npos);
+    // dissonancia-session/1: the coach's metrics and the take's limits follow the events.
+    CHECK(side.find("\"format\": \"dissonancia-session/1\"") != std::string::npos);
+    CHECK(side.find("\"metrics\": {") != std::string::npos);
+    CHECK(side.find("\"limits\": {") != std::string::npos);
     CHECK(side.find("\"midi\": 69, \"name\": \"A5\"") != std::string::npos);   // Treble 8vb session: A4 written A5
 
     ma_decoder dec;

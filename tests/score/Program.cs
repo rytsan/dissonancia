@@ -209,6 +209,16 @@ File.WriteAllText(path, """
 var take = Take.Load(path);
 Check(take.Notes[0].Sounding == new Pitch(4, 0, 3) && take.BeatsPerBar == 3 && take.Chords[0].Roman == "I" && take.Cadences.Count == 1, "sidecar load");
 Check(B(take).Measures[0].Items.Sum(i => i.Duration) == 36, "3/4 measure");
+// dissonancia-session/1 (docs/SESSION.md) is the take format plus metrics and limits: it loads the same.
+File.WriteAllText(path, File.ReadAllText(path).Replace("dissonancia-take/1", "dissonancia-session/1").TrimEnd()[..^1] + """
+,
+ "metrics": {"timing": {"grid": "metronome", "confidence": 0.90, "onsets": 20, "matched": 18, "meanOffsetMs": 12.0, "spreadMs": 8.0, "swing": null,
+   "perSixteenth": [{"position": "1", "count": 18, "offsetMs": 12.0, "accentDb": 0.0}], "bars": [{"bar": 1, "matched": 3, "meanOffsetMs": null, "spreadMs": null}], "evidence": "x"},
+   "tempo": {"bpm": 90.00, "metronomeBpm": 90.00, "driftBpm": 0.50, "spreadBpm": 1.00, "beats": 20, "evidence": "x"}},
+ "limits": {"peakDbfs": -3.0, "rmsDbfs": -20.0, "clippedSamples": 0, "droppedFrames": 0, "warnings": []}}
+""");
+var session = Take.Load(path);
+Check(session.Notes.Count == 1 && session.BeatsPerBar == 3 && session.Cadences.Count == 1, "session JSON load");
 
 // Likely guitar shapes: the common open and barre chords.
 // STUDIO harmony map: chords folded into triads (colours, inversions and passing chords out), degrees in the key.

@@ -832,6 +832,15 @@ The constant: on the synthetic strums our attacks are ~1 ms after the first stri
 onsets (from pitch tracking) likely come late; a metronome offset is reported as ours. The heard
 tempo misses R1.7 (within 2 %) on 30 % of takes.
 
+## Session JSON (phase 2, step 4, 2026-10-26)
+
+A REC take's JSON is now `dissonancia-session/1` ([`SESSION.md`](SESSION.md)): the take format plus
+`metrics` (timing overall, per sixteenth and per bar; tempo heard) and `limits` (level, clipping,
+dropped frames, warnings). After the WAV closes, `write_sidecar` reads it back as mono and runs
+`write_take_metrics_json`. The grid is the metronome when the click played during the take, else the
+beats heard; the round-trip latency comes off the attacks. `dz_wav file.wav session bpm beatsPerBar
+[click]` prints the members. The app reads both formats.
+
 ## Baseline (phase 0, 2026-10-21)
 
 `python3 tools/eval/eval.py` (corpora from `tools/eval/corpora.py`). Harmony and chord are scored on

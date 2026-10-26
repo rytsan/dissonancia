@@ -1,5 +1,6 @@
 #include "engine.hpp"
 #include "sidecar.hpp"
+#include "timing.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -585,7 +586,7 @@ void Engine::write_sidecar(uint64_t frames, uint64_t dropped) {
     const SessionConfig& s = session_;
     std::fprintf(f,
                  "{\n"
-                 "  \"format\": \"dissonancia-take/1\",\n"
+                 "  \"format\": \"dissonancia-session/1\",\n"
                  "  \"session\": {\"mode\": %d, \"quality\": %d, \"referenceA4\": %.3f, \"keySet\": %s, \"keyFifths\": %d,"
                  " \"keyMode\": %d, \"clef\": %d, \"meter\": [%d, %d], \"bpm\": %.3f, \"countInBars\": %d},\n"
                  "  \"deviceRate\": %u,\n"
@@ -609,7 +610,18 @@ void Engine::write_sidecar(uint64_t frames, uint64_t dropped) {
                  (unsigned long long)recStart_.load(), (unsigned long long)frames, recorderGaps_.load(), (unsigned long long)dropped,
                  !takeLogOverflow_.load() && flushDone_.load() ? "true" : "false");
     write_events_json(f, takeLog_, double(recStart_.load()) / rate_);
-    std::fprintf(f, "\n  ]\n}\n");
+    std::fprintf(f, "\n  ],\n");
+    // The coach's metrics from the closed WAV, read back as mono (not real time: REC has stopped).
+    std::vector<float> x;
+    ma_decoder dec;
+    ma_decoder_config dc = ma_decoder_config_init(ma_format_f32, 1, 0);
+    if (ma_decoder_init_file(recPath_.c_str(), &dc, &dec) == MA_SUCCESS) {
+        float buf[8192];
+        for (ma_uint64 got = 0; ma_decoder_read_pcm_frames(&dec, buf, 8192, &got) == MA_SUCCESS && got > 0;) x.insert(x.end(), buf, buf + got);
+        ma_decoder_uninit(&dec);
+    }
+    write_take_metrics_json(f, x.data(), x.size(), rate_, metroBpm_.load(), int(beatsPerBar_.load()), clickDuringTake_, compensationMs() / 1000.0, dropped);
+    std::fprintf(f, "}\n");
     std::fclose(f);
 }
 

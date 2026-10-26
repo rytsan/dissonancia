@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <string>
+
+#include "beats.hpp"
 
 namespace dz {
 
@@ -97,7 +100,7 @@ std::vector<Onset> detect_onsets(const float* x, size_t n, uint32_t rate) {
     return out;
 }
 
-TimingReport timing_report(const std::vector<Onset>& onsets, const std::vector<double>& beats) {
+TimingReport timing_report(const std::vector<Onset>& onsets, const std::vector<double>& beats, int beatsPerBar) {
     TimingReport r;
     r.onsets = int(onsets.size());
     if (beats.size() < 2) return r;
@@ -118,14 +121,15 @@ TimingReport timing_report(const std::vector<Onset>& onsets, const std::vector<d
     r.tempoSpreadBpm = std::sqrt(std::max(0.0, sbb / m - (sb / m) * (sb / m)));
 
     // Each attack's place in its beat (0..1).
-    struct At { double frac, dur; float level; };
+    struct At { double frac, dur; float level; size_t beat; };
     std::vector<At> at;
     for (const Onset& o : onsets) {
         size_t i = size_t(std::upper_bound(beats.begin(), beats.end(), o.time) - beats.begin());
         i = std::clamp<size_t>(i, 1, beats.size() - 1) - 1;
         const double d = beats[i + 1] - beats[i], frac = (o.time - beats[i]) / d;
         if (frac < -0.125 || frac >= 1.875) continue;   // beyond the grid
-        at.push_back({frac - std::floor(frac + 0.125), d, o.level});
+        const double k = std::floor(frac + 0.125);
+        at.push_back({frac - k, d, o.level, i + size_t(k)});
     }
     // Swing: the eighths off the beat, where they fall (straight 0.5, triplet 0.67).
     // Measured from the beats as played, so a player late on every note is not swinging.
@@ -142,6 +146,7 @@ TimingReport timing_report(const std::vector<Onset>& onsets, const std::vector<d
         if (r.swing > 1.2) eighth = p;   // swung: the offbeat's grid point is where it is played (from the beat)
     }
     double sum = 0, sum2 = 0, lvl = 0;
+    std::vector<double> barSum2;
     for (const At& a : at) {
         const double grid[4] = {0, 0.25, eighth, 0.75};
         int q = 0;
@@ -151,6 +156,17 @@ TimingReport timing_report(const std::vector<Onset>& onsets, const std::vector<d
         const double ms = (a.frac - grid[q]) * a.dur * 1000;
         r.matched++, sum += ms, sum2 += ms * ms, lvl += a.level;
         r.offsetMs[q] += ms, r.accentDb[q] += a.level, r.count[q]++;
+        if (beatsPerBar > 0) {
+            const size_t b = a.beat / size_t(beatsPerBar);
+            if (b >= r.bars.size()) r.bars.resize(b + 1), barSum2.resize(b + 1);
+            r.bars[b].matched++, r.bars[b].meanOffsetMs += ms, barSum2[b] += ms * ms;
+        }
+    }
+    for (size_t b = 0; b < r.bars.size(); b++) {
+        BarTiming& t = r.bars[b];
+        if (!t.matched) continue;
+        t.meanOffsetMs /= t.matched;
+        t.spreadMs = std::sqrt(std::max(0.0, barSum2[b] / t.matched - t.meanOffsetMs * t.meanOffsetMs));
     }
     if (r.matched) {
         r.meanOffsetMs = sum / r.matched;
@@ -161,6 +177,81 @@ TimingReport timing_report(const std::vector<Onset>& onsets, const std::vector<d
     }
     if (r.onsets) r.confidence = double(r.matched) / r.onsets * std::min(1.0, r.onsets / 16.0);
     return r;
+}
+
+void write_take_metrics_json(FILE* f, const float* x, size_t n, uint32_t rate, double bpm, int beatsPerBar, bool clickHeard,
+                             double comp, uint64_t droppedFrames) {
+    auto num = [&](double v, const char* fmt = "%.1f") {   // null where there is nothing to say
+        if (std::isfinite(v)) std::fprintf(f, fmt, v);
+        else std::fputs("null", f);
+    };
+    std::vector<Onset> on = detect_onsets(x, n, rate);
+    for (Onset& o : on) o.time -= comp;
+    // The player's own beats give the tempo (R2.2) either way; the grid for the offsets is the click
+    // when it was heard.
+    BeatTrack heard = track_beats(x, n, rate, bpm);
+    for (double& t : heard.beats) t -= comp;
+    std::vector<double> grid;
+    if (clickHeard && bpm > 0)
+        for (double t = 0; t < double(n) / rate + 60 / bpm; t += 60 / bpm) grid.push_back(t);
+    else grid = heard.beats;
+    const TimingReport r = timing_report(on, grid, beatsPerBar), tempo = timing_report(on, heard.beats);
+    const double nan = std::nan("");
+
+    std::fprintf(f, "  \"metrics\": {\n    \"timing\": {\"grid\": \"%s\", \"confidence\": %.2f, \"onsets\": %d, \"matched\": %d, \"meanOffsetMs\": ",
+                 clickHeard ? "metronome" : "beats heard", r.confidence, r.onsets, r.matched);
+    num(r.matched ? r.meanOffsetMs : nan);
+    std::fputs(", \"spreadMs\": ", f);
+    num(r.matched ? r.spreadMs : nan);
+    std::fputs(", \"swing\": ", f);
+    num(r.swing > 0 ? r.swing : nan, "%.2f");
+    std::fputs(",\n      \"perSixteenth\": [", f);
+    const char* names[4] = {"1", "e", "&", "a"};
+    for (int q = 0, first = 1; q < 4; q++) {
+        if (!r.count[q]) continue;
+        std::fprintf(f, "%s{\"position\": \"%s\", \"count\": %d, \"offsetMs\": %.1f, \"accentDb\": %.1f}", first ? "" : ", ", names[q],
+                     r.count[q], r.offsetMs[q], r.accentDb[q]);
+        first = 0;
+    }
+    std::fputs("],\n      \"bars\": [", f);
+    for (size_t b = 0; b < r.bars.size(); b++) {
+        std::fprintf(f, "%s{\"bar\": %zu, \"matched\": %d, \"meanOffsetMs\": ", b ? ", " : "", b + 1, r.bars[b].matched);
+        num(r.bars[b].matched ? r.bars[b].meanOffsetMs : nan);
+        std::fputs(", \"spreadMs\": ", f);
+        num(r.bars[b].matched ? r.bars[b].spreadMs : nan);
+        std::fputs("}", f);
+    }
+    std::fprintf(f, "],\n      \"evidence\": \"attacks by spectral flux, %.1f ms of round-trip latency taken off, set to the nearest sixteenth of %s\"},\n",
+                 comp * 1000, clickHeard ? "the metronome's beats (heard during the take)" : "the beats heard in the take (the click was off)");
+    std::fputs("    \"tempo\": {\"bpm\": ", f);
+    num(heard.bpm > 0 ? tempo.bpm : nan, "%.2f");
+    std::fprintf(f, ", \"metronomeBpm\": %.2f, \"driftBpm\": ", bpm);
+    num(heard.beats.size() > 2 ? tempo.driftBpm : nan, "%.2f");
+    std::fputs(", \"spreadBpm\": ", f);
+    num(heard.beats.size() > 2 ? tempo.tempoSpreadBpm : nan, "%.2f");
+    std::fprintf(f, ", \"beats\": %zu, \"evidence\": \"beats tracked in the take (onset envelope, dynamic programming), seeded at the metronome's tempo\"}\n  },\n",
+                 heard.beats.size());
+
+    // Known limits of the take (R3.1): level, clipping, lost frames, and what they make unreliable.
+    double peak = 0, energy = 0;
+    size_t clipped = 0;
+    for (size_t i = 0; i < n; i++) {
+        const double v = std::abs(double(x[i]));
+        peak = std::max(peak, v), energy += v * v, clipped += v >= 0.999;
+    }
+    const double peakDb = 20 * std::log10(peak + 1e-12), rmsDb = 10 * std::log10(energy / double(std::max<size_t>(n, 1)) + 1e-12);
+    std::vector<std::string> warn;
+    if (clipped) warn.push_back("clipping: " + std::to_string(clipped) + " samples at full scale");
+    if (rmsDb < -50) warn.push_back("very quiet input: attacks may be missed");
+    if (droppedFrames) warn.push_back("frames dropped by the recorder: times after the gap may be off");
+    if (r.confidence < 0.5) warn.push_back("timing: few attacks on the grid, low confidence");
+    std::fputs("  \"limits\": {\"peakDbfs\": ", f);
+    num(peakDb);
+    std::fputs(", \"rmsDbfs\": ", f);
+    num(rmsDb);
+    std::fprintf(f, ", \"clippedSamples\": %zu, \"droppedFrames\": %llu, \"warnings\": [", clipped, (unsigned long long)droppedFrames);
+    for (size_t i = 0; i < warn.size(); i++) std::fprintf(f, "%s\"%s\"", i ? ", " : "", warn[i].c_str());
+    std::fputs("]}\n", f);
 }
 
 }  // namespace dz

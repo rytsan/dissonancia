@@ -1,5 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
+#include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <string>
 #include <random>
 #include <vector>
 
@@ -88,4 +91,34 @@ TEST_CASE("timing: silence and no grid give nothing") {
     auto r = timing_report({{1.0, 0.f}}, {});
     CHECK(r.matched == 0);
     CHECK(r.confidence == 0);
+}
+
+TEST_CASE("timing: a take's session metrics, per bar, with the latency taken off") {
+    const auto beats = grid(100, 17, 0.0);   // four bars of 4/4 from the first downbeat
+    std::vector<double> at;
+    for (size_t i = 0; i + 1 < beats.size(); i++) at.push_back(beats[i] + (i < 8 ? 0.025 : 0.005));   // late 20 ms, then 0 ms
+    auto x = strums(44100, at, std::vector<float>(at.size(), 1.f), 4);
+    FILE* f = std::tmpfile();
+    REQUIRE(f);
+    write_take_metrics_json(f, x.data(), x.size(), 44100, 100, 4, true, 0.005, 0);
+    std::string s(size_t(std::ftell(f)), '\0');
+    std::rewind(f);
+    REQUIRE(std::fread(s.data(), 1, s.size(), f) == s.size());
+    std::fclose(f);
+    INFO(s);
+    CHECK(std::count(s.begin(), s.end(), '{') == std::count(s.begin(), s.end(), '}'));
+    CHECK(std::count(s.begin(), s.end(), '[') == std::count(s.begin(), s.end(), ']'));
+    auto value = [&](const std::string& key, size_t from = 0) {
+        const size_t p = s.find("\"" + key + "\": ", from);
+        REQUIRE(p != std::string::npos);
+        return std::stod(s.substr(p + key.size() + 4));
+    };
+    CHECK(s.find("\"grid\": \"metronome\"") != std::string::npos);
+    CHECK(std::abs(value("meanOffsetMs") - 10) < 3);
+    const size_t bars = s.find("\"bars\"");
+    CHECK(std::abs(value("meanOffsetMs", s.find("\"bar\": 1", bars)) - 20) < 3);
+    CHECK(std::abs(value("meanOffsetMs", s.find("\"bar\": 3", bars)) - 0) < 3);
+    CHECK(s.find("\"bar\": 5") == std::string::npos);
+    CHECK(std::abs(value("bpm", s.find("\"tempo\"")) - 100) < 2);
+    CHECK(s.find("\"warnings\": []") != std::string::npos);
 }
