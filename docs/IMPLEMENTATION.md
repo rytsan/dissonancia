@@ -910,6 +910,29 @@ fall on every interval (not the 5th, 7th or 9th partials: leaving those out move
 So the JSON says to compare takes with it. The changes ours alone has (P 0.58) are the decoder's
 splits.
 
+## Coach form (phase 2, step 3, 2026-10-26)
+
+`core/src/form.hpp`: per take, R2.8. The pitch classes on each beat of the metronome's grid (a chord's
+tones on the beat's first quarter, or the notes in it) cut into phrases of 4 or 8 bars from the first
+downbeat: the length under which the most bars repeat an earlier phrase. Each phrase takes the label
+of the earlier first time it matches (mean Jaccard over the beats ≥ 0.65), else a new letter. A
+repeat carries its agreement with the first time and its heard tempo against it.
+
+`python3 tools/eval/form.py [guitarset|rwc-pop]`: the form from our chords against the form from the
+annotated chords (major / minor triads on both sides), on the same annotated beat grid. Bars are
+compared pairwise (do two bars share a label), as structure is scored (Levy & Sandler 2008). It
+tests the hearing under the form, not the form against a musician's; RWC's AIST structure
+annotations would do that (not downloaded).
+
+| Corpus | Pairwise P / R / F | Phrase length as the annotated chords' | Same form string |
+|---|---|---|---|
+| GuitarSet (180) | 0.81 / 0.94 / 0.87 | 87 % | 62 % |
+| RWC-Pop (100) | 0.75 / 0.57 / 0.65 | 96 % | 3 % (songs: ~20 phrases) |
+
+Swept: phrase lengths 2–16 bars (2 lets a two-bar riff repeat under any song: F 0.76 and 0.51; 12
+and 16 never won) and the match 0.6–0.8 (0.75: F 0.82 and 0.61). Tests (`test_form.cpp`): AABA with
+the last A changed and faster; a progression played twice through 8 bars of 3/4; nothing repeated.
+
 ## Session JSON (phase 2, step 4, 2026-10-26)
 
 A REC take's JSON is now `dissonancia-session/1` ([`SESSION.md`](SESSION.md)): the take format plus

@@ -7,8 +7,10 @@
 // time per line: a metronome grid), else the beats heard. DEV: DZ_ONSETS_IN=file takes the attacks
 // from it (one time per line) instead of detecting them.
 //   dz_wav file.wav intonation [A4]   coach intonation (R2.4): one line per note read, then the take.
-//   dz_wav file.wav harmony [beats.txt [beatsPerBar]]   coach harmony execution (R2.6), guitar: each
+//   dz_wav file.wav harmony [beats.txt [beatsPerBar [general]]]   coach harmony execution (R2.6): each
 // chord, each change, then the take; against the beats in the file, else the beats heard.
+//   dz_wav file.wav form beats.txt beatsPerBar masks.txt   coach form (R2.8) from the pitch classes on
+// each beat (one 12-bit mask per line, per beat of beats.txt, whose first is a downbeat).
 //   dz_wav file.wav session bpm beatsPerBar [click|voice]   the session JSON's metrics and limits for a
 // take starting on a downbeat (click: the metronome was heard, so it is the grid; voice: a voice take,
 // with its intonation).
@@ -24,6 +26,7 @@
 
 #include "beats.hpp"
 #include "choir.hpp"
+#include "form.hpp"
 #include "harmony.hpp"
 #include "intonation.hpp"
 #include "session.hpp"
@@ -125,9 +128,25 @@ int main(int argc, char** argv) {
                     r.tuningCents, r.inTunePct, r.inTuneOwnPct, r.meanAbsCents, r.scoops, r.vibratoNotes, r.confidence);
         return 0;
     }
+    if (mode == "form" && argc > 5) {
+        auto read = [](const char* path, auto& v) {
+            if (FILE* f = std::fopen(path, "r")) {
+                for (double t; std::fscanf(f, "%lf", &t) == 1;) v.push_back(typename std::decay_t<decltype(v)>::value_type(t));
+                std::fclose(f);
+            }
+        };
+        std::vector<double> grid;
+        std::vector<uint16_t> masks;
+        read(argv[3], grid);
+        read(argv[5], masks);
+        const FormReport r = form_report(masks, std::atoi(argv[4]), grid, track_beats(x.data(), x.size(), rate, 0).beats);
+        for (const FormSection& s : r.sections) std::printf("section %d %d %c match %.1f bpm %.1f\n", s.firstBar, s.bars, s.label, s.matchPct, s.bpm);
+        std::printf("form %s phrase %d repeats %d match %.1f tempo %.1f\n", r.form.c_str(), r.phraseBars, r.repeats, r.repeatMatchPct, r.repeatTempoPct);
+        return 0;
+    }
     if (mode == "harmony") {
         SessionConfig s{};
-        s.mode = AnalysisMode::GuitarChords;
+        s.mode = argc > 5 && std::strcmp(argv[5], "general") == 0 ? AnalysisMode::GeneralChords : AnalysisMode::GuitarChords;
         s.quality = AudioQuality::Balanced;
         s.referenceA4 = 440;
         s.meter = {4, 4};

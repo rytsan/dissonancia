@@ -5,7 +5,7 @@ coach (phase 3) reads only this file. Writer: `Engine::write_sidecar` (`core/src
 `write_events_json` (`core/src/sidecar.hpp`) and `write_take_metrics_json` (`core/src/session.cpp`).
 Checked by `core/tests/test_core.cpp` (a REC take), `core/tests/test_timing.cpp` (timing on
 synthetic strums), `core/tests/test_dynamics.cpp` (loudness and attacks on synthetic tones),
-`core/tests/test_harmony.cpp` (changes on synthetic strums),
+`core/tests/test_harmony.cpp` (changes on synthetic strums), `core/tests/test_form.cpp` (forms),
 `core/tests/test_intonation.cpp` (intonation on a synthetic sung line) and
 `tests/score` (the app loads it, and the older format).
 
@@ -26,6 +26,7 @@ measure (no attacks in a bar, too few offbeats for a swing).
 | `metrics.intonation` | R2.4 (below); voice and single-line modes only |
 | `metrics.dynamics` | R2.7 (below) |
 | `metrics.harmony` | R2.6 (below); chord modes only |
+| `metrics.form` | R2.8 (below) |
 | `limits` | the take's known limits (below) |
 
 ### `metrics.timing`
@@ -95,6 +96,16 @@ The chords as the whole-take decoder reads them, against what was played.
 - `changeList`: `time`, `bar`, `beat`, `offbeat`, `offsetMs`, `gapDb`, `cleanAfterPct`.
 - `chordList`: `start`, `end`, `symbol`, `cleanPct`.
 - `evidence`.
+
+### `metrics.form`
+
+- `form`: one letter per phrase (`"AABA"`); `phraseBars`: 4 or 8, the length under which most bars
+  repeat an earlier phrase.
+- `repeats`, `repeatMatchPct` (the repeats' agreement with their first time), `repeatTempoChangePct`
+  (their mean tempo change against it; `null`: no tempo heard).
+- `sections`: `label`, `firstBar`, `bars`, `matchPct`, `bpm` (heard).
+- `evidence`. Bars are the metronome's from the first downbeat; the pitch classes on each beat come
+  from the chords (chord modes) or the notes (voice and single line).
 
 ### `limits`
 

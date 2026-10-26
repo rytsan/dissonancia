@@ -5,7 +5,9 @@
 #include <string>
 
 #include "beats.hpp"
+#include "chords.hpp"
 #include "dynamics.hpp"
+#include "form.hpp"
 #include "harmony.hpp"
 #include "intonation.hpp"
 #include "live_config.hpp"
@@ -15,9 +17,11 @@ namespace dz {
 
 namespace {
 // Writes ",\n    \"intonation\": {...}" (R2.4) for a voice or a single line; returns its confidence.
-double write_intonation_json(FILE* f, const float* x, size_t n, uint32_t rate, const SessionConfig& s, double comp) {
+// events: the decoded notes, for the form.
+double write_intonation_json(FILE* f, const float* x, size_t n, uint32_t rate, const SessionConfig& s, double comp, std::vector<AnalyzerEvent>& events) {
     std::vector<PitchPoint> track;
-    const IntonationReport r = intonation_report(decode_notes(s, x, n, rate, comp, {}, &track), track);
+    events = decode_notes(s, x, n, rate, comp, {}, &track);
+    const IntonationReport r = intonation_report(events, track);
     std::fprintf(f, ",\n    \"intonation\": {\"referenceA4\": %.2f, \"confidence\": %.2f, \"notes\": %zu", s.referenceA4, r.confidence, r.notes.size());
     if (r.notes.empty()) {
         std::fputs(", \"evidence\": \"no note held long enough to read\"}", f);
@@ -63,10 +67,11 @@ double write_intonation_json(FILE* f, const float* x, size_t n, uint32_t rate, c
 }
 
 // Writes ",\n    \"harmony\": {...}" (R2.6) for a chord mode; returns its confidence.
+// chords: the decoded chords, for the form.
 double write_harmony_json(FILE* f, const float* x, size_t n, uint32_t rate, const SessionConfig& s, double comp, const std::vector<double>& attacks,
-                          const std::vector<double>& grid) {
+                          const std::vector<double>& grid, std::vector<AnalyzerEvent>& chords) {
     std::vector<HeardFrame> heard;
-    const auto chords = decode_chords(s, x, n, rate, comp, false, {}, &heard);
+    chords = decode_chords(s, x, n, rate, comp, false, {}, &heard);
     const HarmonyReport r = harmony_report(chords, heard, x, n, rate, comp, attacks, grid, s.meter.numerator);
     auto num = [&](double v, const char* fmt = "%.1f") {
         if (std::isfinite(v)) std::fprintf(f, fmt, v);
@@ -167,11 +172,44 @@ void write_take_metrics_json(FILE* f, const float* x, size_t n, uint32_t rate, c
     std::fprintf(f, ", \"beats\": %zu, \"evidence\": \"beats tracked in the take (onset envelope, dynamic programming), seeded at the metronome's tempo\"}",
                  heard.beats.size());
     double intonationConfidence = 1, harmonyConfidence = 1;
-    if (!is_chord_mode(s.mode)) intonationConfidence = write_intonation_json(f, x, n, rate, s, comp);
+    std::vector<AnalyzerEvent> events;
+    if (!is_chord_mode(s.mode)) intonationConfidence = write_intonation_json(f, x, n, rate, s, comp, events);
     else {
         std::vector<double> attacks;
         for (const Onset& o : on) attacks.push_back(o.time);
-        harmonyConfidence = write_harmony_json(f, x, n, rate, s, comp, attacks, grid);
+        harmonyConfidence = write_harmony_json(f, x, n, rate, s, comp, attacks, grid, events);
+    }
+    // R2.8: the form, on the metronome's bars, from the chords (or the notes) on each beat.
+    if (bpm > 0 && beatsPerBar > 0) {
+        std::vector<double> bars;
+        for (double t = 0; t < double(n) / rate + 60 / bpm; t += 60 / bpm) bars.push_back(t);
+        std::vector<uint16_t> masks(bars.size() - 1, 0);
+        for (const AnalyzerEvent& e : events)
+            for (size_t k = 0; k + 1 < bars.size(); k++) {
+                // a chord on the beat's first quarter; a note anywhere in the beat
+                const double a = bars[k], b = bars[k + 1], at = a + (b - a) / 4;
+                if (e.type == AnalyzerEventType::ChordEnded && e.data.chord.quality != ChordQuality::Unknown && e.data.chord.startTimeSeconds <= at &&
+                    at < e.data.chord.endTimeSeconds)
+                    masks[k] |= chord_tones(e.data.chord.rootPitchClass, e.data.chord.quality);
+                else if (e.type == AnalyzerEventType::NoteEnd && e.data.note.startTimeSeconds < b && e.data.note.endTimeSeconds > a)
+                    masks[k] |= uint16_t(1u << (e.data.note.midi % 12));
+            }
+        const FormReport fr = form_report(masks, beatsPerBar, bars, heard.beats);
+        std::fprintf(f, ",\n    \"form\": {\"form\": \"%s\", \"phraseBars\": %d, \"repeats\": %d, \"repeatMatchPct\": ", fr.form.c_str(), fr.phraseBars, fr.repeats);
+        num(fr.repeats ? fr.repeatMatchPct : nan);
+        std::fputs(", \"repeatTempoChangePct\": ", f);
+        num(fr.repeatTempoPct);
+        std::fputs(",\n      \"sections\": [", f);
+        for (size_t i = 0; i < fr.sections.size(); i++) {
+            const FormSection& c = fr.sections[i];
+            std::fprintf(f, "%s{\"label\": \"%c\", \"firstBar\": %d, \"bars\": %d, \"matchPct\": %.0f, \"bpm\": ", i ? ", " : "", c.label, c.firstBar,
+                         c.bars, c.matchPct);
+            num(c.bpm > 0 ? c.bpm : nan);
+            std::fputs("}", f);
+        }
+        std::fputs("],\n      \"evidence\": \"phrases of 4 or 8 bars from the first downbeat; a phrase repeats an earlier one when the pitch"
+                   " classes on its beats (chords, or notes) agree 65 % or more; matchPct: that agreement with the first time; bpm: the beats"
+                   " heard in it\"}", f);
     }
     // R2.7: loudness over the take, per bar and phrase; the attacks' consistency per sixteenth.
     const DynamicsReport d = dynamics_report(x, n, rate, bpm > 0 ? 60 / bpm * beatsPerBar : 0);
