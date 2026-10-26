@@ -10,13 +10,19 @@
 #include <vector>
 
 #include "dissonancia.h"
+#include "notes.hpp"
 
 namespace dz {
 
 // metronomeGrid: the file starts on a downbeat of s.bpm / s.meter (a REC take): changes cost less
 // on the beats and least on the downbeats. progress(fraction) returns false to cancel (empty result).
+// The notes heard at every hop (window time, compensated).
+struct HeardFrame { double t; NoteFrame notes; };
+
+// heard: when given, filled with pass 1's perceived notes (harmony.hpp reads them).
 std::vector<AnalyzerEvent> decode_chords(const SessionConfig& s, const float* x, size_t n, uint32_t rate, double compensationSeconds,
-                                         bool metronomeGrid, const std::function<bool(double)>& progress = {});
+                                         bool metronomeGrid, const std::function<bool(double)>& progress = {},
+                                         std::vector<HeardFrame>* heard = nullptr);
 
 // Whole-take note decoding (voice / melody): pass 1 = the LIVE pitch estimate of every hop (YIN,
 // clarity); pass 2 = Viterbi over MIDI notes + unvoiced with a cost per change and a robust

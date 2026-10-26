@@ -6,6 +6,7 @@
 
 #include "beats.hpp"
 #include "dynamics.hpp"
+#include "harmony.hpp"
 #include "intonation.hpp"
 #include "live_config.hpp"
 #include "timing.hpp"
@@ -60,6 +61,50 @@ double write_intonation_json(FILE* f, const float* x, size_t n, uint32_t rate, c
                " temperament at referenceA4 (tuningCents: their median, the tuning heard); in tune within 20 cents\"}", f);
     return r.confidence;
 }
+
+// Writes ",\n    \"harmony\": {...}" (R2.6) for a chord mode; returns its confidence.
+double write_harmony_json(FILE* f, const float* x, size_t n, uint32_t rate, const SessionConfig& s, double comp, const std::vector<double>& attacks,
+                          const std::vector<double>& grid) {
+    std::vector<HeardFrame> heard;
+    const auto chords = decode_chords(s, x, n, rate, comp, false, {}, &heard);
+    const HarmonyReport r = harmony_report(chords, heard, x, n, rate, comp, attacks, grid, s.meter.numerator);
+    auto num = [&](double v, const char* fmt = "%.1f") {
+        if (std::isfinite(v)) std::fprintf(f, fmt, v);
+        else std::fputs("null", f);
+    };
+    std::fprintf(f, ",\n    \"harmony\": {\"confidence\": %.2f, \"chords\": %zu, \"changes\": %zu, \"onGrid\": %d, \"changeMeanMs\": ", r.confidence,
+                 r.chords.size(), r.changes.size(), r.onGrid);
+    num(r.changeMeanMs);
+    std::fputs(", \"changeSpreadMs\": ", f);
+    num(r.changeSpreadMs);
+    std::fprintf(f, ", \"gaps\": %d, \"cleanPct\": ", r.gaps);
+    num(r.cleanPct);
+    std::fputs(", \"cleanAtChangePct\": ", f);
+    num(r.cleanAtChangePct);
+    std::fputs(",\n      \"changeList\": [", f);
+    for (size_t i = 0; i < r.changes.size(); i++) {
+        const ChordChange& c = r.changes[i];
+        std::fprintf(f, "%s\n        {\"time\": %.3f, \"bar\": %d, \"beat\": %d, \"offbeat\": %s, \"offsetMs\": ", i ? "," : "", c.time, c.bar, c.beatInBar,
+                     c.offbeat ? "true" : "false");
+        num(c.offsetMs);
+        std::fprintf(f, ", \"gapDb\": %.1f, \"cleanAfterPct\": ", c.gapDb);
+        num(c.cleanAfterPct);
+        std::fputs("}", f);
+    }
+    std::fputs("],\n      \"chordList\": [", f);
+    for (size_t i = 0; i < r.chords.size(); i++) {
+        const ChordPlayed& c = r.chords[i];
+        std::fprintf(f, "%s\n        {\"start\": %.3f, \"end\": %.3f, \"symbol\": \"%s\", \"cleanPct\": ", i ? "," : "", c.start, c.end, c.symbol);
+        num(c.cleanPct);
+        std::fputs("}", f);
+    }
+    std::fputs("],\n      \"evidence\": \"chords by the whole-take decoder; a change's time is its attack, against the nearest eighth of the"
+               " grid (bar 0: off it); gapDb: the level 150-30 ms before the change against the same before the chord's own strums (gaps: 10 dB"
+               " down or more); cleanPct: notes heard that are the chord's tones, after its first 0.25 s; the hearing itself puts ~15 % of notes"
+               " outside the chord (GuitarSet: 82 % heard where 96 % were played), so compare takes rather than read it as absolute\"}", f);
+    return r.changes.empty() ? 1 : r.confidence;   // one chord throughout: nothing to doubt
+}
+
 }  // namespace
 
 void write_take_metrics_json(FILE* f, const float* x, size_t n, uint32_t rate, const SessionConfig& s, bool clickHeard, double comp,
@@ -121,8 +166,13 @@ void write_take_metrics_json(FILE* f, const float* x, size_t n, uint32_t rate, c
     num(heard.beats.size() > 2 ? tempo.tempoSpreadBpm : nan, "%.2f");
     std::fprintf(f, ", \"beats\": %zu, \"evidence\": \"beats tracked in the take (onset envelope, dynamic programming), seeded at the metronome's tempo\"}",
                  heard.beats.size());
-    double intonationConfidence = 1;
+    double intonationConfidence = 1, harmonyConfidence = 1;
     if (!is_chord_mode(s.mode)) intonationConfidence = write_intonation_json(f, x, n, rate, s, comp);
+    else {
+        std::vector<double> attacks;
+        for (const Onset& o : on) attacks.push_back(o.time);
+        harmonyConfidence = write_harmony_json(f, x, n, rate, s, comp, attacks, grid);
+    }
     // R2.7: loudness over the take, per bar and phrase; the attacks' consistency per sixteenth.
     const DynamicsReport d = dynamics_report(x, n, rate, bpm > 0 ? 60 / bpm * beatsPerBar : 0);
     std::fputs(",\n    \"dynamics\": {\"integratedLufs\": ", f);
@@ -163,6 +213,7 @@ void write_take_metrics_json(FILE* f, const float* x, size_t n, uint32_t rate, c
     if (droppedFrames) warn.push_back("frames dropped by the recorder: times after the gap may be off");
     if (r.confidence < 0.5) warn.push_back("timing: few attacks on the grid, low confidence");
     if (intonationConfidence < 0.5) warn.push_back("intonation: few notes read, low confidence");
+    if (harmonyConfidence < 0.5) warn.push_back("harmony: few chord changes on the grid, low confidence");
     std::fputs("  \"limits\": {\"peakDbfs\": ", f);
     num(peakDb);
     std::fputs(", \"rmsDbfs\": ", f);

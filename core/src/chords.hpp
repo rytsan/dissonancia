@@ -49,6 +49,9 @@ private:
     KeyEstimate est_{};
 };
 
+// The chord's pitch classes as a 12-bit mask (bit k: pitch class k).
+uint16_t chord_tones(int root, ChordQuality q);
+
 class ChordMatcher {
 public:
     explicit ChordMatcher(const SessionConfig& s);

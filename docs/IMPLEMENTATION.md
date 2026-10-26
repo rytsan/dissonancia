@@ -879,6 +879,37 @@ crescendo reads 7 LU over 8 bars; a swell and a fade read as two phrases, peakin
 plucks with the downbeat 6 dB up read 0 dB of spread and a 6 dB accent, and with 3 dB of random level
 ~3 dB of spread. There is no corpus with the truth for these; BS.1770 is the standard they rest on.
 
+## Coach harmony execution (phase 2, step 3, 2026-10-26)
+
+`core/src/harmony.hpp`: per take in a chord mode, R2.6. The chords come from `decode_chords`, which
+also hands back the notes it heard per hop (`chord_tones` in `chords.hpp` gives a chord's pitch
+classes). A change goes to other tones, from a chord right before. Per change:
+- **On time**: its attack (the nearest `detect_onsets` attack within 0.1 s, since the decoder's
+  start comes ~20 ms early from the chroma's onsets) against the nearest eighth of the grid.
+- **Gap**: the level 150–30 ms before the attack against the same before the chord before's own
+  strums (a pattern's rests are not a gap); 10 dB down is a gap.
+- **Clean**: the notes heard that are the chord's tones, after its first 0.25 s, and within it.
+
+`dz_wav file.wav harmony [beats.txt [beatsPerBar]]` prints it. Test (`test_harmony.cpp`): strummed
+C G Am F, G 30 ms late, the hand lifted before Am.
+
+`python3 tools/eval/harmony.py`, on GuitarSet's 180 takes against the annotations: the performed
+chords' changes (their bounds are on the grid; the attack is the annotated strum nearest), the
+notes, the beats.
+
+| Metric | Against the annotations |
+|---|---|
+| Changes | 1851 annotated, 2536 ours, 1480 matched within 0.3 s (R 0.80, P 0.58) |
+| Change offset | a constant -7.8 ms (as timing's); |error| median 10.1 ms, p90 28.3 ms |
+| Gaps (no note sounding 150–30 ms before) | P 0.61, R 0.48 |
+| Clean % per take | annotated 95.9 %, ours 82.0 % (median); correlation 0.43 |
+
+Clean is the weak one. It is the hearing, not our chord labels: our notes against the annotated
+chords read 79.3 %, and shifting them in time does not help (75–81 %). The notes outside the chord
+fall on every interval (not the 5th, 7th or 9th partials: leaving those out moves it 0.8 points).
+So the JSON says to compare takes with it. The changes ours alone has (P 0.58) are the decoder's
+splits.
+
 ## Session JSON (phase 2, step 4, 2026-10-26)
 
 A REC take's JSON is now `dissonancia-session/1` ([`SESSION.md`](SESSION.md)): the take format plus

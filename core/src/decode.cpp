@@ -25,7 +25,7 @@ struct Frame {
 }  // namespace
 
 std::vector<AnalyzerEvent> decode_chords(const SessionConfig& s, const float* x, size_t n, uint32_t rate, double comp,
-                                         bool /*grid*/, const std::function<bool(double)>& progress) {
+                                         bool /*grid*/, const std::function<bool(double)>& progress, std::vector<HeardFrame>* heard) {
     // ponytail: the metronome grid of a REC take (changes on the beats) is not used by the notes HMM
     // yet; add it as a lower change cost on the beats if takes show changes off the beat.
     const LiveConfig c = live_config(s.mode, s.quality, rate);
@@ -52,6 +52,8 @@ std::vector<AnalyzerEvent> decode_chords(const SessionConfig& s, const float* x,
         if (progress && (pos / hop) % 64 == 0 && !progress(0.8 * double(pos) / double(n))) return {};
     }
     if (frames.empty()) return {};
+    if (heard)
+        for (const Frame& f : frames) heard->push_back({f.t - comp, f.notes});
 
     // Pass 2: the chord HMM over the perceived notes (as LIVE), decoded with the whole take: every
     // frame decided from the past and the future. Silence (no note heard for 0.6 s) separates.

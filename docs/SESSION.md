@@ -5,6 +5,7 @@ coach (phase 3) reads only this file. Writer: `Engine::write_sidecar` (`core/src
 `write_events_json` (`core/src/sidecar.hpp`) and `write_take_metrics_json` (`core/src/session.cpp`).
 Checked by `core/tests/test_core.cpp` (a REC take), `core/tests/test_timing.cpp` (timing on
 synthetic strums), `core/tests/test_dynamics.cpp` (loudness and attacks on synthetic tones),
+`core/tests/test_harmony.cpp` (changes on synthetic strums),
 `core/tests/test_intonation.cpp` (intonation on a synthetic sung line) and
 `tests/score` (the app loads it, and the older format).
 
@@ -24,6 +25,7 @@ measure (no attacks in a bar, too few offbeats for a swing).
 | `metrics.tempo` | R2.2 (below) |
 | `metrics.intonation` | R2.4 (below); voice and single-line modes only |
 | `metrics.dynamics` | R2.7 (below) |
+| `metrics.harmony` | R2.6 (below); chord modes only |
 | `limits` | the take's known limits (below) |
 
 ### `metrics.timing`
@@ -78,10 +80,26 @@ attack and release left out) of 5 hops or more.
   third against the first), `peakAt` (where the loudest 400 ms falls, 0–1).
 - `evidence`.
 
+### `metrics.harmony`
+
+The chords as the whole-take decoder reads them, against what was played.
+- `confidence` (changes on the grid / changes, scaled down under 8), `chords`, `changes` (to other
+  tones; a new bass under the same chord is not one), `onGrid`.
+- `changeMeanMs`, `changeSpreadMs`: each change's attack against the nearest eighth of the grid
+  (the same grid as `timing`), within 0.1 beat; > 0 late.
+- `gaps`: changes with the level 150–30 ms before their attack 10 dB or more under the same before
+  the chord before's own strums (the hand lifted early).
+- `cleanPct`, `cleanAtChangePct`: the notes heard that are the chord's tones, after each chord's
+  first 0.25 s and within it. The hearing itself puts ~15 % of notes outside the chord, so these
+  compare takes; they are not absolute.
+- `changeList`: `time`, `bar`, `beat`, `offbeat`, `offsetMs`, `gapDb`, `cleanAfterPct`.
+- `chordList`: `start`, `end`, `symbol`, `cleanPct`.
+- `evidence`.
+
 ### `limits`
 
 `peakDbfs`, `rmsDbfs`, `clippedSamples`, `droppedFrames`, and `warnings`: sentences for the coach
-(clipping, a very quiet input, dropped frames, timing or intonation with low confidence).
+(clipping, a very quiet input, dropped frames, timing, intonation or harmony with low confidence).
 
 ## Versions
 

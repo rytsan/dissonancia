@@ -74,8 +74,9 @@ band). Open for later: the change ratio (R1.3), the exact symbol (R1.4), melody 
 2. Intonation and tuning (R2.4, R2.5) from the YIN track. **R2.4 per take done 2026-10-26**
    (`core/src/intonation.cpp`, `tools/eval/intonation.py`, in the session JSON). R2.5 (string by
    string) is not built.
-3. Harmony execution, dynamics and form (R2.6–R2.8). **R2.7 per take done 2026-10-26**
-   (`core/src/dynamics.cpp`; accents per beat of the bar join R2.3).
+3. Harmony execution, dynamics and form (R2.6–R2.8). **R2.6 and R2.7 per take done 2026-10-26**
+   (`core/src/harmony.cpp`, `core/src/dynamics.cpp`; accents per beat of the bar join R2.3). R2.8
+   (form) is not built.
 4. `dissonancia-session/1`, written after every REC, with a schema test. It grows from today's
    sidecar. **Done 2026-10-26** ([`SESSION.md`](SESSION.md)): the events, the timing and
    tempo per take and per bar, and the take's limits. The other metrics join it as they are built.

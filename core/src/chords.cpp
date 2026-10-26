@@ -56,6 +56,13 @@ bool contains(const int8_t* a, int n, int v) {
 
 }  // namespace
 
+uint16_t chord_tones(int root, ChordQuality q) {
+    const QualityDef& d = def(q);
+    uint16_t m = 0;
+    for (int k = 0; k < d.n; k++) m |= uint16_t(1u << ((root + d.iv[k] + 12) % 12));
+    return m;
+}
+
 // ---------------------------------------------------------------- song key
 
 namespace {

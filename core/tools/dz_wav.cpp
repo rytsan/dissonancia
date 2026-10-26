@@ -7,6 +7,8 @@
 // time per line: a metronome grid), else the beats heard. DEV: DZ_ONSETS_IN=file takes the attacks
 // from it (one time per line) instead of detecting them.
 //   dz_wav file.wav intonation [A4]   coach intonation (R2.4): one line per note read, then the take.
+//   dz_wav file.wav harmony [beats.txt [beatsPerBar]]   coach harmony execution (R2.6), guitar: each
+// chord, each change, then the take; against the beats in the file, else the beats heard.
 //   dz_wav file.wav session bpm beatsPerBar [click|voice]   the session JSON's metrics and limits for a
 // take starting on a downbeat (click: the metronome was heard, so it is the grid; voice: a voice take,
 // with its intonation).
@@ -22,6 +24,7 @@
 
 #include "beats.hpp"
 #include "choir.hpp"
+#include "harmony.hpp"
 #include "intonation.hpp"
 #include "session.hpp"
 #include "chords.hpp"
@@ -120,6 +123,38 @@ int main(int argc, char** argv) {
         for (const PhraseIntonation& p : r.phrases) std::printf("phrase %.3f %.3f %d drift %.1f\n", p.start, p.end, p.notes, p.driftCents);
         std::printf("intonation notes %zu tuning %.1f inTune %.1f inTuneOwn %.1f meanAbs %.1f scoops %d vibrato %d confidence %.2f\n", r.notes.size(),
                     r.tuningCents, r.inTunePct, r.inTuneOwnPct, r.meanAbsCents, r.scoops, r.vibratoNotes, r.confidence);
+        return 0;
+    }
+    if (mode == "harmony") {
+        SessionConfig s{};
+        s.mode = AnalysisMode::GuitarChords;
+        s.quality = AudioQuality::Balanced;
+        s.referenceA4 = 440;
+        s.meter = {4, 4};
+        s.bpm = 120;
+        std::vector<double> beats;
+        if (argc > 3)
+            if (FILE* f = std::fopen(argv[3], "r")) {
+                for (double v; std::fscanf(f, "%lf", &v) == 1;) beats.push_back(v);
+                std::fclose(f);
+            }
+        if (beats.empty()) beats = track_beats(x.data(), x.size(), rate, 0).beats;
+        std::vector<HeardFrame> heard;
+        const auto chords = decode_chords(s, x.data(), x.size(), rate, 0.0, false, {}, &heard);
+        std::vector<double> attacks;
+        for (const Onset& o : detect_onsets(x.data(), x.size(), rate)) attacks.push_back(o.time);
+        const HarmonyReport r = harmony_report(chords, heard, x.data(), x.size(), rate, 0.0, attacks, beats, argc > 4 ? std::atoi(argv[4]) : 4);
+        if (std::getenv("DZ_HEARDDUMP"))
+            for (const HeardFrame& h : heard) {
+                std::printf("heard %.3f", h.t);
+                for (int k = 0; k < h.notes.count; k++) std::printf(" %d", h.notes.midi[k]);
+                std::printf("\n");
+            }
+        for (const ChordPlayed& c : r.chords) std::printf("chord %.3f %.3f %s clean %.1f\n", c.start, c.end, c.symbol, c.cleanPct);
+        for (const ChordChange& c : r.changes)
+            std::printf("change %.3f offset %.1f beat %d%s gap %.1f cleanAfter %.1f\n", c.time, c.offsetMs, c.beatInBar, c.offbeat ? "&" : "", c.gapDb, c.cleanAfterPct);
+        std::printf("harmony chords %zu changes %zu onGrid %d mean %.1f spread %.1f clean %.1f cleanAtChange %.1f gaps %d confidence %.2f\n", r.chords.size(),
+                    r.changes.size(), r.onGrid, r.changeMeanMs, r.changeSpreadMs, r.cleanPct, r.cleanAtChangePct, r.gaps, r.confidence);
         return 0;
     }
     if (mode == "choir") {
