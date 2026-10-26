@@ -61,9 +61,16 @@ Each step is judged with `eval.py --compare` (paired per song, 95 % interval), n
 Exit: R1.1–R1.3 on RWC and GuitarSet. If a classical model stalls well below 90 %, weigh a small
 neural model in LIVE, as Melodia already runs Basic Pitch.
 
+**Closed 2026-10-26 at the ceiling.** Harmony on screen: RWC-Pop 72.6 %, GuitarSet 79.8 %, synthetic
+94.7 %; delay 0.53-0.58 s. Perfect notes reach 80-83 % live and 88 % offline with each chord's bounds
+given, so the decision layer is near what the notes say; the rest is hearing (~8 points on a full
+band). Open for later: the change ratio (R1.3), the exact symbol (R1.4), melody (R1.5).
+
 ## Phase 2 — Coach metrics and session JSON (R2, R3)
 
-1. Timing and tempo (R2.1–R2.3) from onsets and beats, live and per take.
+1. Timing and tempo (R2.1–R2.3) from onsets and beats, live and per take. **Per take done
+   2026-10-26** (`core/src/timing.cpp`, `tools/eval/timing.py`): see IMPLEMENTATION.md. Live, and the
+   per-beat-of-the-bar view, wait for the session JSON (step 4).
 2. Intonation and tuning (R2.4, R2.5) from the YIN track.
 3. Harmony execution, dynamics and form (R2.6–R2.8).
 4. `dissonancia-session/1`, written after every REC, with a schema test. It grows from today's

@@ -3,6 +3,9 @@
 // confirmed chords and how often the live preview would change on screen.
 //   dz_wav file.wav [guitar|piano|general|voice|choir] [low|balanced|high] [offline [bpm beatsPerBar]]
 // choir: the STUDIO choir by section (S9), one line per note: part start end midi confidence.
+//   dz_wav file.wav timing [beats.txt]   coach timing (R2.1-R2.3) against the beats in the file (one
+// time per line: a metronome grid), else the beats heard. DEV: DZ_ONSETS_IN=file takes the attacks
+// from it (one time per line) instead of detecting them.
 // offline: the STUDIO whole-take decoder instead of the live tracker; with a bpm, the file is taken
 // to start on a downbeat of that metronome grid (a REC take).
 #include <cmath>
@@ -13,12 +16,14 @@
 #include <string>
 #include <vector>
 
+#include "beats.hpp"
 #include "choir.hpp"
 #include "chords.hpp"
 #include "decode.hpp"
 #include "voice.hpp"
 #include "cqt.hpp"
 #include "live_config.hpp"
+#include "timing.hpp"
 
 using namespace dz;
 
@@ -63,6 +68,26 @@ int main(int argc, char** argv) {
     uint32_t rate = 48000;
     if (!read_wav(argv[1], x, rate)) { std::fprintf(stderr, "cannot read %s\n", argv[1]); return 1; }
     const std::string mode = argc > 2 ? argv[2] : "guitar", q = argc > 3 ? argv[3] : "balanced";
+    if (mode == "timing") {
+        auto times = [](const char* path) {
+            std::vector<double> t;
+            if (FILE* f = std::fopen(path, "r")) {
+                for (double v; std::fscanf(f, "%lf", &v) == 1;) t.push_back(v);
+                std::fclose(f);
+            }
+            return t;
+        };
+        std::vector<Onset> onsets;
+        if (const char* in = std::getenv("DZ_ONSETS_IN")) for (double t : times(in)) onsets.push_back({t, 0.f});
+        else onsets = detect_onsets(x.data(), x.size(), rate);
+        const std::vector<double> beats = argc > 3 ? times(argv[3]) : track_beats(x.data(), x.size(), rate, 0).beats;
+        const TimingReport r = timing_report(onsets, beats);
+        std::printf("timing onsets %d matched %d mean %.1f spread %.1f swing %.2f bpm %.2f drift %.2f tempoSpread %.2f confidence %.2f\n",
+                    r.onsets, r.matched, r.meanOffsetMs, r.spreadMs, r.swing, r.bpm, r.driftBpm, r.tempoSpreadBpm, r.confidence);
+        for (int q = 0; q < 4; q++) std::printf("position %d count %d offset %.1f accent %.1f\n", q, r.count[q], r.offsetMs[q], r.accentDb[q]);
+        if (std::getenv("DZ_ONSETDUMP")) for (const Onset& o : onsets) std::printf("onset %.4f %.1f\n", o.time, o.level);
+        return 0;
+    }
     if (mode == "choir") {
         for (const ChoirNote& n : choir_notes(choir_frames(x.data(), x.size(), rate)))
             std::printf("%s %.3f %.3f %d %.2f%s\n", kChoirPart[n.section], n.start, n.end, n.midi, n.confidence, n.ambiguous ? " ambiguous" : "");

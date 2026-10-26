@@ -777,6 +777,38 @@ notes, a sung melody with passing and neighbour tones, kick/snare/hi-hat),
   CPU. Also fetches the Demucs weights and the VCSL sounds. A failure is remembered and not
   retried at every start.
 
+## Coach timing (phase 2, step 1, 2026-10-26)
+
+`core/src/timing.hpp`: per take (POST layer), R2.1-R2.3.
+- **Attacks**: spectral flux (Boeck et al. 2012), a ~23 ms Hann frame every 5 ms, magnitudes floored
+  55 dB under the loudest frame; peaks over +-30 ms, above the mean around them by a margin, 50 ms
+  apart. A strum is one attack. Broadband energy was tried first: strings beating against each other
+  read as attacks.
+- **Against the grid**: the metronome's beats, or `track_beats` when there is none. Each attack goes
+  to its nearest sixteenth (within 0.1 beat, else it is between grid points). Reported: mean offset
+  (> 0 dragging), spread, and per sixteenth (on, e, and, a) the offset and the accent in dB.
+- **Swing**: the offbeat eighths' place, measured from the downbeats as played; when swung
+  (> 1.2), the offbeat's grid point moves there.
+- **Tempo**: the median beat, the drift (a linear fit over the take), the beat-to-beat spread.
+- **Confidence**: matched / attacks, scaled down under 16 attacks.
+
+`dz_wav file.wav timing [beats.txt]` prints it. Tests (`test_timing.cpp`): synthetic strums dragging
+15 ms with 6 ms of spread come out at 15.6 / 6.1 ms; triplet swing at 2.0; a drift of 9.75 BPM.
+
+`python3 tools/eval/timing.py 2`, on 90 GuitarSet comping takes, played to a click whose grid is the
+beat annotation. The same metrics from the annotated note onsets are the reference:
+
+| Metric | Error against the annotations |
+|---|---|
+| Attacks found (50 ms) | F 0.80 (P 0.79, R 0.80) |
+| Mean offset | a constant -7.7 ms (ours earlier); with it removed, median 2.5 ms, p90 7.0 ms |
+| Spread | median 2.1 ms, p90 5.1 ms (the players' spread: median 19 ms) |
+| Tempo heard, no grid | within 2 %: 70 % of takes; 80 % counting octave and 3:2 errors |
+
+The constant: on the synthetic strums our attacks are ~1 ms after the first string, so the annotated
+onsets (from pitch tracking) likely come late; a metronome offset is reported as ours. The heard
+tempo misses R1.7 (within 2 %) on 30 % of takes.
+
 ## Baseline (phase 0, 2026-10-21)
 
 `python3 tools/eval/eval.py` (corpora from `tools/eval/corpora.py`). Harmony and chord are scored on
