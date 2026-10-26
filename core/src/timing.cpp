@@ -3,9 +3,6 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
-#include <string>
-
-#include "beats.hpp"
 
 namespace dz {
 
@@ -177,81 +174,6 @@ TimingReport timing_report(const std::vector<Onset>& onsets, const std::vector<d
     }
     if (r.onsets) r.confidence = double(r.matched) / r.onsets * std::min(1.0, r.onsets / 16.0);
     return r;
-}
-
-void write_take_metrics_json(FILE* f, const float* x, size_t n, uint32_t rate, double bpm, int beatsPerBar, bool clickHeard,
-                             double comp, uint64_t droppedFrames) {
-    auto num = [&](double v, const char* fmt = "%.1f") {   // null where there is nothing to say
-        if (std::isfinite(v)) std::fprintf(f, fmt, v);
-        else std::fputs("null", f);
-    };
-    std::vector<Onset> on = detect_onsets(x, n, rate);
-    for (Onset& o : on) o.time -= comp;
-    // The player's own beats give the tempo (R2.2) either way; the grid for the offsets is the click
-    // when it was heard.
-    BeatTrack heard = track_beats(x, n, rate, bpm);
-    for (double& t : heard.beats) t -= comp;
-    std::vector<double> grid;
-    if (clickHeard && bpm > 0)
-        for (double t = 0; t < double(n) / rate + 60 / bpm; t += 60 / bpm) grid.push_back(t);
-    else grid = heard.beats;
-    const TimingReport r = timing_report(on, grid, beatsPerBar), tempo = timing_report(on, heard.beats);
-    const double nan = std::nan("");
-
-    std::fprintf(f, "  \"metrics\": {\n    \"timing\": {\"grid\": \"%s\", \"confidence\": %.2f, \"onsets\": %d, \"matched\": %d, \"meanOffsetMs\": ",
-                 clickHeard ? "metronome" : "beats heard", r.confidence, r.onsets, r.matched);
-    num(r.matched ? r.meanOffsetMs : nan);
-    std::fputs(", \"spreadMs\": ", f);
-    num(r.matched ? r.spreadMs : nan);
-    std::fputs(", \"swing\": ", f);
-    num(r.swing > 0 ? r.swing : nan, "%.2f");
-    std::fputs(",\n      \"perSixteenth\": [", f);
-    const char* names[4] = {"1", "e", "&", "a"};
-    for (int q = 0, first = 1; q < 4; q++) {
-        if (!r.count[q]) continue;
-        std::fprintf(f, "%s{\"position\": \"%s\", \"count\": %d, \"offsetMs\": %.1f, \"accentDb\": %.1f}", first ? "" : ", ", names[q],
-                     r.count[q], r.offsetMs[q], r.accentDb[q]);
-        first = 0;
-    }
-    std::fputs("],\n      \"bars\": [", f);
-    for (size_t b = 0; b < r.bars.size(); b++) {
-        std::fprintf(f, "%s{\"bar\": %zu, \"matched\": %d, \"meanOffsetMs\": ", b ? ", " : "", b + 1, r.bars[b].matched);
-        num(r.bars[b].matched ? r.bars[b].meanOffsetMs : nan);
-        std::fputs(", \"spreadMs\": ", f);
-        num(r.bars[b].matched ? r.bars[b].spreadMs : nan);
-        std::fputs("}", f);
-    }
-    std::fprintf(f, "],\n      \"evidence\": \"attacks by spectral flux, %.1f ms of round-trip latency taken off, set to the nearest sixteenth of %s\"},\n",
-                 comp * 1000, clickHeard ? "the metronome's beats (heard during the take)" : "the beats heard in the take (the click was off)");
-    std::fputs("    \"tempo\": {\"bpm\": ", f);
-    num(heard.bpm > 0 ? tempo.bpm : nan, "%.2f");
-    std::fprintf(f, ", \"metronomeBpm\": %.2f, \"driftBpm\": ", bpm);
-    num(heard.beats.size() > 2 ? tempo.driftBpm : nan, "%.2f");
-    std::fputs(", \"spreadBpm\": ", f);
-    num(heard.beats.size() > 2 ? tempo.tempoSpreadBpm : nan, "%.2f");
-    std::fprintf(f, ", \"beats\": %zu, \"evidence\": \"beats tracked in the take (onset envelope, dynamic programming), seeded at the metronome's tempo\"}\n  },\n",
-                 heard.beats.size());
-
-    // Known limits of the take (R3.1): level, clipping, lost frames, and what they make unreliable.
-    double peak = 0, energy = 0;
-    size_t clipped = 0;
-    for (size_t i = 0; i < n; i++) {
-        const double v = std::abs(double(x[i]));
-        peak = std::max(peak, v), energy += v * v, clipped += v >= 0.999;
-    }
-    const double peakDb = 20 * std::log10(peak + 1e-12), rmsDb = 10 * std::log10(energy / double(std::max<size_t>(n, 1)) + 1e-12);
-    std::vector<std::string> warn;
-    if (clipped) warn.push_back("clipping: " + std::to_string(clipped) + " samples at full scale");
-    if (rmsDb < -50) warn.push_back("very quiet input: attacks may be missed");
-    if (droppedFrames) warn.push_back("frames dropped by the recorder: times after the gap may be off");
-    if (r.confidence < 0.5) warn.push_back("timing: few attacks on the grid, low confidence");
-    std::fputs("  \"limits\": {\"peakDbfs\": ", f);
-    num(peakDb);
-    std::fputs(", \"rmsDbfs\": ", f);
-    num(rmsDb);
-    std::fprintf(f, ", \"clippedSamples\": %zu, \"droppedFrames\": %llu, \"warnings\": [", clipped, (unsigned long long)droppedFrames);
-    for (size_t i = 0; i < warn.size(); i++) std::fprintf(f, "%s\"%s\"", i ? ", " : "", warn[i].c_str());
-    std::fputs("]}\n", f);
 }
 
 }  // namespace dz

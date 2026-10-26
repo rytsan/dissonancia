@@ -832,6 +832,39 @@ The constant: on the synthetic strums our attacks are ~1 ms after the first stri
 onsets (from pitch tracking) likely come late; a metronome offset is reported as ours. The heard
 tempo misses R1.7 (within 2 %) on 30 % of takes.
 
+## Coach intonation (phase 2, step 2, 2026-10-26)
+
+`core/src/intonation.hpp`: per take, R2.4, for a voice or a single line. `decode_notes` hands back
+its pass 1 pitch track. Per note:
+- **Cents**: the median over the steady part (80 ms of attack and 50 ms of release left out),
+  against equal temperament at the session's A4. The take's median is the tuning heard; "in tune" is
+  within 20 cents, of the reference and of the tuning heard.
+- **Scoop**: the glide into the note followed back up to 60 ms (the decoder starts a note once its
+  pitch is near), its first 60 ms against the steady part.
+- **Drift**: the steady part's last third against its first. A linear fit follows the edges (vocadito
+  |error| 18.7 cents against 12.7).
+- **Vibrato**: the detrended cents' autocorrelation over 3.5–9 Hz, above 0.4, at least 8 cents deep.
+- **Phrases**: notes with gaps under 0.4 s; the fitted change of their cents.
+
+`dz_wav file.wav intonation [A4]` prints it. Test (`test_intonation.cpp`): a synthetic line with a
+sharp note, a scoop from 150 cents under, a 5.5 Hz ±40 cents vibrato, a 48 cents sag and a flat note.
+
+`python3 tools/eval/intonation.py`, on vocadito's 40 tracks. The reference is the same metrics from
+the annotated F0 inside annotator 1's notes:
+
+| Metric | Error against the annotated F0 |
+|---|---|
+| Notes | 1979 read from the reference, 1472 matched by ours (same pitch, most of it overlapped) |
+| Cents per note | median 3.9, p90 23.6 |
+| Drift per note | median 12.7, p90 61.9 cents |
+| Scoops (> 30 cents) | P 0.74, R 0.64 (scoop |error| median 17.8 cents) |
+| Vibrato notes | 61 ours, 60 reference, 35 both; rate 0.15 Hz, depth 2.1 cents off |
+| Per track | tuning heard 4.2 cents (p90 10.6); % in tune 6.4 points (p90 18.2); mean |cents| 2.4 |
+
+On the annotated notes' own bounds, our pitch track alone is off 1.8 cents (pitch), 7.0 (scoop) and
+7.5 (drift), and finds 53 of the 70 vibratos with 5 extra. The rest of the error is where our notes
+start and end.
+
 ## Session JSON (phase 2, step 4, 2026-10-26)
 
 A REC take's JSON is now `dissonancia-session/1` ([`SESSION.md`](SESSION.md)): the take format plus

@@ -3,7 +3,6 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <vector>
 
 namespace dz {
@@ -38,11 +37,5 @@ struct TimingReport {
 // beats: the grid, seconds (a metronome's beats, or track_beats() on the take).
 TimingReport timing_report(const std::vector<Onset>& onsets, const std::vector<double>& beats, int beatsPerBar = 0);
 
-// The session JSON's "metrics" and "limits" members (dissonancia-session/1, docs/SESSION.md) for a
-// REC take: mono samples from its first downbeat, the metronome's tempo and meter. clickHeard: the
-// click played during the take, so it is the grid; otherwise the beats heard in the take are.
-// comp: seconds the recording lags what the player heard (the round trip).
-void write_take_metrics_json(FILE* f, const float* x, size_t n, uint32_t rate, double bpm, int beatsPerBar, bool clickHeard,
-                             double comp, uint64_t droppedFrames);
 
 }  // namespace dz

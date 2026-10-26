@@ -22,7 +22,11 @@ std::vector<AnalyzerEvent> decode_chords(const SessionConfig& s, const float* x,
 // clarity); pass 2 = Viterbi over MIDI notes + unvoiced with a cost per change and a robust
 // emission (a vibrato swing, a stray octave frame or a transition does not split a note); each note
 // is then spelled in the key by melodic direction, with its mean pitch, cents, vibrato, confidence.
+// The pitch of every hop (window centre, compensated; midi = 69 + 12 log2(f / A4), 0 unvoiced).
+struct PitchPoint { double t; float midi; };
+
+// track: when given, filled with pass 1's pitch track (intonation.hpp reads it).
 std::vector<AnalyzerEvent> decode_notes(const SessionConfig& s, const float* x, size_t n, uint32_t rate, double compensationSeconds,
-                                        const std::function<bool(double)>& progress = {});
+                                        const std::function<bool(double)>& progress = {}, std::vector<PitchPoint>* track = nullptr);
 
 }  // namespace dz

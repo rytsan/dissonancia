@@ -2,9 +2,10 @@
 
 Every REC take writes `<take>.json` next to `<take>.wav` (R3). It is complete without the audio: the
 coach (phase 3) reads only this file. Writer: `Engine::write_sidecar` (`core/src/engine.cpp`), with
-`write_events_json` (`core/src/sidecar.hpp`) and `write_take_metrics_json` (`core/src/timing.cpp`).
-Checked by `core/tests/test_core.cpp` (a REC take), `core/tests/test_timing.cpp` (the metrics on
-synthetic strums) and `tests/score` (the app loads it, and the older format).
+`write_events_json` (`core/src/sidecar.hpp`) and `write_take_metrics_json` (`core/src/session.cpp`).
+Checked by `core/tests/test_core.cpp` (a REC take), `core/tests/test_timing.cpp` (timing on
+synthetic strums), `core/tests/test_intonation.cpp` (intonation on a synthetic sung line) and
+`tests/score` (the app loads it, and the older format).
 
 Times are seconds from the take's first downbeat. A number is `null` where there is nothing to
 measure (no attacks in a bar, too few offbeats for a swing).
@@ -20,6 +21,7 @@ measure (no attacks in a bar, too few offbeats for a swing).
 | `eventLogComplete`, `eventTimeBase`, `events` | the timeline: `note`, `chord` and `cadence` events as LIVE confirmed them |
 | `metrics.timing` | R2.1, R2.3 (below) |
 | `metrics.tempo` | R2.2 (below) |
+| `metrics.intonation` | R2.4 (below); voice and single-line modes only |
 | `limits` | the take's known limits (below) |
 
 ### `metrics.timing`
@@ -42,10 +44,28 @@ measure (no attacks in a bar, too few offbeats for a swing).
 beat), `beats` tracked, `evidence`. The beat tracker is seeded at the metronome's tempo, so a player
 far off the click may be read at the click's tempo.
 
+### `metrics.intonation`
+
+Each note the whole-take decoder finds, read from the YIN track; a note needs a steady part (its
+attack and release left out) of 5 hops or more.
+- `referenceA4`, `confidence` (notes read / notes, scaled down under 8), `notes`.
+- `tuningCents`: the median of the notes' cents against equal temperament at `referenceA4`, the
+  tuning heard. `inTunePct`: notes within ±20 cents of the reference's grid;
+  `inTuneOwnTuningPct` and `meanAbsCents`: against the tuning heard (a singer a quarter tone flat
+  throughout is in tune with themselves).
+- `scoops`: notes whose glide in (60 ms from where it starts) is more than 30 cents off;
+  `vibratoNotes`.
+- `phrases`: runs of 4 notes or more with gaps under 0.4 s; `driftCents`, the fitted change of the
+  notes' cents across the phrase (going flat < 0).
+- `bars`: per bar of the metronome, by note start: `notes`, `inTuneOwnTuningPct`, `meanAbsCents`.
+- `notesRead`: `start`, `end`, `midi`, `cents`, `scoopCents` (< 0 from below), `driftCents` (the
+  steady part's last third against its first), `vibratoHz` and `vibratoCents` (0: none).
+- `evidence`.
+
 ### `limits`
 
 `peakDbfs`, `rmsDbfs`, `clippedSamples`, `droppedFrames`, and `warnings`: sentences for the coach
-(clipping, a very quiet input, dropped frames, timing with low confidence).
+(clipping, a very quiet input, dropped frames, timing or intonation with low confidence).
 
 ## Versions
 

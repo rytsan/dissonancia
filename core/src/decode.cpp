@@ -215,7 +215,7 @@ constexpr double kMinNote = 0.08;
 }  // namespace
 
 std::vector<AnalyzerEvent> decode_notes(const SessionConfig& s, const float* x, size_t n, uint32_t rate, double comp,
-                                        const std::function<bool(double)>& progress) {
+                                        const std::function<bool(double)>& progress, std::vector<PitchPoint>* track) {
     const LiveConfig c = live_config(s.mode, s.quality, rate);
     const uint32_t hop = uint32_t(std::lround(c.hopSeconds * rate));
     VoicePipeline vp(s, c, rate, hop, comp);
@@ -231,6 +231,8 @@ std::vector<AnalyzerEvent> decode_notes(const SessionConfig& s, const float* x, 
         if (progress && (pos / hop) % 256 == 0 && !progress(0.8 * double(pos) / double(n))) return {};
     }
     if (frames.empty()) return {};
+    if (track)
+        for (const P& f : frames) track->push_back({f.t, f.voiced ? f.midi : 0.f});
 
     // Viterbi: emission = -(d / sigma)^2 / 2, floored, times the frame's clarity; unvoiced frames
     // belong to the unvoiced state, voiced ones cost it a constant.

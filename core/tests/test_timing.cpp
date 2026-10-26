@@ -6,6 +6,7 @@
 #include <random>
 #include <vector>
 
+#include "session.hpp"
 #include "timing.hpp"
 
 using namespace dz;
@@ -100,7 +101,11 @@ TEST_CASE("timing: a take's session metrics, per bar, with the latency taken off
     auto x = strums(44100, at, std::vector<float>(at.size(), 1.f), 4);
     FILE* f = std::tmpfile();
     REQUIRE(f);
-    write_take_metrics_json(f, x.data(), x.size(), 44100, 100, 4, true, 0.005, 0);
+    SessionConfig session{};
+    session.mode = AnalysisMode::GuitarChords;
+    session.bpm = 100;
+    session.meter = {4, 4};
+    write_take_metrics_json(f, x.data(), x.size(), 44100, session, true, 0.005, 0);
     std::string s(size_t(std::ftell(f)), '\0');
     std::rewind(f);
     REQUIRE(std::fread(s.data(), 1, s.size(), f) == s.size());

@@ -6,8 +6,10 @@
 //   dz_wav file.wav timing [beats.txt]   coach timing (R2.1-R2.3) against the beats in the file (one
 // time per line: a metronome grid), else the beats heard. DEV: DZ_ONSETS_IN=file takes the attacks
 // from it (one time per line) instead of detecting them.
-//   dz_wav file.wav session bpm beatsPerBar [click]   the session JSON's metrics and limits for a
-// take starting on a downbeat (click: the metronome was heard, so it is the grid).
+//   dz_wav file.wav intonation [A4]   coach intonation (R2.4): one line per note read, then the take.
+//   dz_wav file.wav session bpm beatsPerBar [click|voice]   the session JSON's metrics and limits for a
+// take starting on a downbeat (click: the metronome was heard, so it is the grid; voice: a voice take,
+// with its intonation).
 // offline: the STUDIO whole-take decoder instead of the live tracker; with a bpm, the file is taken
 // to start on a downbeat of that metronome grid (a REC take).
 #include <cmath>
@@ -20,6 +22,8 @@
 
 #include "beats.hpp"
 #include "choir.hpp"
+#include "intonation.hpp"
+#include "session.hpp"
 #include "chords.hpp"
 #include "decode.hpp"
 #include "voice.hpp"
@@ -92,8 +96,30 @@ int main(int argc, char** argv) {
     }
     if (mode == "session" && argc > 4) {
         std::printf("{\n");
-        write_take_metrics_json(stdout, x.data(), x.size(), rate, std::atof(argv[3]), std::atoi(argv[4]), argc > 5, 0, 0);
+        SessionConfig s{};
+        s.mode = argc > 5 && std::strcmp(argv[5], "voice") == 0 ? AnalysisMode::VoiceMono : AnalysisMode::GuitarChords;
+        s.quality = AudioQuality::Balanced;
+        s.referenceA4 = 440;
+        s.bpm = float(std::atof(argv[3]));
+        s.meter = {uint8_t(std::atoi(argv[4])), 4};
+        write_take_metrics_json(stdout, x.data(), x.size(), rate, s, argc > 5 && std::strcmp(argv[5], "click") == 0, 0, 0);
         std::printf("}\n");
+        return 0;
+    }
+    if (mode == "intonation") {
+        SessionConfig s{};
+        s.mode = AnalysisMode::VoiceMono;
+        s.quality = AudioQuality::Balanced;
+        s.referenceA4 = argc > 3 ? float(std::atof(argv[3])) : 440.f;
+        std::vector<PitchPoint> track;
+        const IntonationReport r = intonation_report(decode_notes(s, x.data(), x.size(), rate, 0.0, {}, &track), track);
+        for (const NoteIntonation& n : r.notes)
+            std::printf("note %.3f %.3f %d cents %.1f scoop %.1f drift %.1f vibrato %.2f %.1f\n", n.start, n.end, n.midi, n.cents, n.scoopCents,
+                        n.driftCents, n.vibratoHz, n.vibratoCents);
+        if (std::getenv("DZ_TRACKDUMP")) for (const PitchPoint& p : track) std::printf("track %.4f %.3f\n", p.t, p.midi);
+        for (const PhraseIntonation& p : r.phrases) std::printf("phrase %.3f %.3f %d drift %.1f\n", p.start, p.end, p.notes, p.driftCents);
+        std::printf("intonation notes %zu tuning %.1f inTune %.1f inTuneOwn %.1f meanAbs %.1f scoops %d vibrato %d confidence %.2f\n", r.notes.size(),
+                    r.tuningCents, r.inTunePct, r.inTuneOwnPct, r.meanAbsCents, r.scoops, r.vibratoNotes, r.confidence);
         return 0;
     }
     if (mode == "choir") {

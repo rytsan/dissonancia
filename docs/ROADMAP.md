@@ -71,7 +71,9 @@ band). Open for later: the change ratio (R1.3), the exact symbol (R1.4), melody 
 1. Timing and tempo (R2.1–R2.3) from onsets and beats, live and per take. **Per take done
    2026-10-26** (`core/src/timing.cpp`, `tools/eval/timing.py`): see IMPLEMENTATION.md. Per bar in the
    session JSON (step 4); live waits for DS-X (step 5).
-2. Intonation and tuning (R2.4, R2.5) from the YIN track.
+2. Intonation and tuning (R2.4, R2.5) from the YIN track. **R2.4 per take done 2026-10-26**
+   (`core/src/intonation.cpp`, `tools/eval/intonation.py`, in the session JSON). R2.5 (string by
+   string) is not built.
 3. Harmony execution, dynamics and form (R2.6–R2.8).
 4. `dissonancia-session/1`, written after every REC, with a schema test. It grows from today's
    sidecar. **Done 2026-10-26** ([`SESSION.md`](SESSION.md)): the events, the timing and

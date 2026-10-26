@@ -1,6 +1,6 @@
 #include "engine.hpp"
 #include "sidecar.hpp"
-#include "timing.hpp"
+#include "session.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -620,7 +620,7 @@ void Engine::write_sidecar(uint64_t frames, uint64_t dropped) {
         for (ma_uint64 got = 0; ma_decoder_read_pcm_frames(&dec, buf, 8192, &got) == MA_SUCCESS && got > 0;) x.insert(x.end(), buf, buf + got);
         ma_decoder_uninit(&dec);
     }
-    write_take_metrics_json(f, x.data(), x.size(), rate_, metroBpm_.load(), int(beatsPerBar_.load()), clickDuringTake_, compensationMs() / 1000.0, dropped);
+    write_take_metrics_json(f, x.data(), x.size(), rate_, session_, clickDuringTake_, compensationMs() / 1000.0, dropped);
     std::fprintf(f, "}\n");
     std::fclose(f);
 }
