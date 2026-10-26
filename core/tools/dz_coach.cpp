@@ -99,7 +99,7 @@ struct Coach {
         for (int t = 0; t < tries; t++) {
             if (t) llama_memory_seq_rm(llama_get_memory(ctx), 0, n, -1);   // back to the end of the prompt
             llama_sampler* s = llama_sampler_chain_init(llama_sampler_chain_default_params());
-            llama_sampler_chain_add(s, llama_sampler_init_grammar(vocab, kGrammar, "root"));
+            llama_sampler_chain_add(s, llama_sampler_init_grammar(vocab, grammar(f).c_str(), "root"));
             llama_sampler_chain_add(s, llama_sampler_init_top_p(0.9f, 1));
             llama_sampler_chain_add(s, llama_sampler_init_temp(0.6f));
             llama_sampler_chain_add(s, llama_sampler_init_dist(seed + uint32_t(t)));
@@ -159,37 +159,39 @@ int main(int argc, char** argv) {
             if (mode == "run") {
                 const Facts f = facts(slurp(argv[3]));
                 const Generated g = coach.generate(prompt(shots, f), f, seed, tries);
-                for (const std::string& d : g.best.droppedItems) std::fprintf(stderr, "dropped (a number not in the facts): %s\n", d.c_str());
+                for (const std::string& d : g.best.droppedItems) std::fprintf(stderr, "dropped %s\n", d.c_str());
                 std::fputs(g.best.report.c_str(), stdout);
                 std::fprintf(stderr, "checked: %d items, %d dropped, %d tries, %s\n", g.best.items, g.best.dropped, g.tries, g.ok ? "ok" : "failed");
                 return g.tries == 0 ? 1 : g.ok ? 0 : 3;
             }
             // R4.6: the model on the fixed sessions in a directory (one try each, as written).
-            // passed: the check kept every section and dropped at most a third; invented: items
-            // dropped for a number the facts do not hold; cited: kept items that quote a value;
-            // hedged: on a take with low confidence, the report says so.
+            // passed: the check kept every section and dropped at most a third (the report is used as
+            // it came, no second try); invented: items with a number the facts do not hold; dropped:
+            // those and the rest the check removed (a fact to work on told as going well, a repeat, a
+            // comparison with an earlier take); cited: kept items that quote a value; low confidence
+            // said: on a take with low confidence, the report has its Confiança section.
             std::vector<fs::path> files;
             for (const auto& e : fs::directory_iterator(argv[3]))
                 if (e.path().extension() == ".json") files.push_back(e.path());
             std::sort(files.begin(), files.end());
-            int passed = 0, items = 0, invented = 0, cited = 0, kept = 0, low = 0, hedged = 0;
+            int passed = 0, items = 0, invented = 0, dropped = 0, cited = 0, kept = 0, low = 0, hedged = 0;
             static const std::regex digit(R"(\d)");
             for (const fs::path& p : files) {
                 const Facts f = facts(slurp(p));
                 const Generated g = coach.generate(prompt(shots, f), f, seed, tries);
                 const Checked& c = g.best;
-                passed += g.ok, items += c.items, invented += c.dropped;
+                passed += g.ok, items += c.items, invented += c.invented, dropped += c.dropped;
                 std::istringstream lines(c.report);
                 for (std::string l; std::getline(lines, l);)
                     if (l.rfind("- ", 0) == 0) kept++, cited += std::regex_search(l, digit);
-                const bool hedge = c.report.find("confiança") != std::string::npos;
+                const bool hedge = c.hedged;
                 if (f.lowConfidence) low++, hedged += hedge;
-                std::printf("== %s: %s, %d items, %d invented%s\n%s", p.filename().string().c_str(), g.ok ? "passed" : "FAILED", c.items, c.dropped,
+                std::printf("== %s: %s, %d items, %d dropped%s\n%s", p.filename().string().c_str(), g.ok ? "passed" : "FAILED", c.items, c.dropped,
                             f.lowConfidence ? (hedge ? ", low confidence said" : ", low confidence NOT said") : "", g.raw.c_str());
-                for (const std::string& d : c.droppedItems) std::printf("   invented: %s\n", d.c_str());
+                for (const std::string& d : c.droppedItems) std::printf("   dropped %s\n", d.c_str());
             }
-            std::printf("eval %zu takes: passed %d, items %d, invented %d (%.0f %%), cited %d of %d kept, low confidence said %d of %d\n", files.size(), passed,
-                        items, invented, items ? 100.0 * invented / items : 0.0, cited, kept, hedged, low);
+            std::printf("eval %zu takes: passed %d, items %d, invented %d (%.0f %%), dropped %d, cited %d of %d kept, low confidence said %d of %d\n",
+                        files.size(), passed, items, invented, items ? 100.0 * invented / items : 0.0, dropped, cited, kept, hedged, low);
             return 0;
         }
     } catch (const std::exception& e) {

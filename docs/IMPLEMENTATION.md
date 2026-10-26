@@ -968,10 +968,30 @@ The contract `dissonancia-coach/1` (`core/src/coach.{hpp,cpp}`) holds the rest:
   the timing gives only its spread.
 - **Prompt**: a document, not a chat: a header, the worked examples in `core/coach/examples` (a
   session JSON each, with the report we wrote for it), this take's facts, then `Relatório:`.
-- **Grammar** (GBNF): "O que foi bem" (1–3 items), "Para trabalhar" (1–2), "Exercícios" (1–2).
-- **Check**: every number in an item must be one of the facts' (an exercise may also name a slower
-  tempo or a count); an item that fails is dropped; a report that loses a section or more than a
-  third of its items is generated again (3 tries).
+- **Judgement is ours**: each fact line is tagged `[bom]`, `[trabalhar]`, `[neutro]` or `[limite]`
+  by thresholds in `coach.cpp`; the model words and orders, it does not weigh. A metric with low
+  confidence is never `[bom]`. A tempo heard more than 15 % off the click is left out (a beat
+  tracker's octave or 3:2 error is likelier).
+- **Grammar** (GBNF): "O que foi bem" (1–3 items), "Para trabalhar" (1–2), "Exercícios" (1–2), and
+  "Confiança" (1) when a metric has low confidence. An item is one sentence of Latin text, at most
+  ~240 characters, ending in a full stop: a model cannot run on (Qwen wandered into Chinese).
+- **Check**: an item is dropped when it holds a number that is not a fact's (a digit inside a name
+  such as A4 or Cadd9 does not count; an exercise may name a slower tempo or a count), compares with
+  an earlier take, tells a `[trabalhar]` fact as going well, or repeats another's numbers. A report
+  that loses a section, more than a third of its items, or its Confiança section is generated
+  again (3 tries).
+
+First scoring (`eval`, one try each, `core/coach/tests`: 5 guitar comping takes and 2 voice takes,
+two with low confidence) on Qwen3.6-35B-A3B IQ4_XS, an instruct model run as a plain continuation (no
+base model on this machine yet), 22 layers on the 2080 Ti, ~80 s a take:
+
+| Contract | Passed | Invented numbers | Dropped | Low confidence said |
+|---|---|---|---|---|
+| facts and number check only | 7 / 7 | 1 of 49 | 1 | 1 of 2 |
+| + tags, Confiança section, bounded items | 7 / 7 | 0 of 51 | 4 (told as going well, a repeat) | 2 of 2 |
+
+What the number check could not catch, and the tags fixed: "the intonation improved" (no earlier
+take), "bar 3 is better: 26 cents against a mean of 16", a fact to work on put under what went well.
 
 `dz_coach facts|prompt session.json`, `dz_coach run model.gguf session.json`, and `dz_coach eval
 model.gguf core/coach/tests` (R4.6: each fixed session once; reports passed, numbers invented, items
