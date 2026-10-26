@@ -27,6 +27,9 @@ struct TimingReport {
     double spreadMs = 0;                 // standard deviation of the offsets
     double offsetMs[4]{}, accentDb[4]{}; // per sixteenth of the beat (on, e, and, a): mean offset, level against the mean
     int count[4]{};
+    double levelSpreadDb[4]{};           // per sixteenth: standard deviation of the attacks' levels, within each beat of the bar
+    std::vector<double> beatAccentDb;    // per beat of the bar (when given): level against the mean; NaN: no attack
+    double levelSpreadAllDb = 0;         // pooled over all (the bar's accent pattern left out)
     double swing = 0;                    // long / short eighth (1 straight, 2 triplet); 0: too few offbeats
     double bpm = 0, driftBpm = 0;        // tempo of the beats, and its change over the take (linear fit)
     double tempoSpreadBpm = 0;           // standard deviation of the beat-to-beat tempo

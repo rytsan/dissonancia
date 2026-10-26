@@ -5,6 +5,7 @@
 #include <string>
 
 #include "beats.hpp"
+#include "dynamics.hpp"
 #include "intonation.hpp"
 #include "live_config.hpp"
 #include "timing.hpp"
@@ -97,6 +98,11 @@ void write_take_metrics_json(FILE* f, const float* x, size_t n, uint32_t rate, c
                      r.count[q], r.offsetMs[q], r.accentDb[q]);
         first = 0;
     }
+    std::fputs("],\n      \"accentPerBeatDb\": [", f);
+    for (size_t b = 0; b < r.beatAccentDb.size(); b++) {
+        if (b) std::fputs(", ", f);
+        num(r.beatAccentDb[b]);
+    }
     std::fputs("],\n      \"bars\": [", f);
     for (size_t b = 0; b < r.bars.size(); b++) {
         std::fprintf(f, "%s{\"bar\": %zu, \"matched\": %d, \"meanOffsetMs\": ", b ? ", " : "", b + 1, r.bars[b].matched);
@@ -117,6 +123,30 @@ void write_take_metrics_json(FILE* f, const float* x, size_t n, uint32_t rate, c
                  heard.beats.size());
     double intonationConfidence = 1;
     if (!is_chord_mode(s.mode)) intonationConfidence = write_intonation_json(f, x, n, rate, s, comp);
+    // R2.7: loudness over the take, per bar and phrase; the attacks' consistency per sixteenth.
+    const DynamicsReport d = dynamics_report(x, n, rate, bpm > 0 ? 60 / bpm * beatsPerBar : 0);
+    std::fputs(",\n    \"dynamics\": {\"integratedLufs\": ", f);
+    num(d.integratedLufs > -70 ? d.integratedLufs : nan);
+    std::fprintf(f, ", \"rangeLu\": %.1f, \"trendLu\": %.1f, \"attackSpreadDb\": ", d.rangeLu, d.trendLu);
+    num(r.matched >= 8 ? r.levelSpreadAllDb : nan);
+    std::fputs(",\n      \"perSixteenth\": [", f);
+    for (int q = 0, first = 1; q < 4; q++) {
+        if (r.count[q] < 2) continue;
+        std::fprintf(f, "%s{\"position\": \"%s\", \"count\": %d, \"spreadDb\": %.1f}", first ? "" : ", ", names[q], r.count[q], r.levelSpreadDb[q]);
+        first = 0;
+    }
+    std::fputs("],\n      \"bars\": [", f);
+    for (size_t b = 0; b < d.barLufs.size(); b++) {
+        std::fprintf(f, "%s{\"bar\": %zu, \"lufs\": ", b ? ", " : "", b + 1);
+        num(d.barLufs[b] > -70 ? d.barLufs[b] : nan);
+        std::fputs("}", f);
+    }
+    std::fputs("],\n      \"phrases\": [", f);
+    for (size_t i = 0; i < d.phrases.size(); i++)
+        std::fprintf(f, "%s{\"start\": %.1f, \"end\": %.1f, \"lufs\": %.1f, \"changeLu\": %.1f, \"peakAt\": %.2f}", i ? ", " : "", d.phrases[i].start,
+                     d.phrases[i].end, d.phrases[i].lufs, d.phrases[i].changeLu, d.phrases[i].peakAt);
+    std::fputs("],\n      \"evidence\": \"K-weighted loudness (ITU-R BS.1770, EBU R128) of the take, its bars and its phrases (sound with gaps under"
+               " 0.4 s); attackSpreadDb: the attacks' level spread within each sixteenth, the accent pattern left out\"}", f);
     std::fputs("\n  },\n", f);
 
     // Known limits of the take (R3.1): level, clipping, lost frames, and what they make unreliable.

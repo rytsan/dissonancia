@@ -144,6 +144,11 @@ TimingReport timing_report(const std::vector<Onset>& onsets, const std::vector<d
     }
     double sum = 0, sum2 = 0, lvl = 0;
     std::vector<double> barSum2;
+    // Level spread per group: the beat in the bar (when given) and the sixteenth, so the accents of
+    // the bar's pattern are not counted as unevenness.
+    const size_t groups = 4 * size_t(std::max(1, beatsPerBar));
+    std::vector<double> gSum(groups), gSum2(groups);
+    std::vector<int> gCount(groups);
     for (const At& a : at) {
         const double grid[4] = {0, 0.25, eighth, 0.75};
         int q = 0;
@@ -153,6 +158,8 @@ TimingReport timing_report(const std::vector<Onset>& onsets, const std::vector<d
         const double ms = (a.frac - grid[q]) * a.dur * 1000;
         r.matched++, sum += ms, sum2 += ms * ms, lvl += a.level;
         r.offsetMs[q] += ms, r.accentDb[q] += a.level, r.count[q]++;
+        const size_t g = (beatsPerBar > 0 ? a.beat % size_t(beatsPerBar) : 0) * 4 + size_t(q);
+        gSum[g] += a.level, gSum2[g] += double(a.level) * a.level, gCount[g]++;
         if (beatsPerBar > 0) {
             const size_t b = a.beat / size_t(beatsPerBar);
             if (b >= r.bars.size()) r.bars.resize(b + 1), barSum2.resize(b + 1);
@@ -169,8 +176,23 @@ TimingReport timing_report(const std::vector<Onset>& onsets, const std::vector<d
         r.meanOffsetMs = sum / r.matched;
         r.spreadMs = std::sqrt(std::max(0.0, sum2 / r.matched - r.meanOffsetMs * r.meanOffsetMs));
         lvl /= r.matched;
-        for (int q = 0; q < 4; q++)
-            if (r.count[q]) r.offsetMs[q] /= r.count[q], r.accentDb[q] = r.accentDb[q] / r.count[q] - lvl;
+        double pooled[4]{};
+        for (size_t g = 0; g < groups; g++)
+            if (gCount[g]) pooled[g % 4] += std::max(0.0, gSum2[g] - gSum[g] * gSum[g] / gCount[g]);   // count x variance
+        for (int q = 0; q < 4; q++) {
+            if (!r.count[q]) continue;
+            r.levelSpreadDb[q] = std::sqrt(pooled[q] / r.count[q]);
+            r.levelSpreadAllDb += pooled[q];
+            r.offsetMs[q] /= r.count[q], r.accentDb[q] = r.accentDb[q] / r.count[q] - lvl;
+        }
+        r.levelSpreadAllDb = std::sqrt(r.levelSpreadAllDb / r.matched);
+        if (beatsPerBar > 0)
+            for (int b = 0; b < beatsPerBar; b++) {
+                double sum = 0;
+                int cnt = 0;
+                for (int q = 0; q < 4; q++) sum += gSum[size_t(b * 4 + q)], cnt += gCount[size_t(b * 4 + q)];
+                r.beatAccentDb.push_back(cnt ? sum / cnt - lvl : std::nan(""));
+            }
     }
     if (r.onsets) r.confidence = double(r.matched) / r.onsets * std::min(1.0, r.onsets / 16.0);
     return r;

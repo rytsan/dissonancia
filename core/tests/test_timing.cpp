@@ -123,7 +123,7 @@ TEST_CASE("timing: a take's session metrics, per bar, with the latency taken off
     const size_t bars = s.find("\"bars\"");
     CHECK(std::abs(value("meanOffsetMs", s.find("\"bar\": 1", bars)) - 20) < 3);
     CHECK(std::abs(value("meanOffsetMs", s.find("\"bar\": 3", bars)) - 0) < 3);
-    CHECK(s.find("\"bar\": 5") == std::string::npos);
+    CHECK(s.find("\"bar\": 5") > s.find("\"dynamics\""));   // timing: four bars (the dynamics hear the last strum ring on)
     CHECK(std::abs(value("bpm", s.find("\"tempo\"")) - 100) < 2);
     CHECK(s.find("\"warnings\": []") != std::string::npos);
 }
