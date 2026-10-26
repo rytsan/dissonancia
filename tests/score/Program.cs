@@ -219,6 +219,23 @@ File.WriteAllText(path, File.ReadAllText(path).Replace("dissonancia-take/1", "di
 """);
 var session = Take.Load(path);
 Check(session.Notes.Count == 1 && session.BeatsPerBar == 3 && session.Cadences.Count == 1, "session JSON load");
+// DS-X TAKE: the newest take's report, its tiles and its values per bar.
+{
+    var dir = Path.Combine(Path.GetTempPath(), "dz-takes-check");
+    Directory.CreateDirectory(dir);
+    foreach (var old in Directory.GetFiles(dir)) File.Delete(old);
+    Environment.SetEnvironmentVariable("DISSONANCIA_TAKES", dir);
+    var takePath = Path.Combine(dir, "take-20261026-120000.json");
+    File.WriteAllText(takePath, File.ReadAllText(path));
+    var rep = TakeReport.Latest(null)!;
+    Check(rep.Tiles.Select(t => t.Name).SequenceEqual(["TIMING", "SWING", "TEMPO", "LIMITES"]) && rep.Tiles[0].Value == "+12 ms" && rep.Tiles[0].Ok,
+          $"take report tiles: {string.Join(" ", rep.Tiles.Select(t => $"{t.Name}={t.Value}"))}");
+    Check(rep.Bars["timing"].Length == 1 && rep.Bars["timing"][0] is null, "take report: a bar without attacks is empty");
+    File.WriteAllText(takePath, "{\"format\": \"dissonancia-session/1\", \"session\": {}, \"events\": []}");
+    File.SetLastWriteTimeUtc(takePath, DateTime.UtcNow.AddSeconds(5));
+    Check(TakeReport.Latest(rep) is { Pending: true }, "take report: metrics not yet written");
+    Environment.SetEnvironmentVariable("DISSONANCIA_TAKES", null);
+}
 
 // Likely guitar shapes: the common open and barre chords.
 // STUDIO harmony map: chords folded into triads (colours, inversions and passing chords out), degrees in the key.

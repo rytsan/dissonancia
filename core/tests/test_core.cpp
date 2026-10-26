@@ -264,3 +264,33 @@ TEST_CASE("audio tap: the analysed input reaches the GUI reader in order") {
     CHECK(ordered);
     e.stop();
 }
+
+TEST_CASE("live timing: attacks 20 ms behind the metronome, in a voice and a chord mode") {
+    for (AnalysisMode mode : {AnalysisMode::VoiceMono, AnalysisMode::GuitarChords}) {
+        Engine e;
+        REQUIRE(e.start(session(mode), headless(), nullptr, nullptr) == ANA_OK);
+        // 120 BPM from frame 0: a plucked note on every beat, 20 ms late, 0.35 s long (C3 E3 G3 C4).
+        const double midi[4] = {48, 52, 55, 60};
+        std::vector<float> in(480), out(480);
+        for (uint64_t pos = 0; pos < 48000 * 12; pos += 480) {
+            for (size_t i = 0; i < in.size(); i++) {
+                const double t = double(pos + i) / 48000, u = std::fmod(t, 0.5) - 0.02;
+                const int k = int(t / 0.5) % 4;
+                const double f0 = 440 * std::pow(2.0, (midi[k] - 69) / 12);
+                double v = 0;
+                if (u >= 0 && u < 0.35)
+                    for (int h = 1; h <= 4; h++) v += std::sin(2 * M_PI * f0 * h * u) * std::exp(-u * h / 0.3) / h * std::min(1.0, (0.35 - u) / 0.01);
+                in[i] = float(0.2 * v);
+            }
+            e.on_audio(in.data(), out.data(), 480);
+            std::this_thread::sleep_for(std::chrono::microseconds(200));
+        }
+        LiveSnapshot s{};
+        REQUIRE(wait_until([&] { e.read_snapshot(&s); return s.analyzedFrames >= 48000 * 12 - 480; }));
+        INFO("mode " << int(mode) << " count " << s.timingCount << " mean " << s.timingMeanMs << " spread " << s.timingSpreadMs << " last " << s.timingLastMs);
+        CHECK(s.timingCount >= 18);
+        CHECK(std::abs(s.timingMeanMs - 20) < 10);
+        CHECK(s.timingSpreadMs < 8);
+        e.stop();
+    }
+}

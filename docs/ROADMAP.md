@@ -80,7 +80,10 @@ band). Open for later: the change ratio (R1.3), the exact symbol (R1.4), melody 
    sidecar. **Done 2026-10-26** ([`SESSION.md`](SESSION.md)): the events, the timing and
    tempo per take and per bar, and the take's limits. The other metrics join it as they are built.
 5. DS-X shows the metrics live. After REC, a session report shows them and marks them on the
-   timeline.
+   timeline. **First pass done 2026-10-26**: live timing (the snapshot's `timing*`) as a DS-X
+   tile; DS-X's TAKE key shows the newest take's report (tiles, the chosen metric per bar, the
+   form's sections). Live intonation, dynamics and harmony execution, and marks on STUDIO's
+   timeline, are not built.
 
 Exit: each metric validated on a corpus where the truth is known. Timing uses synthetic offsets
 and GuitarSet beats; intonation uses vocadito and Dagstuhl.

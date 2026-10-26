@@ -62,6 +62,8 @@ public sealed class LiveFrame
     public string ChordRoman = "";         // Roman numeral in the session key, "" = no key
     public string Cadence = "", CadenceEvidence = "";   // last cadence candidate (live: harmonic evidence only)
     public float ChordLatencyMs, ChordConfirmElapsedMs, HarmonyLatencyMs;
+    public float TimingLastMs, TimingMeanMs, TimingSpreadMs;   // live timing against the metronome (ms, > 0 late)
+    public int TimingCount;                                    // attacks on the grid so far, 0 = none
     public Pitch Bass;
     public bool BassSettled, BassValid;
     public float BassSettleRemainingMs;

@@ -335,7 +335,7 @@ void Engine::process_hop(const float* x, uint32_t n) {
         voice_->process(x, n, anFrames_, vout_);
         for (uint32_t i = 0; i < vout_.eventCount; i++) {
             publish_event(vout_.events[i]);
-            if (vout_.events[i].type == AnalyzerEventType::NoteStart) onsetStrength += 1;
+            if (vout_.events[i].type == AnalyzerEventType::NoteStart) onsetStrength += 1, live_timing(vout_.events[i].data.note.startTimeSeconds);
         }
         if (hopDb > -50) onsetStrength += std::max(0.f, hopDb - lastHopDb_) / 10.f;
     }
@@ -348,6 +348,7 @@ void Engine::process_hop(const float* x, uint32_t n) {
             e.data.onset.strength = cout_.flux;
             e.data.onset.type = OnsetType::ChordAttack;
             publish_event(e);
+            live_timing(e.data.onset.timestampSeconds);
         }
         // Chords from perceived notes (NoteFrontEnd + ChordHmm): measured against the chroma tracker
         // on fingerpicking, band mixes and GuitarSet (tools/loopback/guitarset.py: 34 % -> 69 % majmin).
@@ -384,6 +385,15 @@ void Engine::process_hop(const float* x, uint32_t n) {
     uint64_t rs = recStart_.load(std::memory_order_acquire), re = recStop_.load(std::memory_order_acquire);
     s.countingIn = rs != kNever && anFrames_ < rs;
     s.recording = rs != kNever && anFrames_ >= rs && anFrames_ < re;
+    s.timingCount = uint16_t(std::min<uint32_t>(liveCount_, 65535));
+    if (liveCount_) {
+        const int k = int(std::min<uint32_t>(liveCount_, 16));
+        double sum = 0, sum2 = 0;
+        for (int i = 0; i < k; i++) sum += liveOffsets_[i], sum2 += double(liveOffsets_[i]) * liveOffsets_[i];
+        s.timingLastMs = liveLast_;
+        s.timingMeanMs = float(sum / k);
+        s.timingSpreadMs = float(std::sqrt(std::max(0.0, sum2 / k - (sum / k) * (sum / k))));
+    }
     s.recordedSeconds = rs == kNever ? 0 : anFrames_ >= rs ? double(std::min(anFrames_, re) - rs) / rate_ : -double(rs - anFrames_) / rate_;
 
     s.vuLevel = vu_;
@@ -577,6 +587,19 @@ void Engine::recorder_loop() {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));   // not real-time: polling is fine here
     }
     drain();
+}
+
+void Engine::live_timing(double seconds) {
+    if (!metroOn_.load(std::memory_order_relaxed)) return;
+    const uint32_t gen = metroGen_.load(std::memory_order_acquire);
+    if (gen != liveGen_) liveGen_ = gen, liveCount_ = 0;   // a new tempo or grid: start over
+    const double beats = (seconds * rate_ - double(metroOrigin_.load(std::memory_order_relaxed))) / beat_frames();
+    if (beats < -0.1) return;
+    const double off = beats * 4 - std::round(beats * 4);   // in sixteenths
+    if (std::fabs(off) > 0.4) return;                       // between them (0.1 beat)
+    liveLast_ = float(off / 4 * beat_frames() / rate_ * 1000);
+    liveOffsets_[liveCount_ % 16] = liveLast_;
+    liveCount_++;
 }
 
 void Engine::write_sidecar(uint64_t frames, uint64_t dropped) {

@@ -309,7 +309,11 @@ struct LiveSnapshot {
     KeyEstimate songKey;               // key heard so far (chord modes)
     char harmonySymbol[16];            // the harmony underneath (major/minor triads, slow), "" = none
     float harmonyLatencyMs;            // a change of harmony -> shown (chordLatencyMs: the same for the chord played)
-    uint8_t _pad5[4];
+    // Live timing (coach R2.1) while the metronome runs: each attack against its nearest sixteenth,
+    // ms (> 0 late); the last one, and the mean and spread of the last 16. count 0: none yet.
+    float timingLastMs, timingMeanMs, timingSpreadMs;
+    uint16_t timingCount;
+    uint8_t _pad5[6];
     float waveMin[ANA_WAVE_COLUMNS];
     float waveMax[ANA_WAVE_COLUMNS];
     float scope[ANA_SCOPE_SAMPLES];    // last samples, oldest first

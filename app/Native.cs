@@ -158,7 +158,9 @@ unsafe struct LiveSnapshotNative
     public KeyEstimateNative SongKey;
     public fixed byte HarmonySymbol[16];
     public float HarmonyLatencyMs;
-    fixed byte _pad5[4];
+    public float TimingLastMs, TimingMeanMs, TimingSpreadMs;
+    public ushort TimingCount;
+    fixed byte _pad5[6];
     public fixed float WaveMin[WaveColumns];
     public fixed float WaveMax[WaveColumns];
     public fixed float Scope[ScopeSamples];
@@ -403,6 +405,8 @@ public sealed class NativeLiveSource : ILiveSource
         f.ChordConfidence = ch.Best.Confidence;
         f.ChordLatencyMs = _snap.ChordLatencyMs;
         f.HarmonyLatencyMs = _snap.HarmonyLatencyMs;
+        f.TimingCount = _snap.TimingCount;
+        (f.TimingLastMs, f.TimingMeanMs, f.TimingSpreadMs) = (_snap.TimingLastMs, _snap.TimingMeanMs, _snap.TimingSpreadMs);
         f.ChordConfirmElapsedMs = _snap.ChordConfirmElapsedMs;
         fixed (byte* why = ch.Explanation) f.ChordReason = _reason.Get(why, 64, s => s.Replace(" = ", " ≡ ").Replace(" - ", " — "));
         bool altChanged = false;

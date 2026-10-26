@@ -88,17 +88,24 @@ public abstract class KeyedModule : RackModule
 }
 
 /// DS-X MÉTRICAS: what the LIVE pipeline measures, as lit keys; the chosen one's last 30 s plotted.
+/// TAKE: the coach's report of the newest REC take instead, its chosen metric drawn bar by bar over
+/// the take with the form's sections.
 public sealed class MetricsModule : KeyedModule
 {
     public MetricsModule() { Title = "DS-X  MÉTRICAS DO LIVE"; }
 
-    int _sel;
-    readonly float[][] _hist = Enumerable.Range(0, 8).Select(_ => new float[300]).ToArray();
+    int _sel, _takeSel;
+    bool _take;
+    TakeReport? _report;
+    long _lastLoad;
+    readonly float[][] _hist = Enumerable.Range(0, 9).Select(_ => new float[300]).ToArray();
     int _head;
     long _lastSample;
 
     protected override void Draw(DrawingContext ctx, Rect r)
     {
+        Key(ctx, new Rect(r.Right - 64, r.Y - 18, 60, 16), _take ? "LIVE" : "TAKE", () => _take = !_take, _take, Ui.Amber);
+        if (_take) { DrawTake(ctx, r); return; }
         var f = Frame!;
         bool chords = Session.IsChordMode;
         float lat = Session.Live == LiveMode.FullSong ? f.HarmonyLatencyMs : chords ? f.ChordLatencyMs : f.NoteLatencyMs;
@@ -113,6 +120,8 @@ public sealed class MetricsModule : KeyedModule
             ("TEMPO", f.DetectedBpm > 0 ? $"{f.DetectedBpm:0} bpm" : "—", f.Bpm > 0 ? $"metrônomo {f.Bpm:0}" : "metrônomo off", tempoErr is >= 0 and < 3 || tempoErr < 0, f.DetectedBpm),
             ("CONFIANÇA", chords ? $"{f.ChordConfidence * 100:0} %" : f.NoteValid ? "nota" : "—", chords ? (f.ChordConfirmed ? "confirmado" : "provisório") : $"{f.Cents:+0;-0} ¢", !chords || f.ChordConfidence > 0.5f, chords ? f.ChordConfidence * 100 : f.Cents),
             ("SAÍDA", $"{f.CaptureMs:0} ms", $"{f.SampleRate / 1000:0.#} kHz · PG {P.Voices} voz", P.PeakDb < -1, P.PeakDb),
+            ("TIMING", f.TimingCount > 0 && f.Bpm > 0 ? $"{f.TimingMeanMs:+0;-0;0} ms" : "—", f.Bpm <= 0 ? "metrônomo off" : f.TimingCount > 0 ? $"desvio {f.TimingSpreadMs:0} · última {f.TimingLastMs:+0;-0;0}" : "toque no tempo",
+             f.TimingCount == 0 || Math.Abs(f.TimingMeanMs) < 15 && f.TimingSpreadMs < 20, f.TimingLastMs),
         ];
         long now = Environment.TickCount64;
         if (now - _lastSample >= 100)
@@ -155,6 +164,68 @@ public sealed class MetricsModule : KeyedModule
         }
         ctx.DrawGeometry(null, Ui.ScopeTrace, geo);
         Ui.Text(ctx, $"{tiles[_sel].Name} · últimos 30 s · {lo:0.#} … {hi:0.#}", g.X + 6, g.Y + 3, 9, Ui.LcdDim, Ui.Mono);
+    }
+
+    // The newest take's report: its tiles, and the chosen one bar by bar over the take.
+    void DrawTake(DrawingContext ctx, Rect r)
+    {
+        long now = Environment.TickCount64;
+        if (now - _lastLoad > 1000) { _lastLoad = now; _report = TakeReport.Latest(_report); }
+        var rep = _report;
+        if (rep is null || rep.Pending || rep.Tiles.Count == 0)
+        {
+            Ui.Text(ctx, rep is null ? "nenhum take ainda: grave com REC" : "take gravado · calculando as métricas…", r.X + 4, r.Y + 6, 11, Ui.Label, Ui.Sans);
+            return;
+        }
+        var tiles = rep.Tiles;
+        _takeSel = Math.Min(_takeSel, tiles.Count - 1);
+        bool plot = r.Height > 90;
+        double tw = Math.Min(150, (plot ? r.Width * 0.62 : r.Width) / tiles.Count - 6), th = Math.Min(52, r.Height - 4);
+        for (int i = 0; i < tiles.Count; i++)
+        {
+            var t = tiles[i];
+            var b = new Rect(r.X + i * (tw + 6), r.Y + 2, tw, th);
+            int k = i;
+            ctx.DrawRectangle(new ImmutableSolidColorBrush(Color.FromUInt32(0xFF0B0C0D)), null, b.Translate(new Vector(0, 2)), 4, 4);
+            ctx.DrawRectangle(KeyFace, i == _takeSel ? new ImmutablePen((IImmutableBrush)Ui.Amber, 1.5) : KeyEdge, b, 4, 4);
+            Ui.Led(ctx, new Point(b.X + 9, b.Y + 9), 3, true, t.Ok ? Ui.Green : Ui.Red, Ui.GreenOff);
+            Ui.Text(ctx, t.Name, b.X + 17, b.Y + 3, 8, Ui.Label, Ui.SansBold);
+            Ui.Text(ctx, t.Value, b.X + 8, b.Y + 15, 15, t.Ok ? Ui.LcdText : Ui.Red, Ui.Mono);
+            Ui.Text(ctx, t.Sub.Length > 26 ? t.Sub[..26] : t.Sub, b.X + 8, b.Bottom - 13, 8, Ui.Label, Ui.Mono);
+            Area(b, () => _takeSel = k);
+        }
+        if (!plot) return;
+        var g = new Rect(r.X + tiles.Count * (tw + 6) + 6, r.Y + 2, r.Right - (r.X + tiles.Count * (tw + 6) + 6), r.Height - 6);
+        if (g.Width < 60) return;
+        ctx.DrawRectangle(Ui.Scope, Ui.LcdEdge, g, 3, 3);
+        var sel = tiles[_takeSel];
+        rep.Bars.TryGetValue(sel.Series, out var v);
+        int bars = Math.Max(v?.Length ?? 0, rep.Sections.Count == 0 ? 0 : rep.Sections.Max(s => s.FirstBar + s.Bars - 1));
+        string name = Path.GetFileNameWithoutExtension(rep.Path);
+        if (bars == 0) { Ui.Text(ctx, $"{name} · {sel.Name}: sem valores por compasso", g.X + 6, g.Y + 3, 9, Ui.LcdDim, Ui.Mono); return; }
+        double bw = (g.Width - 8) / bars, top = g.Y + 30, bottom = g.Bottom - 6;
+        // The form: each section's letter over its bars.
+        foreach (var (first, n, label, match) in rep.Sections)
+        {
+            double x0 = g.X + 4 + (first - 1) * bw;
+            ctx.DrawLine(new ImmutablePen((IImmutableBrush)Ui.LcdDim, 1), new Point(x0, g.Y + 16), new Point(x0, bottom));
+            Ui.Text(ctx, match < 100 ? $"{label} {match:0}%" : $"{label}", x0 + 3, g.Y + 16, 9, Ui.LcdText, Ui.Mono);
+        }
+        if (v is { Length: > 0 } && v.Any(x => x.HasValue))
+        {
+            double lo = v.Where(x => x.HasValue).Min(x => x!.Value), hi = v.Where(x => x.HasValue).Max(x => x!.Value);
+            bool signed = sel.Series is "timing" or "harmony";   // offsets: around 0 (late up)
+            if (signed) { hi = Math.Max(Math.Abs(lo), Math.Abs(hi)); lo = -hi; }
+            if (hi - lo < 1) { lo -= 0.5; hi += 0.5; }
+            double Y(double x) => bottom - (bottom - top) * (x - lo) / (hi - lo);
+            if (signed) ctx.DrawLine(new ImmutablePen((IImmutableBrush)Ui.LcdDim, 1), new Point(g.X + 4, Y(0)), new Point(g.Right - 4, Y(0)));
+            double baseY = signed ? Y(0) : bottom;
+            for (int i = 0; i < v.Length; i++)
+                if (v[i] is double x)
+                    ctx.DrawRectangle(Ui.ScopeTrace.Brush, null, new Rect(g.X + 4 + i * bw + 1, Math.Min(baseY, Y(x)), Math.Max(1, bw - 2), Math.Max(1, Math.Abs(Y(x) - baseY))));
+            Ui.Text(ctx, $"{name} · {sel.Name} por compasso · {lo:0.#} … {hi:0.#}", g.X + 6, g.Y + 3, 9, Ui.LcdDim, Ui.Mono);
+        }
+        else Ui.Text(ctx, $"{name} · {sel.Name} · forma por compasso", g.X + 6, g.Y + 3, 9, Ui.LcdDim, Ui.Mono);
     }
 }
 

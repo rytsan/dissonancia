@@ -933,6 +933,20 @@ Swept: phrase lengths 2–16 bars (2 lets a two-bar riff repeat under any song: 
 and 16 never won) and the match 0.6–0.8 (0.75: F 0.82 and 0.61). Tests (`test_form.cpp`): AABA with
 the last A changed and faster; a progression played twice through 8 bars of 3/4; nothing repeated.
 
+## Coach metrics shown (phase 2, step 5, first pass, 2026-10-26)
+
+- **Live timing** (core): every attack while the metronome runs (a chord mode's onset, a voice's
+  note start; both less the round trip) is set to its nearest sixteenth of the metronome, within 0.1
+  beat. The snapshot carries the last offset and the mean and spread of the last 16
+  (`timingLastMs`, `timingMeanMs`, `timingSpreadMs`, `timingCount`; the ABI grows 16 bytes). A new
+  tempo or grid starts over. Test: plucks 20 ms behind the click read 19 ms (voice) and 20 ms (guitar
+  chords), spread 0.
+- **DS-X**: a TIMING tile live. The TAKE key swaps the tiles for the newest take's report
+  (`app/TakeReport.cs`, reloaded when the JSON changes: "calculating" until the metrics arrive):
+  timing, swing, tempo, intonation or chord changes, dynamics, form, limits. The plot draws the chosen
+  one per bar over the take (offsets around zero, late up), the form's letters at its sections.
+  Checked in `tests/score` (tiles, an empty bar, the pending state); not looked at on screen yet.
+
 ## Session JSON (phase 2, step 4, 2026-10-26)
 
 A REC take's JSON is now `dissonancia-session/1` ([`SESSION.md`](SESSION.md)): the take format plus

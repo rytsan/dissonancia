@@ -148,7 +148,13 @@ private:
     SpscQueue<float, 1u << 18> tap_;   // analysed mono input for the GUI's note transcriber (~5 s at 48 kHz), lossy when full
 
     std::thread analysisThread_, recorderThread_;
-    std::thread metricsThread_;   // the take JSON's metrics, after REC stops (seconds of work; joined by the next take and stop())
+    std::thread metricsThread_;
+    // Live timing: the last 16 attacks' offsets to the metronome's sixteenths (analysis thread).
+    void live_timing(double seconds);
+    float liveOffsets_[16]{};
+    uint32_t liveCount_ = 0;
+    float liveLast_ = 0;
+    uint32_t liveGen_ = ~0u;   // the take JSON's metrics, after REC stops (seconds of work; joined by the next take and stop())
 };
 
 }  // namespace dz
