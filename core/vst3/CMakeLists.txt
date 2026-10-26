@@ -42,7 +42,7 @@ endif()
 add_executable(dz_plugin dz_plugin.cpp ${DZ_EDITOR} ${DZ_VST3_MODULE}
   ${SDK_ROOT}/public.sdk/source/vst/hosting/plugprovider.cpp
   ${SDK_ROOT}/public.sdk/source/common/memorystream.cpp)
-target_link_libraries(dz_plugin PRIVATE sdk_hosting miniaudio)
+target_link_libraries(dz_plugin PRIVATE sdk_hosting dz_miniaudio)
 if(DZ_EDITOR STREQUAL "editor_x11.cpp")
   target_include_directories(dz_plugin PRIVATE ${X11_INCLUDE_DIR})
   target_link_libraries(dz_plugin PRIVATE ${X11_LIBRARIES})

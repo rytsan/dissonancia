@@ -1,0 +1,376 @@
+{
+ "format": "dissonancia-session/1",
+ "session": {
+  "mode": 2,
+  "bpm": 96,
+  "meter": [
+   4,
+   4
+  ]
+ },
+ "events": [],
+ "metrics": {
+  "timing": {
+   "grid": "metronome",
+   "confidence": 0.38,
+   "onsets": 21,
+   "matched": 11,
+   "meanOffsetMs": -18.4,
+   "spreadMs": 31.0,
+   "swing": null,
+   "perSixteenth": [],
+   "accentPerBeatDb": [
+    0.5,
+    -0.2,
+    0.1,
+    -0.4
+   ],
+   "bars": [
+    {
+     "bar": 2,
+     "matched": 3,
+     "meanOffsetMs": -41.0,
+     "spreadMs": 12.0
+    },
+    {
+     "bar": 3,
+     "matched": 4,
+     "meanOffsetMs": -9.0,
+     "spreadMs": 20.0
+    }
+   ],
+   "evidence": "attacks by spectral flux, 0.0 ms of round-trip latency taken off, set to the nearest sixteenth of the metronome's beats (heard during the take)"
+  },
+  "tempo": {
+   "bpm": 99.4,
+   "metronomeBpm": 96.0,
+   "driftBpm": 3.9,
+   "spreadBpm": 3.43,
+   "beats": 65,
+   "evidence": "beats tracked in the take (onset envelope, dynamic programming), seeded at the metronome's tempo"
+  },
+  "harmony": {
+   "confidence": 0.3,
+   "chords": 5,
+   "changes": 4,
+   "onGrid": 2,
+   "changeMeanMs": -22.0,
+   "changeSpreadMs": 25.0,
+   "gaps": 0,
+   "cleanPct": 81.0,
+   "cleanAtChangePct": 62.3,
+   "changeList": [
+    {
+     "time": 2.229,
+     "bar": 0,
+     "beat": 1,
+     "offbeat": false,
+     "offsetMs": null,
+     "gapDb": -2.0,
+     "cleanAfterPct": 62.1
+    },
+    {
+     "time": 4.439,
+     "bar": 3,
+     "beat": 1,
+     "offbeat": false,
+     "offsetMs": -38.0,
+     "gapDb": -2.0,
+     "cleanAfterPct": 47.8
+    },
+    {
+     "time": 6.649,
+     "bar": 4,
+     "beat": 1,
+     "offbeat": false,
+     "offsetMs": -17.8,
+     "gapDb": -2.0,
+     "cleanAfterPct": 61.9
+    },
+    {
+     "time": 8.74,
+     "bar": 0,
+     "beat": 0,
+     "offbeat": false,
+     "offsetMs": null,
+     "gapDb": -2.0,
+     "cleanAfterPct": 16.7
+    }
+   ],
+   "chordList": [
+    {
+     "start": 0.018,
+     "end": 2.22,
+     "symbol": "Abmaj7",
+     "cleanPct": 79.4
+    },
+    {
+     "start": 2.22,
+     "end": 4.4,
+     "symbol": "Db/Ab",
+     "cleanPct": 66.4
+    },
+    {
+     "start": 4.4,
+     "end": 6.64,
+     "symbol": "D",
+     "cleanPct": 78.4
+    },
+    {
+     "start": 6.64,
+     "end": 8.74,
+     "symbol": "Abm7/Cb",
+     "cleanPct": 75.6
+    },
+    {
+     "start": 8.74,
+     "end": 10.338,
+     "symbol": "Fm",
+     "cleanPct": 70.7
+    },
+    {
+     "start": 10.338,
+     "end": 11.14,
+     "symbol": "G7/F",
+     "cleanPct": 68.0
+    },
+    {
+     "start": 11.14,
+     "end": 12.74,
+     "symbol": "Bbm",
+     "cleanPct": 67.3
+    },
+    {
+     "start": 12.74,
+     "end": 13.398,
+     "symbol": "Abm7",
+     "cleanPct": 51.1
+    },
+    {
+     "start": 13.398,
+     "end": 15.56,
+     "symbol": "Ebm",
+     "cleanPct": 82.5
+    },
+    {
+     "start": 15.56,
+     "end": 17.5,
+     "symbol": "Ebm7",
+     "cleanPct": 76.2
+    },
+    {
+     "start": 17.5,
+     "end": 20.0,
+     "symbol": "Abm",
+     "cleanPct": 67.0
+    },
+    {
+     "start": 20.0,
+     "end": 21.38,
+     "symbol": "Db/Ab",
+     "cleanPct": 91.7
+    },
+    {
+     "start": 21.38,
+     "end": 21.938,
+     "symbol": "G7/A",
+     "cleanPct": 60.5
+    },
+    {
+     "start": 21.938,
+     "end": 24.16,
+     "symbol": "D",
+     "cleanPct": 75.6
+    },
+    {
+     "start": 24.16,
+     "end": 25.658,
+     "symbol": "Bmaj7",
+     "cleanPct": 68.1
+    },
+    {
+     "start": 25.658,
+     "end": 26.64,
+     "symbol": "Abm7",
+     "cleanPct": 47.5
+    },
+    {
+     "start": 26.64,
+     "end": 28.9,
+     "symbol": "Db7/F",
+     "cleanPct": 65.9
+    },
+    {
+     "start": 28.9,
+     "end": 30.3,
+     "symbol": "Bbmaj7",
+     "cleanPct": 76.7
+    },
+    {
+     "start": 30.3,
+     "end": 31.38,
+     "symbol": "Abm",
+     "cleanPct": 38.2
+    },
+    {
+     "start": 31.38,
+     "end": 32.46,
+     "symbol": "Eb",
+     "cleanPct": 90.0
+    },
+    {
+     "start": 32.46,
+     "end": 35.338,
+     "symbol": "Ebm",
+     "cleanPct": 70.0
+    }
+   ],
+   "evidence": "chords by the whole-take decoder; a change's time is its attack, against the nearest eighth of the grid (bar 0: off it); gapDb: the level 150-30 ms before the change against the same before the chord's own strums (gaps: 10 dB down or more); cleanPct: notes heard that are the chord's tones, after its first 0.25 s; the hearing itself puts ~15 % of notes outside the chord (GuitarSet: 82 % heard where 96 % were played), so compare takes rather than read it as absolute"
+  },
+  "form": {
+   "form": "",
+   "phraseBars": 0,
+   "repeats": 0
+  },
+  "dynamics": {
+   "integratedLufs": -23.4,
+   "rangeLu": 1.8,
+   "trendLu": 0.6,
+   "attackSpreadDb": 2.1,
+   "perSixteenth": [
+    {
+     "position": "1",
+     "count": 56,
+     "spreadDb": 4.2
+    },
+    {
+     "position": "e",
+     "count": 5,
+     "spreadDb": 1.0
+    },
+    {
+     "position": "&",
+     "count": 51,
+     "spreadDb": 3.9
+    },
+    {
+     "position": "a",
+     "count": 16,
+     "spreadDb": 3.3
+    }
+   ],
+   "bars": [
+    {
+     "bar": 1,
+     "lufs": -20.5
+    },
+    {
+     "bar": 2,
+     "lufs": -23.2
+    },
+    {
+     "bar": 3,
+     "lufs": -24.8
+    },
+    {
+     "bar": 4,
+     "lufs": -22.8
+    },
+    {
+     "bar": 5,
+     "lufs": -25.9
+    },
+    {
+     "bar": 6,
+     "lufs": -21.4
+    },
+    {
+     "bar": 7,
+     "lufs": -26.0
+    },
+    {
+     "bar": 8,
+     "lufs": -24.6
+    },
+    {
+     "bar": 9,
+     "lufs": -20.8
+    },
+    {
+     "bar": 10,
+     "lufs": -24.3
+    },
+    {
+     "bar": 11,
+     "lufs": -25.2
+    },
+    {
+     "bar": 12,
+     "lufs": -29.7
+    },
+    {
+     "bar": 13,
+     "lufs": -25.5
+    },
+    {
+     "bar": 14,
+     "lufs": -22.6
+    },
+    {
+     "bar": 15,
+     "lufs": -27.2
+    },
+    {
+     "bar": 16,
+     "lufs": -27.0
+    },
+    {
+     "bar": 17,
+     "lufs": -67.8
+    }
+   ],
+   "phrases": [
+    {
+     "start": 0.0,
+     "end": 8.4,
+     "lufs": -22.4,
+     "changeLu": -1.3,
+     "peakAt": 0.41
+    },
+    {
+     "start": 8.8,
+     "end": 16.8,
+     "lufs": -23.6,
+     "changeLu": 1.9,
+     "peakAt": 0.45
+    },
+    {
+     "start": 17.3,
+     "end": 25.7,
+     "lufs": -23.7,
+     "changeLu": -4.7,
+     "peakAt": 0.24
+    },
+    {
+     "start": 26.6,
+     "end": 34.7,
+     "lufs": -24.8,
+     "changeLu": -1.1,
+     "peakAt": 0.44
+    }
+   ],
+   "evidence": "K-weighted loudness (ITU-R BS.1770, EBU R128) of the take, its bars and its phrases (sound with gaps under 0.4 s); attackSpreadDb: the attacks' level spread within each sixteenth, the accent pattern left out"
+  }
+ },
+ "limits": {
+  "peakDbfs": 0.0,
+  "rmsDbfs": -14.2,
+  "clippedSamples": 312,
+  "droppedFrames": 0,
+  "warnings": [
+   "clipping: 312 samples at full scale",
+   "timing: few attacks on the grid, low confidence",
+   "harmony: few chord changes on the grid, low confidence"
+  ]
+ }
+}

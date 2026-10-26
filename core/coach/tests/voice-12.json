@@ -1,0 +1,551 @@
+{
+ "format": "dissonancia-session/1",
+ "session": {
+  "mode": 0,
+  "bpm": 100,
+  "meter": [
+   4,
+   4
+  ]
+ },
+ "events": [],
+ "metrics": {
+  "timing": {
+   "grid": "beats heard",
+   "confidence": 0.85,
+   "onsets": 33,
+   "matched": 28,
+   "meanOffsetMs": -10.3,
+   "spreadMs": 30.5,
+   "swing": 1.13,
+   "perSixteenth": [
+    {
+     "position": "1",
+     "count": 12,
+     "offsetMs": -4.6,
+     "accentDb": 1.7
+    },
+    {
+     "position": "e",
+     "count": 1,
+     "offsetMs": -17.5,
+     "accentDb": 2.9
+    },
+    {
+     "position": "&",
+     "count": 8,
+     "offsetMs": -17.7,
+     "accentDb": -0.8
+    },
+    {
+     "position": "a",
+     "count": 7,
+     "offsetMs": -10.5,
+     "accentDb": -2.3
+    }
+   ],
+   "accentPerBeatDb": [
+    0.7,
+    -2.4,
+    2.6,
+    -0.5
+   ],
+   "bars": [
+    {
+     "bar": 1,
+     "matched": 4,
+     "meanOffsetMs": 0.7,
+     "spreadMs": 35.9
+    },
+    {
+     "bar": 2,
+     "matched": 4,
+     "meanOffsetMs": -7.8,
+     "spreadMs": 26.8
+    },
+    {
+     "bar": 3,
+     "matched": 5,
+     "meanOffsetMs": -9.1,
+     "spreadMs": 24.8
+    },
+    {
+     "bar": 4,
+     "matched": 5,
+     "meanOffsetMs": -13.6,
+     "spreadMs": 41.4
+    },
+    {
+     "bar": 5,
+     "matched": 7,
+     "meanOffsetMs": -19.7,
+     "spreadMs": 26.8
+    },
+    {
+     "bar": 6,
+     "matched": 3,
+     "meanOffsetMs": -2.6,
+     "spreadMs": 0.5
+    }
+   ],
+   "evidence": "attacks by spectral flux, 0.0 ms of round-trip latency taken off, set to the nearest sixteenth of the beats heard in the take (the click was off)"
+  },
+  "tempo": {
+   "bpm": 96.77,
+   "metronomeBpm": 100.0,
+   "driftBpm": 1.99,
+   "spreadBpm": 5.85,
+   "beats": 25,
+   "evidence": "beats tracked in the take (onset envelope, dynamic programming), seeded at the metronome's tempo"
+  },
+  "intonation": {
+   "referenceA4": 440.0,
+   "confidence": 0.97,
+   "notes": 29,
+   "tuningCents": 8.7,
+   "inTunePct": 69.0,
+   "inTuneOwnTuningPct": 69.0,
+   "meanAbsCents": 15.6,
+   "scoops": 11,
+   "vibratoNotes": 1,
+   "phrases": [
+    {
+     "start": 1.069,
+     "end": 7.544,
+     "notes": 14,
+     "driftCents": 36.7
+    },
+    {
+     "start": 8.244,
+     "end": 14.774,
+     "notes": 15,
+     "driftCents": 3.7
+    }
+   ],
+   "bars": [
+    {
+     "bar": 1,
+     "notes": 4,
+     "inTuneOwnTuningPct": 75.0,
+     "meanAbsCents": 9.2
+    },
+    {
+     "bar": 2,
+     "notes": 4,
+     "inTuneOwnTuningPct": 75.0,
+     "meanAbsCents": 13.7
+    },
+    {
+     "bar": 3,
+     "notes": 6,
+     "inTuneOwnTuningPct": 50.0,
+     "meanAbsCents": 25.9
+    },
+    {
+     "bar": 4,
+     "notes": 6,
+     "inTuneOwnTuningPct": 66.7,
+     "meanAbsCents": 17.5
+    },
+    {
+     "bar": 5,
+     "notes": 4,
+     "inTuneOwnTuningPct": 50.0,
+     "meanAbsCents": 13.1
+    },
+    {
+     "bar": 6,
+     "notes": 5,
+     "inTuneOwnTuningPct": 100.0,
+     "meanAbsCents": 9.8
+    }
+   ],
+   "notesRead": [
+    {
+     "start": 1.069,
+     "end": 1.344,
+     "midi": 53,
+     "cents": 9.5,
+     "scoopCents": 14.8,
+     "driftCents": -22.8,
+     "vibratoHz": 0.0,
+     "vibratoCents": 0.0
+    },
+    {
+     "start": 1.399,
+     "end": 1.944,
+     "midi": 59,
+     "cents": 3.2,
+     "scoopCents": -26.4,
+     "driftCents": -4.4,
+     "vibratoHz": 0.0,
+     "vibratoCents": 0.0
+    },
+    {
+     "start": 2.069,
+     "end": 2.394,
+     "midi": 58,
+     "cents": -13.9,
+     "scoopCents": 20.3,
+     "driftCents": -24.1,
+     "vibratoHz": 0.0,
+     "vibratoCents": 0.0
+    },
+    {
+     "start": 2.394,
+     "end": 2.954,
+     "midi": 59,
+     "cents": 0.8,
+     "scoopCents": 33.0,
+     "driftCents": -9.4,
+     "vibratoHz": 0.0,
+     "vibratoCents": 0.0
+    },
+    {
+     "start": 3.009,
+     "end": 3.254,
+     "midi": 61,
+     "cents": 2.8,
+     "scoopCents": -113.5,
+     "driftCents": -12.5,
+     "vibratoHz": 0.0,
+     "vibratoCents": 0.0
+    },
+    {
+     "start": 3.374,
+     "end": 3.704,
+     "midi": 56,
+     "cents": 0.9,
+     "scoopCents": -57.5,
+     "driftCents": 14.5,
+     "vibratoHz": 0.0,
+     "vibratoCents": 0.0
+    },
+    {
+     "start": 3.859,
+     "end": 4.674,
+     "midi": 61,
+     "cents": -6.0,
+     "scoopCents": -6.5,
+     "driftCents": 26.5,
+     "vibratoHz": 0.0,
+     "vibratoCents": 0.0
+    },
+    {
+     "start": 4.759,
+     "end": 4.854,
+     "midi": 58,
+     "cents": -17.7,
+     "scoopCents": 6.9,
+     "driftCents": 42.3,
+     "vibratoHz": 0.0,
+     "vibratoCents": 0.0
+    },
+    {
+     "start": 4.854,
+     "end": 5.384,
+     "midi": 59,
+     "cents": 17.7,
+     "scoopCents": -24.5,
+     "driftCents": -11.7,
+     "vibratoHz": 0.0,
+     "vibratoCents": 0.0
+    },
+    {
+     "start": 5.384,
+     "end": 5.754,
+     "midi": 58,
+     "cents": 52.5,
+     "scoopCents": -92.7,
+     "driftCents": -32.1,
+     "vibratoHz": 0.0,
+     "vibratoCents": 0.0
+    },
+    {
+     "start": 5.754,
+     "end": 6.124,
+     "midi": 56,
+     "cents": 27.4,
+     "scoopCents": -22.9,
+     "driftCents": 43.6,
+     "vibratoHz": 0.0,
+     "vibratoCents": 0.0
+    },
+    {
+     "start": 6.219,
+     "end": 6.689,
+     "midi": 58,
+     "cents": 39.7,
+     "scoopCents": -7.3,
+     "driftCents": -5.6,
+     "vibratoHz": 0.0,
+     "vibratoCents": 0.0
+    },
+    {
+     "start": 6.689,
+     "end": 6.814,
+     "midi": 60,
+     "cents": -6.2,
+     "scoopCents": 8.7,
+     "driftCents": -22.4,
+     "vibratoHz": 0.0,
+     "vibratoCents": 0.0
+    },
+    {
+     "start": 6.814,
+     "end": 7.544,
+     "midi": 59,
+     "cents": 46.6,
+     "scoopCents": -16.4,
+     "driftCents": 4.8,
+     "vibratoHz": 4.77,
+     "vibratoCents": 17.0
+    },
+    {
+     "start": 8.244,
+     "end": 8.544,
+     "midi": 54,
+     "cents": 11.2,
+     "scoopCents": -34.1,
+     "driftCents": 23.9,
+     "vibratoHz": 0.0,
+     "vibratoCents": 0.0
+    },
+    {
+     "start": 8.544,
+     "end": 8.634,
+     "midi": 55,
+     "cents": -32.4,
+     "scoopCents": -3.3,
+     "driftCents": 37.0,
+     "vibratoHz": 0.0,
+     "vibratoCents": 0.0
+    },
+    {
+     "start": 8.669,
+     "end": 8.764,
+     "midi": 58,
+     "cents": 26.6,
+     "scoopCents": -113.7,
+     "driftCents": 32.7,
+     "vibratoHz": 0.0,
+     "vibratoCents": 0.0
+    },
+    {
+     "start": 8.764,
+     "end": 9.184,
+     "midi": 59,
+     "cents": 22.0,
+     "scoopCents": -15.4,
+     "driftCents": -55.4,
+     "vibratoHz": 0.0,
+     "vibratoCents": 0.0
+    },
+    {
+     "start": 9.184,
+     "end": 9.424,
+     "midi": 58,
+     "cents": 34.1,
+     "scoopCents": 4.9,
+     "driftCents": 52.4,
+     "vibratoHz": 0.0,
+     "vibratoCents": 0.0
+    },
+    {
+     "start": 9.529,
+     "end": 10.174,
+     "midi": 59,
+     "cents": 3.9,
+     "scoopCents": 33.0,
+     "driftCents": -7.6,
+     "vibratoHz": 0.0,
+     "vibratoCents": 0.0
+    },
+    {
+     "start": 10.229,
+     "end": 10.604,
+     "midi": 61,
+     "cents": 5.5,
+     "scoopCents": -110.6,
+     "driftCents": 2.0,
+     "vibratoHz": 0.0,
+     "vibratoCents": 0.0
+    },
+    {
+     "start": 10.849,
+     "end": 11.024,
+     "midi": 56,
+     "cents": -17.4,
+     "scoopCents": -71.4,
+     "driftCents": -55.5,
+     "vibratoHz": 0.0,
+     "vibratoCents": 0.0
+    },
+    {
+     "start": 11.069,
+     "end": 11.264,
+     "midi": 60,
+     "cents": -11.7,
+     "scoopCents": 17.2,
+     "driftCents": 13.9,
+     "vibratoHz": 0.0,
+     "vibratoCents": 0.0
+    },
+    {
+     "start": 11.264,
+     "end": 11.624,
+     "midi": 61,
+     "cents": 11.2,
+     "scoopCents": -2.3,
+     "driftCents": 12.8,
+     "vibratoHz": 0.0,
+     "vibratoCents": 0.0
+    },
+    {
+     "start": 12.019,
+     "end": 12.554,
+     "midi": 59,
+     "cents": -10.8,
+     "scoopCents": -71.8,
+     "driftCents": -1.3,
+     "vibratoHz": 0.0,
+     "vibratoCents": 0.0
+    },
+    {
+     "start": 12.554,
+     "end": 12.854,
+     "midi": 58,
+     "cents": 8.7,
+     "scoopCents": 5.8,
+     "driftCents": -1.1,
+     "vibratoHz": 0.0,
+     "vibratoCents": 0.0
+    },
+    {
+     "start": 12.854,
+     "end": 13.324,
+     "midi": 56,
+     "cents": 25.1,
+     "scoopCents": 11.6,
+     "driftCents": -1.0,
+     "vibratoHz": 0.0,
+     "vibratoCents": 0.0
+    },
+    {
+     "start": 13.324,
+     "end": 13.684,
+     "midi": 58,
+     "cents": 14.2,
+     "scoopCents": -48.2,
+     "driftCents": -31.1,
+     "vibratoHz": 0.0,
+     "vibratoCents": 0.0
+    },
+    {
+     "start": 13.844,
+     "end": 14.774,
+     "midi": 59,
+     "cents": 16.0,
+     "scoopCents": 9.7,
+     "driftCents": -2.6,
+     "vibratoHz": 0.0,
+     "vibratoCents": 0.0
+    }
+   ],
+   "evidence": "YIN pitch track, notes by the whole-take decoder; cents are each note's steady median against equal temperament at referenceA4 (tuningCents: their median, the tuning heard); in tune within 20 cents"
+  },
+  "form": {
+   "form": "",
+   "phraseBars": 0,
+   "repeats": 0,
+   "repeatMatchPct": null,
+   "repeatTempoChangePct": null,
+   "sections": [],
+   "evidence": "phrases of 4 or 8 bars from the first downbeat; a phrase repeats an earlier one when the pitch classes on its beats (chords, or notes) agree 65 % or more; matchPct: that agreement with the first time; bpm: the beats heard in it"
+  },
+  "dynamics": {
+   "integratedLufs": -25.1,
+   "rangeLu": 1.1,
+   "trendLu": -1.3,
+   "attackSpreadDb": 7.1,
+   "perSixteenth": [
+    {
+     "position": "1",
+     "count": 12,
+     "spreadDb": 6.5
+    },
+    {
+     "position": "&",
+     "count": 8,
+     "spreadDb": 9.1
+    },
+    {
+     "position": "a",
+     "count": 7,
+     "spreadDb": 6.1
+    }
+   ],
+   "bars": [
+    {
+     "bar": 1,
+     "lufs": -26.6
+    },
+    {
+     "bar": 2,
+     "lufs": -25.1
+    },
+    {
+     "bar": 3,
+     "lufs": -24.9
+    },
+    {
+     "bar": 4,
+     "lufs": -25.4
+    },
+    {
+     "bar": 5,
+     "lufs": -26.1
+    },
+    {
+     "bar": 6,
+     "lufs": -24.6
+    },
+    {
+     "bar": 7,
+     "lufs": -28.5
+    }
+   ],
+   "phrases": [
+    {
+     "start": 1.0,
+     "end": 7.6,
+     "lufs": -24.9,
+     "changeLu": -0.8,
+     "peakAt": 0.06
+    },
+    {
+     "start": 8.1,
+     "end": 11.6,
+     "lufs": -24.7,
+     "changeLu": -2.1,
+     "peakAt": 0.16
+    },
+    {
+     "start": 12.0,
+     "end": 14.8,
+     "lufs": -24.8,
+     "changeLu": -0.2,
+     "peakAt": 0.75
+    }
+   ],
+   "evidence": "K-weighted loudness (ITU-R BS.1770, EBU R128) of the take, its bars and its phrases (sound with gaps under 0.4 s); attackSpreadDb: the attacks' level spread within each sixteenth, the accent pattern left out"
+  }
+ },
+ "limits": {
+  "peakDbfs": -9.7,
+  "rmsDbfs": -24.9,
+  "clippedSamples": 0,
+  "droppedFrames": 0,
+  "warnings": []
+ }
+}

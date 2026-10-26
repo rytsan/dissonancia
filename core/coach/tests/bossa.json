@@ -1,0 +1,526 @@
+{
+ "format": "dissonancia-session/1",
+ "session": {
+  "mode": 2,
+  "bpm": 131,
+  "meter": [
+   4,
+   4
+  ]
+ },
+ "events": [],
+ "metrics": {
+  "timing": {
+   "grid": "metronome",
+   "confidence": 0.93,
+   "onsets": 88,
+   "matched": 82,
+   "meanOffsetMs": 6.8,
+   "spreadMs": 18.5,
+   "swing": 1.04,
+   "perSixteenth": [
+    {
+     "position": "1",
+     "count": 48,
+     "offsetMs": 4.5,
+     "accentDb": 2.9
+    },
+    {
+     "position": "&",
+     "count": 34,
+     "offsetMs": 10.0,
+     "accentDb": -4.1
+    }
+   ],
+   "accentPerBeatDb": [
+    -0.4,
+    0.3,
+    -2.3,
+    0.9
+   ],
+   "bars": [
+    {
+     "bar": 1,
+     "matched": 3,
+     "meanOffsetMs": 14.0,
+     "spreadMs": 1.6
+    },
+    {
+     "bar": 2,
+     "matched": 6,
+     "meanOffsetMs": -6.3,
+     "spreadMs": 15.5
+    },
+    {
+     "bar": 3,
+     "matched": 4,
+     "meanOffsetMs": -7.2,
+     "spreadMs": 12.7
+    },
+    {
+     "bar": 4,
+     "matched": 6,
+     "meanOffsetMs": 22.9,
+     "spreadMs": 16.7
+    },
+    {
+     "bar": 5,
+     "matched": 4,
+     "meanOffsetMs": 15.3,
+     "spreadMs": 17.0
+    },
+    {
+     "bar": 6,
+     "matched": 6,
+     "meanOffsetMs": 26.3,
+     "spreadMs": 10.6
+    },
+    {
+     "bar": 7,
+     "matched": 6,
+     "meanOffsetMs": -6.6,
+     "spreadMs": 6.7
+    },
+    {
+     "bar": 8,
+     "matched": 5,
+     "meanOffsetMs": 1.9,
+     "spreadMs": 7.5
+    },
+    {
+     "bar": 9,
+     "matched": 5,
+     "meanOffsetMs": -0.1,
+     "spreadMs": 13.2
+    },
+    {
+     "bar": 10,
+     "matched": 6,
+     "meanOffsetMs": 3.0,
+     "spreadMs": 23.1
+    },
+    {
+     "bar": 11,
+     "matched": 5,
+     "meanOffsetMs": 8.2,
+     "spreadMs": 13.7
+    },
+    {
+     "bar": 12,
+     "matched": 4,
+     "meanOffsetMs": 28.8,
+     "spreadMs": 3.5
+    },
+    {
+     "bar": 13,
+     "matched": 7,
+     "meanOffsetMs": 3.9,
+     "spreadMs": 24.4
+    },
+    {
+     "bar": 14,
+     "matched": 6,
+     "meanOffsetMs": 12.3,
+     "spreadMs": 15.2
+    },
+    {
+     "bar": 15,
+     "matched": 4,
+     "meanOffsetMs": -4.4,
+     "spreadMs": 9.5
+    },
+    {
+     "bar": 16,
+     "matched": 5,
+     "meanOffsetMs": -0.7,
+     "spreadMs": 7.9
+    }
+   ],
+   "evidence": "attacks by spectral flux, 0.0 ms of round-trip latency taken off, set to the nearest sixteenth of the metronome's beats (heard during the take)"
+  },
+  "tempo": {
+   "bpm": 130.43,
+   "metronomeBpm": 131.0,
+   "driftBpm": 0.9,
+   "spreadBpm": 4.97,
+   "beats": 64,
+   "evidence": "beats tracked in the take (onset envelope, dynamic programming), seeded at the metronome's tempo"
+  },
+  "harmony": {
+   "confidence": 0.87,
+   "chords": 16,
+   "changes": 15,
+   "onGrid": 13,
+   "changeMeanMs": 8.7,
+   "changeSpreadMs": 18.0,
+   "gaps": 5,
+   "cleanPct": 83.8,
+   "cleanAtChangePct": 57.4,
+   "changeList": [
+    {
+     "time": 1.83,
+     "bar": 2,
+     "beat": 1,
+     "offbeat": false,
+     "offsetMs": -2.3,
+     "gapDb": -12.5,
+     "cleanAfterPct": 70.0
+    },
+    {
+     "time": 3.451,
+     "bar": 2,
+     "beat": 4,
+     "offbeat": true,
+     "offsetMs": 16.0,
+     "gapDb": -3.8,
+     "cleanAfterPct": 77.8
+    },
+    {
+     "time": 5.22,
+     "bar": 0,
+     "beat": 0,
+     "offbeat": false,
+     "offsetMs": null,
+     "gapDb": -3.3,
+     "cleanAfterPct": 38.1
+    },
+    {
+     "time": 7.143,
+     "bar": 4,
+     "beat": 4,
+     "offbeat": true,
+     "offsetMs": 43.5,
+     "gapDb": 1.4,
+     "cleanAfterPct": 46.7
+    },
+    {
+     "time": 9.038,
+     "bar": 0,
+     "beat": 0,
+     "offbeat": false,
+     "offsetMs": null,
+     "gapDb": -4.0,
+     "cleanAfterPct": 45.2
+    },
+    {
+     "time": 10.984,
+     "bar": 7,
+     "beat": 1,
+     "offbeat": false,
+     "offsetMs": -8.4,
+     "gapDb": -11.8,
+     "cleanAfterPct": 69.2
+    },
+    {
+     "time": 11.667,
+     "bar": 7,
+     "beat": 2,
+     "offbeat": true,
+     "offsetMs": -11.9,
+     "gapDb": -1.0,
+     "cleanAfterPct": 86.7
+    },
+    {
+     "time": 14.671,
+     "bar": 9,
+     "beat": 1,
+     "offbeat": false,
+     "offsetMs": 14.1,
+     "gapDb": -18.3,
+     "cleanAfterPct": 68.4
+    },
+    {
+     "time": 16.496,
+     "bar": 10,
+     "beat": 1,
+     "offbeat": false,
+     "offsetMs": 7.9,
+     "gapDb": -7.5,
+     "cleanAfterPct": 57.6
+    },
+    {
+     "time": 18.317,
+     "bar": 11,
+     "beat": 1,
+     "offbeat": false,
+     "offsetMs": -3.3,
+     "gapDb": -11.1,
+     "cleanAfterPct": 85.7
+    },
+    {
+     "time": 19.94,
+     "bar": 11,
+     "beat": 4,
+     "offbeat": true,
+     "offsetMs": 16.3,
+     "gapDb": 2.8,
+     "cleanAfterPct": 31.0
+    },
+    {
+     "time": 22.004,
+     "bar": 13,
+     "beat": 1,
+     "offbeat": false,
+     "offsetMs": 19.2,
+     "gapDb": -3.3,
+     "cleanAfterPct": 42.9
+    },
+    {
+     "time": 23.116,
+     "bar": 13,
+     "beat": 3,
+     "offbeat": true,
+     "offsetMs": -13.3,
+     "gapDb": -1.5,
+     "cleanAfterPct": 85.7
+    },
+    {
+     "time": 24.04,
+     "bar": 14,
+     "beat": 1,
+     "offbeat": true,
+     "offsetMs": -5.8,
+     "gapDb": -16.1,
+     "cleanAfterPct": 17.6
+    },
+    {
+     "time": 25.461,
+     "bar": 14,
+     "beat": 4,
+     "offbeat": true,
+     "offsetMs": 41.3,
+     "gapDb": 3.6,
+     "cleanAfterPct": 27.6
+    }
+   ],
+   "chordList": [
+    {
+     "start": 0.04,
+     "end": 1.8,
+     "symbol": "Em/B",
+     "cleanPct": 91.2
+    },
+    {
+     "start": 1.8,
+     "end": 3.44,
+     "symbol": "A7",
+     "cleanPct": 87.9
+    },
+    {
+     "start": 3.44,
+     "end": 5.22,
+     "symbol": "D/A",
+     "cleanPct": 94.5
+    },
+    {
+     "start": 5.22,
+     "end": 7.218,
+     "symbol": "G",
+     "cleanPct": 74.4
+    },
+    {
+     "start": 7.218,
+     "end": 9.038,
+     "symbol": "Db",
+     "cleanPct": 84.6
+    },
+    {
+     "start": 9.038,
+     "end": 10.918,
+     "symbol": "Eb7/Bb",
+     "cleanPct": 73.3
+    },
+    {
+     "start": 10.918,
+     "end": 11.64,
+     "symbol": "Gadd9/B",
+     "cleanPct": 78.4
+    },
+    {
+     "start": 11.64,
+     "end": 14.64,
+     "symbol": "Bm/F#",
+     "cleanPct": 85.2
+    },
+    {
+     "start": 14.64,
+     "end": 16.46,
+     "symbol": "Em",
+     "cleanPct": 81.2
+    },
+    {
+     "start": 16.46,
+     "end": 18.3,
+     "symbol": "A7",
+     "cleanPct": 91.1
+    },
+    {
+     "start": 18.3,
+     "end": 19.94,
+     "symbol": "D",
+     "cleanPct": 91.1
+    },
+    {
+     "start": 19.94,
+     "end": 21.96,
+     "symbol": "G",
+     "cleanPct": 78.3
+    },
+    {
+     "start": 21.96,
+     "end": 23.08,
+     "symbol": "A7/C#",
+     "cleanPct": 80.5
+    },
+    {
+     "start": 23.08,
+     "end": 24.04,
+     "symbol": "Db",
+     "cleanPct": 85.6
+    },
+    {
+     "start": 24.04,
+     "end": 25.498,
+     "symbol": "F#/Db",
+     "cleanPct": 83.9
+    },
+    {
+     "start": 25.498,
+     "end": 29.298,
+     "symbol": "Bm",
+     "cleanPct": 79.4
+    }
+   ],
+   "evidence": "chords by the whole-take decoder; a change's time is its attack, against the nearest eighth of the grid (bar 0: off it); gapDb: the level 150-30 ms before the change against the same before the chord's own strums (gaps: 10 dB down or more); cleanPct: notes heard that are the chord's tones, after its first 0.25 s; the hearing itself puts ~15 % of notes outside the chord (GuitarSet: 82 % heard where 96 % were played), so compare takes rather than read it as absolute"
+  },
+  "form": {
+   "form": "AA",
+   "phraseBars": 8,
+   "repeats": 1,
+   "repeatMatchPct": 80.2,
+   "repeatTempoChangePct": 0.0,
+   "sections": [
+    {
+     "label": "A",
+     "firstBar": 1,
+     "bars": 8,
+     "matchPct": 100,
+     "bpm": 130.4
+    },
+    {
+     "label": "A",
+     "firstBar": 9,
+     "bars": 8,
+     "matchPct": 80,
+     "bpm": 130.4
+    }
+   ],
+   "evidence": "phrases of 4 or 8 bars from the first downbeat; a phrase repeats an earlier one when the pitch classes on its beats (chords, or notes) agree 65 % or more; matchPct: that agreement with the first time; bpm: the beats heard in it"
+  },
+  "dynamics": {
+   "integratedLufs": -32.0,
+   "rangeLu": 4.0,
+   "trendLu": 2.8,
+   "attackSpreadDb": 3.0,
+   "perSixteenth": [
+    {
+     "position": "1",
+     "count": 48,
+     "spreadDb": 2.7
+    },
+    {
+     "position": "&",
+     "count": 34,
+     "spreadDb": 3.4
+    }
+   ],
+   "bars": [
+    {
+     "bar": 1,
+     "lufs": -33.4
+    },
+    {
+     "bar": 2,
+     "lufs": -30.6
+    },
+    {
+     "bar": 3,
+     "lufs": -35.8
+    },
+    {
+     "bar": 4,
+     "lufs": -32.6
+    },
+    {
+     "bar": 5,
+     "lufs": -33.3
+    },
+    {
+     "bar": 6,
+     "lufs": -32.5
+    },
+    {
+     "bar": 7,
+     "lufs": -34.8
+    },
+    {
+     "bar": 8,
+     "lufs": -32.9
+    },
+    {
+     "bar": 9,
+     "lufs": -32.5
+    },
+    {
+     "bar": 10,
+     "lufs": -28.8
+    },
+    {
+     "bar": 11,
+     "lufs": -33.2
+    },
+    {
+     "bar": 12,
+     "lufs": -31.9
+    },
+    {
+     "bar": 13,
+     "lufs": -34.5
+    },
+    {
+     "bar": 14,
+     "lufs": -32.4
+    },
+    {
+     "bar": 15,
+     "lufs": -29.8
+    },
+    {
+     "bar": 16,
+     "lufs": -32.2
+    },
+    {
+     "bar": 17,
+     "lufs": -28.4
+    }
+   ],
+   "phrases": [
+    {
+     "start": 0.0,
+     "end": 29.3,
+     "lufs": -32.1,
+     "changeLu": 1.6,
+     "peakAt": 0.61
+    }
+   ],
+   "evidence": "K-weighted loudness (ITU-R BS.1770, EBU R128) of the take, its bars and its phrases (sound with gaps under 0.4 s); attackSpreadDb: the attacks' level spread within each sixteenth, the accent pattern left out"
+  }
+ },
+ "limits": {
+  "peakDbfs": -9.7,
+  "rmsDbfs": -31.3,
+  "clippedSamples": 0,
+  "droppedFrames": 0,
+  "warnings": []
+ }
+}

@@ -1,0 +1,9 @@
+O que foi bem:
+- As trocas de acorde caem no tempo: em média +5 ms, com desvio de 18 ms nas 20 trocas.
+- O tempo ficou perto do metrônomo: 109 bpm tocados contra 108.
+Para trabalhar:
+- A mão sai cedo antes de algumas trocas: o som cai em 5 trocas, nos compassos 3, 6, 8 e 10.
+- O ritmo arrasta no fim das frases: compasso 9 a +33 ms e compasso 11 a +34 ms, contra uma média de +13 ms.
+Exercícios:
+- Toque só as trocas dos compassos 6 e 10 a 80 bpm, segurando o acorde até o último instante antes de trocar, 4 vezes cada.
+- Com o metrônomo a 90 bpm, toque os compassos 9 a 11 contando em voz alta e mirando a batida em cima do clique.

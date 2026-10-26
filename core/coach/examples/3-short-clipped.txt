@@ -1,0 +1,8 @@
+O que foi bem:
+- As batidas saíram regulares: variam 2,1 dB na mesma posição.
+Para trabalhar:
+- O sinal clipou: o volume de entrada estava alto demais, então os números deste take valem pouco.
+- O timing tem confiança baixa (só 11 ataques), mas o que foi medido corre à frente: média -18 ms, e o compasso 2 a -41 ms.
+Exercícios:
+- Baixe o ganho de entrada até o pico parar de clipar e grave de novo um take mais longo.
+- Com o metrônomo a 80 bpm, toque o compasso 2 esperando o clique antes de atacar, 4 vezes.

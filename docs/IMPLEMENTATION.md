@@ -956,6 +956,29 @@ dropped frames, warnings). After the WAV closes, `write_sidecar` reads it back a
 beats heard; the round-trip latency comes off the attacks. `dz_wav file.wav session bpm beatsPerBar
 [click]` prints the members. The app reads both formats.
 
+## AI feedback (phase 3, 2026-10-26)
+
+`dz_coach` (`core/tools/dz_coach.cpp`) is a helper process on llama.cpp b11235 (pinned tarball,
+built with the core; CPU by default, `DZ_COACH_CUDA` for CUDA). It loads the GGUF the user points to.
+The contract `dissonancia-coach/1` (`core/src/coach.{hpp,cpp}`) holds the rest:
+- **Facts**: the session JSON becomes short Portuguese lines, each a metric with its value (and its
+  confidence where the JSON has one): timing (and its worst sixteenth and bars), swing, accents,
+  tempo, intonation (scoops, vibrato, phrases that drift, worst bars), chord changes (the latest, the
+  gaps), clean chords, dynamics, form, and the limits. Against the player's own beats (click off),
+  the timing gives only its spread.
+- **Prompt**: a document, not a chat: a header, the worked examples in `core/coach/examples` (a
+  session JSON each, with the report we wrote for it), this take's facts, then `Relatório:`.
+- **Grammar** (GBNF): "O que foi bem" (1–3 items), "Para trabalhar" (1–2), "Exercícios" (1–2).
+- **Check**: every number in an item must be one of the facts' (an exercise may also name a slower
+  tempo or a count); an item that fails is dropped; a report that loses a section or more than a
+  third of its items is generated again (3 tries).
+
+`dz_coach facts|prompt session.json`, `dz_coach run model.gguf session.json`, and `dz_coach eval
+model.gguf core/coach/tests` (R4.6: each fixed session once; reports passed, numbers invented, items
+that cite a value, low confidence said). `dz_coach_tests` checks the contract without a model: the
+facts of an example, the check, the prompt's layout, and every worked example passing the check
+against its own facts.
+
 ## Baseline (phase 0, 2026-10-21)
 
 `python3 tools/eval/eval.py` (corpora from `tools/eval/corpora.py`). Harmony and chord are scored on
