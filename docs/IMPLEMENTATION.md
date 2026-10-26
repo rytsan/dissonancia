@@ -990,6 +990,12 @@ base model on this machine yet), 22 layers on the 2080 Ti, ~80 s a take:
 | facts and number check only | 7 / 7 | 1 of 49 | 1 | 1 of 2 |
 | + tags, Confiança section, bounded items | 7 / 7 | 0 of 51 | 4 (told as going well, a repeat) | 2 of 2 |
 
+**COACH unit** (`app/Coach.cs`, DS-C in LIVE's default rack under DS-X): MODELO GGUF… points to
+the user's file (kept in `coach.json` with the GPU layers); once a new take's metrics are in, it
+runs `dz_coach run` on it (GERAR on request, PARAR stops it) and shows the checked report, scrolled
+by a click. The take there when the app starts is not reported on by itself. The app ships
+`dz_coach` and `coach/examples` beside it. Not looked at on screen yet.
+
 What the number check could not catch, and the tags fixed: "the intonation improved" (no earlier
 take), "bar 3 is better: 26 cents against a mean of 16", a fact to work on put under what went well.
 

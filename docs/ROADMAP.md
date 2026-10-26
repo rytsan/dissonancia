@@ -90,8 +90,9 @@ and GuitarSet beats; intonation uses vocadito and Dagstuhl.
 
 ## Phase 3 — AI feedback (R4)
 
-Steps 1–4 built 2026-10-26 (`dz_coach`, `core/src/coach.cpp`, IMPLEMENTATION.md). Scored so far
-only on an instruct model run as a continuation; a base model of the user's choice is next.
+Steps 1–5 built 2026-10-26 (`dz_coach`, `core/src/coach.cpp`, the COACH unit; IMPLEMENTATION.md).
+Scored so far only on an instruct model run as a continuation; a base model of the user's choice,
+and the exit test on the user's own sessions, are next.
 
 1. `dz_coach`: a helper process on llama.cpp, built from a pinned release. It loads the GGUF base
    model the user downloaded and chose.

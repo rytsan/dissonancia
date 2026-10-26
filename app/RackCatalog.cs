@@ -5,7 +5,7 @@ namespace Dissonancia;
 // Modular rack (spec §22.4): a fixed catalog of view-only modules, full or half width, heights in
 // rack units, one preset per mode saved as JSON. Changing the rack never touches the analysis.
 
-public enum ModuleKind { Input, Scope, Analyzer, Tuner, Fretboard, Keyboard, Waterfall, Timeline, Transport, Status, Metrics, Pads, Sequencer, Midi, Song, Pedals, MelodyLane }
+public enum ModuleKind { Input, Scope, Analyzer, Tuner, Fretboard, Keyboard, Waterfall, Timeline, Transport, Status, Metrics, Pads, Sequencer, Midi, Song, Pedals, MelodyLane, Coach }
 
 public sealed record RackEntry(ModuleKind Module, bool Half, int HeightU);
 
@@ -16,7 +16,7 @@ public static class RackCatalog
     public static string Name(ModuleKind k) => k switch
     {
         ModuleKind.Input => "Analog VU + peak LEDs", ModuleKind.Analyzer => "Analyzer display (chord + note)",
-        ModuleKind.Waterfall => "CQT waterfall", ModuleKind.Timeline => "Chord timeline", ModuleKind.MelodyLane => "Faixa de melodia", ModuleKind.Metrics => "Métricas do LIVE",
+        ModuleKind.Waterfall => "CQT waterfall", ModuleKind.Timeline => "Chord timeline", ModuleKind.MelodyLane => "Faixa de melodia", ModuleKind.Metrics => "Métricas do LIVE", ModuleKind.Coach => "Coach (relatório do take)",
         ModuleKind.Pads => "Playground: pads + sampler", ModuleKind.Sequencer => "Playground: sequencer", ModuleKind.Midi => "Playground: controlador MIDI", ModuleKind.Song => "Playground: timeline da música", ModuleKind.Pedals => "Playground: pedaleira", _ => k.ToString(),
     };
 
@@ -38,6 +38,7 @@ public static class RackCatalog
         ModuleKind.Input or ModuleKind.Fretboard or ModuleKind.Keyboard => (2, 3),
         ModuleKind.Metrics or ModuleKind.Midi => (1, 2),
         ModuleKind.Pads => (3, 4),
+        ModuleKind.Coach => (2, 5),
         ModuleKind.Sequencer => (2, 4),
         ModuleKind.Song => (2, 3),
         ModuleKind.Pedals => (3, 4),
@@ -62,7 +63,7 @@ public static class RackCatalog
             LiveMode.Piano => [new(ModuleKind.Keyboard, false, 2), new(ModuleKind.Waterfall, false, 2), new(ModuleKind.Timeline, false, 1), new(ModuleKind.MelodyLane, false, 1)],
             _ => [new(ModuleKind.Timeline, false, 1), new(ModuleKind.MelodyLane, false, 2), new(ModuleKind.Waterfall, false, 2)],
         };
-        return [.. top, .. middle, new(ModuleKind.Metrics, false, 1), new(ModuleKind.Transport, false, 1), new(ModuleKind.Status, false, 1)];
+        return [.. top, .. middle, new(ModuleKind.Metrics, false, 1), new(ModuleKind.Coach, false, 2), new(ModuleKind.Transport, false, 1), new(ModuleKind.Status, false, 1)];
     }
 
     /// The playground's units (creation: pads, sequencer, MIDI), added and taken out together.

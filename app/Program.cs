@@ -93,7 +93,7 @@ public sealed class MainWindow : Window
             [ModuleKind.Tuner] = new TunerModule(), [ModuleKind.Fretboard] = new FretboardModule(), [ModuleKind.Keyboard] = new KeyboardModule(),
             [ModuleKind.Waterfall] = new WaterfallModule(), [ModuleKind.Timeline] = new TimelineModule(), [ModuleKind.MelodyLane] = _lane,
             [ModuleKind.Transport] = transport, [ModuleKind.Status] = new StatusModule(),
-            [ModuleKind.Metrics] = new MetricsModule(), [ModuleKind.Pads] = new PadsModule(), [ModuleKind.Sequencer] = new SequencerModule(), [ModuleKind.Midi] = new MidiModule(), [ModuleKind.Song] = new SongModule(), [ModuleKind.Pedals] = new PedalboardModule(),
+            [ModuleKind.Metrics] = new MetricsModule(), [ModuleKind.Pads] = new PadsModule(), [ModuleKind.Sequencer] = new SequencerModule(), [ModuleKind.Midi] = new MidiModule(), [ModuleKind.Song] = new SongModule(), [ModuleKind.Pedals] = new PedalboardModule(), [ModuleKind.Coach] = new CoachModule(),
         };
         ((SequencerModule)catalog[ModuleKind.Sequencer]).Song = (SongModule)catalog[ModuleKind.Song];
         ((SongModule)catalog[ModuleKind.Song]).Bounced += () =>

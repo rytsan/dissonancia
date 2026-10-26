@@ -50,4 +50,12 @@
           Link="%(Filename)%(Extension)" Visible="false" />
   </ItemGroup>
 
+  <!-- AI feedback helper (phase 3, optional): run as its own process on the user's GGUF; its worked examples beside it. -->
+  <ItemGroup>
+    <None Include="../core/build/dz_coac?;../core/build/dz_coach.ex?" CopyToOutputDirectory="PreserveNewest"
+          Link="%(Filename)%(Extension)" Visible="false" />
+    <None Include="../core/coach/examples/*" CopyToOutputDirectory="PreserveNewest"
+          Link="coach/examples/%(Filename)%(Extension)" Visible="false" />
+  </ItemGroup>
+
 </Project>
