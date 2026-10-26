@@ -9,6 +9,10 @@ synthetic strums), `core/tests/test_dynamics.cpp` (loudness and attacks on synth
 `core/tests/test_intonation.cpp` (intonation on a synthetic sung line) and
 `tests/score` (the app loads it, and the older format).
 
+The file is written twice: at REC's stop with the events (no `metrics`, no `limits`), so the take
+opens at once; then, replaced in one step, with them, from a worker that reads the whole take
+(~8 s for 4.5 minutes).
+
 Times are seconds from the take's first downbeat. A number is `null` where there is nothing to
 measure (no attacks in a bar, too few offbeats for a swing).
 

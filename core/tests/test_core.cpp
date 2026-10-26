@@ -176,11 +176,11 @@ TEST_CASE("REC: count-in, bar-aligned start, WAV + sidecar, metronome locked") {
     feeding = false;
     feeder.join();
 
-    std::ifstream f(json);
-    REQUIRE(f.good());
-    std::stringstream ss;
-    ss << f.rdbuf();
-    std::string side = ss.str();
+    // The JSON is there at once; its metrics follow from a worker.
+    auto slurp = [&] { std::ifstream f(json); std::stringstream ss; ss << f.rdbuf(); return ss.str(); };
+    REQUIRE(slurp().find("\"events\"") != std::string::npos);
+    REQUIRE(wait_until([&] { return slurp().find("\"limits\"") != std::string::npos; }, 20));
+    std::string side = slurp();
     auto field = [&](const char* key) {
         auto p = side.find(key);
         REQUIRE(p != std::string::npos);

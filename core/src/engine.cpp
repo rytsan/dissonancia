@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 
 #include "rt.hpp"
 
@@ -162,6 +163,7 @@ int Engine::stop() {
     wake_.notify_one();
     analysisThread_.join();
     recorderThread_.join();
+    if (metricsThread_.joinable()) metricsThread_.join();
     flush_pipeline();   // analysis thread is gone: this thread is now the only producer
     if (ringsInit_) { ma_pcm_rb_uninit(&analysisRing_); ma_pcm_rb_uninit(&recorderRing_); ringsInit_ = false; }
     running_ = false;
@@ -581,7 +583,8 @@ void Engine::write_sidecar(uint64_t frames, uint64_t dropped) {
     std::string path = recPath_;
     size_t dot = path.find_last_of('.');
     path = (dot == std::string::npos ? path : path.substr(0, dot)) + ".json";
-    FILE* f = std::fopen(path.c_str(), "w");
+    // The header and the events now (the next take changes the members), rendered through a temp file.
+    FILE* f = std::tmpfile();
     if (!f) return;
     const SessionConfig& s = session_;
     std::fprintf(f,
@@ -610,19 +613,38 @@ void Engine::write_sidecar(uint64_t frames, uint64_t dropped) {
                  (unsigned long long)recStart_.load(), (unsigned long long)frames, recorderGaps_.load(), (unsigned long long)dropped,
                  !takeLogOverflow_.load() && flushDone_.load() ? "true" : "false");
     write_events_json(f, takeLog_, double(recStart_.load()) / rate_);
-    std::fprintf(f, "\n  ],\n");
-    // The coach's metrics from the closed WAV, read back as mono (not real time: REC has stopped).
-    std::vector<float> x;
-    ma_decoder dec;
-    ma_decoder_config dc = ma_decoder_config_init(ma_format_f32, 1, 0);
-    if (ma_decoder_init_file(recPath_.c_str(), &dc, &dec) == MA_SUCCESS) {
-        float buf[8192];
-        for (ma_uint64 got = 0; ma_decoder_read_pcm_frames(&dec, buf, 8192, &got) == MA_SUCCESS && got > 0;) x.insert(x.end(), buf, buf + got);
-        ma_decoder_uninit(&dec);
-    }
-    write_take_metrics_json(f, x.data(), x.size(), rate_, session_, clickDuringTake_, compensationMs() / 1000.0, dropped);
-    std::fprintf(f, "}\n");
+    std::string head(size_t(std::ftell(f)), '\0');
+    std::rewind(f);
+    const bool read = std::fread(head.data(), 1, head.size(), f) == head.size();
     std::fclose(f);
+    if (!read) return;
+    // Written at once without the metrics (the take opens), then again with them from a worker: the
+    // metrics read the whole take (~8 s for 4.5 min), too long to hold REC's stop.
+    auto write = [](const std::string& to, const std::string& text) {
+        if (FILE* o = std::fopen(to.c_str(), "w")) { std::fputs(text.c_str(), o); std::fclose(o); }
+    };
+    write(path, head + "\n  ]\n}\n");
+    if (metricsThread_.joinable()) metricsThread_.join();
+    metricsThread_ = std::thread([=, wav = recPath_, session = session_, click = clickDuringTake_, rate = rate_, comp = compensationMs() / 1000.0] {
+        std::vector<float> x;   // the closed WAV, as mono
+        ma_decoder dec;
+        ma_decoder_config dc = ma_decoder_config_init(ma_format_f32, 1, 0);
+        if (ma_decoder_init_file(wav.c_str(), &dc, &dec) == MA_SUCCESS) {
+            float buf[8192];
+            for (ma_uint64 got = 0; ma_decoder_read_pcm_frames(&dec, buf, 8192, &got) == MA_SUCCESS && got > 0;) x.insert(x.end(), buf, buf + got);
+            ma_decoder_uninit(&dec);
+        }
+        const std::string tmp = path + ".tmp";
+        FILE* o = std::fopen(tmp.c_str(), "w");
+        if (!o) return;
+        std::fputs(head.c_str(), o);
+        std::fputs("\n  ],\n", o);
+        write_take_metrics_json(o, x.data(), x.size(), rate, session, click, comp, dropped);
+        std::fputs("}\n", o);
+        std::fclose(o);
+        std::error_code ec;
+        std::filesystem::rename(tmp, path, ec);   // replaces it in one step (readers see one or the other)
+    });
 }
 
 }  // namespace dz
