@@ -1,0 +1,30 @@
+# The coach's repertoire (contract dissonancia-coach/1): exercises we wrote, by the kind of fact they
+# work on (core/src/coach.cpp gives each fact its kind). "kind: text". No digits here: the model fits
+# an exercise to the take with its bars and a slower tempo, and the check holds those to the facts.
+
+timing: Toque o take inteiro com o metrônomo um pouco mais lento, contando em voz alta, e só suba o tempo quando o clique sumir debaixo da batida.
+timing: Grave um minuto só de batidas abafadas no clique, sem acordes, mirando o ataque exatamente em cima do clique.
+timing-position: Toque só a subdivisão que escapa, abafando as outras batidas, com o metrônomo mais lento e contando a subdivisão em voz alta.
+timing-position: Com o metrônomo marcando as colcheias, toque a frase prestando atenção só na posição indicada até ela cair junto com o clique.
+timing-bar: Toque em loop os compassos indicados com o metrônomo mais lento, contando em voz alta, até eles ficarem iguais aos outros.
+timing-bar: Toque os compassos indicados e o compasso seguinte, sem parar, mirando a primeira batida do compasso seguinte em cima do clique.
+tempo: Toque o take com o metrônomo ligado o tempo todo e, na segunda vez, com o clique só no primeiro tempo de cada compasso.
+tempo: Grave a mesma frase três vezes seguidas com o metrônomo e compare onde cada uma começa a correr ou a arrastar.
+intonation: Cante a frase nota por nota contra uma nota de referência do piano, segurando cada nota até ela parar de oscilar.
+intonation: Cante a escala da tonalidade bem devagar com um drone na tônica, ouvindo cada nota encaixar no drone.
+scoop: Cante as notas que deslizam isoladas, começando já na altura certa, sem deslizar, com uma referência de piano antes de cada uma.
+scoop: Imagine a nota antes de cantar e ataque com um som curto e preciso, depois sustente.
+phrase-drift: Cante a frase indicada segurando a última nota contra uma referência de piano, sem deixar subir nem cair.
+phrase-drift: Cante a frase indicada com um drone na tônica, parando no meio para checar se ainda está encaixada.
+intonation-bar: Cante em loop o compasso indicado bem devagar, com uma referência de piano para cada nota.
+changes: Toque só as trocas de acorde, um acorde por compasso, com o metrônomo mais lento, mirando a troca em cima do primeiro tempo.
+late-change: Toque só a troca indicada, indo e voltando entre os dois acordes com o metrônomo mais lento, até a mão chegar antes do clique.
+late-change: Antecipe o desenho do acorde seguinte na última batida do compasso, com o metrônomo mais lento.
+gap: Toque só as trocas indicadas com o metrônomo mais lento, segurando o acorde até o último instante antes de trocar.
+gap: Toque as trocas indicadas mantendo a mão direita batendo o tempo todo, mesmo que a troca saia suja no começo.
+dynamics: Toque a mesma batida com o metrônomo, mantendo o mesmo volume em todas as batidas da mesma posição, e grave para conferir.
+dynamics: Toque a frase com um crescendo planejado do começo ao fim e depois com volume constante, percebendo a diferença.
+clipping: Baixe o ganho de entrada até o pico parar de clipar e grave de novo um take mais longo.
+quiet: Aumente o ganho de entrada ou aproxime o microfone e grave de novo, com o pico perto do topo sem clipar.
+dropped: Feche outros programas pesados e grave de novo: o gravador perdeu amostras neste take.
+low-confidence: Grave de novo um take mais longo, com o metrônomo, para que as medidas tenham mais ataques.

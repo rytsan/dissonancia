@@ -1,0 +1,8 @@
+O que foi bem:
+- A afinação de referência está certa: a sua está +2 cents do A4 = 440 Hz.
+Para trabalhar:
+- As frases desafinam enquanto andam: a frase 4 caiu 52 cents do começo ao fim, e a frase 2 caiu 38 cents.
+- Muitas notas entram deslizando: 22 notas com scoop de mais de 30 cents.
+Exercícios:
+- Cante a frase 4 com um drone na tônica, parando no meio para checar se ainda está encaixada.
+- Cante as notas que deslizam isoladas, começando já na altura certa, com uma referência de piano antes de cada uma.

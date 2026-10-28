@@ -49,9 +49,15 @@ Facts facts(const std::string& text) {
     Facts f;
     // Each line carries our judgement, so the model words it rather than weighs it: [bom] goes to
     // what went well, [trabalhar] to what to work on, [neutro] either or neither, [limite] to the limits.
-    auto add = [&](const char* tag, const std::string& s) { f.lines.push_back(std::string("[") + tag + "] " + s); };
+    auto add = [&](const char* kind, const char* tag, const std::string& s) {
+        f.lines.push_back(std::string("[") + tag + "] " + s);
+        f.kinds.push_back(kind);
+    };
     f.bpm = root.contains("session") ? get(root["session"], "bpm") : 0;
 
+    // A voice's attacks spread more than a pick's (a consonant before the vowel): looser limits.
+    const bool voice = m.contains("intonation");
+    const double good = voice ? 30 : 20, bad = voice ? 40 : 25;
     if (m.contains("timing") && get(m["timing"], "matched") > 0) {
         const json& t = m["timing"];
         const bool metro = t.value("grid", "") == "metronome";
@@ -59,26 +65,26 @@ Facts facts(const std::string& text) {
         f.lowConfidence |= conf < 0.5;
         // Against the player's own beats (the click off) the mean says nothing: only the spread.
         if (metro)
-            add(conf < 0.5 ? "neutro" : std::fabs(mean) <= 10 && get(t, "spreadMs") <= 20 ? "bom" : std::fabs(mean) > 15 || get(t, "spreadMs") > 25 ? "trabalhar" : "neutro",
+            add("timing", conf < 0.5 ? "neutro" : std::fabs(mean) <= 10 && get(t, "spreadMs") <= good ? "bom" : std::fabs(mean) > 15 || get(t, "spreadMs") > bad ? "trabalhar" : "neutro",
                 "Timing: média " + num(mean, 0, true) + " ms (" + late(mean) + " do metrônomo), desvio " + num(get(t, "spreadMs")) + " ms, " +
                 num(get(t, "matched")) + " ataques; confiança " + level(conf) + ".");
         else
-            add(get(t, "spreadMs") <= 20 ? "bom" : get(t, "spreadMs") > 25 ? "trabalhar" : "neutro", "Timing (metrônomo desligado, medido contra o seu próprio pulso): desvio " + num(get(t, "spreadMs")) + " ms, " + num(get(t, "matched")) +
+            add("timing", get(t, "spreadMs") <= good ? "bom" : get(t, "spreadMs") > bad ? "trabalhar" : "neutro", "Timing (metrônomo desligado, medido contra o seu próprio pulso): desvio " + num(get(t, "spreadMs")) + " ms, " + num(get(t, "matched")) +
                 " ataques; confiança " + level(conf) + ".");
         // A sixteenth played apart from the rest, and the bars furthest off.
         for (const json& p : t.value("perSixteenth", json::array()))
-            if (get(p, "count") >= 4 && std::fabs(get(p, "offsetMs") - mean) >= 10)
-                add("trabalhar", "Timing na posição '" + p.value("position", "") + "' do tempo: " + num(get(p, "offsetMs"), 0, true) + " ms (" + num(get(p, "count")) +
+            if (get(p, "count") >= 4 && std::fabs(get(p, "offsetMs") - mean) >= 10 && std::fabs(get(p, "offsetMs")) >= 15)
+                add("timing-position", "trabalhar", "Timing na posição '" + p.value("position", "") + "' do tempo: " + num(get(p, "offsetMs"), 0, true) + " ms (" + num(get(p, "count")) +
                     " ataques).");
         std::vector<std::pair<double, int>> bars;
         for (const json& b : t.value("bars", json::array()))
             if (has(b, "meanOffsetMs") && get(b, "matched") >= 2) bars.emplace_back(get(b, "meanOffsetMs"), int(get(b, "bar")));
         std::sort(bars.begin(), bars.end(), [](auto& a, auto& b) { return std::fabs(a.first) > std::fabs(b.first); });
         for (size_t i = 0; i < bars.size() && i < 2; i++)
-            if (std::fabs(bars[i].first) >= 15) add("trabalhar", "Timing no compasso " + std::to_string(bars[i].second) + ": " + num(bars[i].first, 0, true) + " ms.");
+            if (std::fabs(bars[i].first) >= (voice ? 30 : 15)) add("timing-bar", "trabalhar", "Timing no compasso " + std::to_string(bars[i].second) + ": " + num(bars[i].first, 0, true) + " ms.");
         if (has(t, "swing")) {
             const double s = get(t, "swing");
-            add("neutro", "Swing: " + num(s, 1) + (s < 1.2 ? " (colcheias retas)." : s > 1.8 ? " (colcheias tercinadas)." : " (colcheias suingadas)."));
+            add("swing", "neutro", "Swing: " + num(s, 1) + (s < 1.2 ? " (colcheias retas)." : s > 1.8 ? " (colcheias tercinadas)." : " (colcheias suingadas)."));
         }
         const json acc = t.value("accentPerBeatDb", json::array());
         if (acc.size() >= 2) {
@@ -89,7 +95,7 @@ Facts facts(const std::string& text) {
                     if (acc[i].get<double>() > hi) hi = acc[i].get<double>(), top = int(i);
                     lo = std::min(lo, acc[i].get<double>());
                 }
-            if (top >= 0 && hi - lo >= 3) add("neutro", "Acento: o tempo " + std::to_string(top + 1) + " do compasso soa " + num(hi - lo) + " dB acima do mais fraco.");
+            if (top >= 0 && hi - lo >= 3) add("accent", "neutro", "Acento: o tempo " + std::to_string(top + 1) + " do compasso soa " + num(hi - lo) + " dB acima do mais fraco.");
         }
     }
     // The tempo heard is left out when it is far from the click (a beat tracker's octave or 3:2 error
@@ -100,24 +106,24 @@ Facts facts(const std::string& text) {
         std::string s = "Tempo: " + num(get(t, "bpm")) + " bpm tocados (metrônomo " + num(get(t, "metronomeBpm")) + ")";
         if (has(t, "driftBpm")) s += ", deriva de " + num(get(t, "driftBpm"), 1, true) + " bpm ao longo do take";
         const double drift = std::fabs(get(t, "driftBpm")), off = get(t, "metronomeBpm") > 0 ? std::fabs(get(t, "bpm") / get(t, "metronomeBpm") - 1) : 0;
-        add(drift <= 2 && off <= 0.02 ? "bom" : drift > 3 || off > 0.05 ? "trabalhar" : "neutro", s + ".");
+        add("tempo", drift <= 2 && off <= 0.02 ? "bom" : drift > 3 || off > 0.05 ? "trabalhar" : "neutro", s + ".");
     }
     if (m.contains("intonation") && has(m["intonation"], "inTuneOwnTuningPct")) {
         const json& t = m["intonation"];
         const double conf = get(t, "confidence");
         f.lowConfidence |= conf < 0.5;
-        add(get(t, "inTuneOwnTuningPct") >= 75 ? "bom" : get(t, "inTuneOwnTuningPct") < 60 ? "trabalhar" : "neutro",
+        add("intonation", get(t, "inTuneOwnTuningPct") >= 75 ? "bom" : get(t, "inTuneOwnTuningPct") < 60 ? "trabalhar" : "neutro",
             "Afinação: " + num(get(t, "inTuneOwnTuningPct")) + "% das notas a até 20 cents da sua afinação, erro médio " + num(get(t, "meanAbsCents")) +
             " cents, " + num(get(t, "notes")) + " notas; confiança " + level(conf) + ".");
-        add(std::fabs(get(t, "tuningCents")) <= 10 ? "bom" : "neutro",
+        add("tuning", std::fabs(get(t, "tuningCents")) <= 10 ? "bom" : "neutro",
             "Afinação de referência: a sua está " + num(get(t, "tuningCents"), 0, true) + " cents do A4 = " + num(get(t, "referenceA4")) + " Hz.");
-        if (get(t, "scoops") > 0) add(get(t, "scoops") > 0.25 * get(t, "notes") ? "trabalhar" : "neutro", "Afinação: " + num(get(t, "scoops")) + " notas entram deslizando (scoop de mais de 30 cents).");
-        if (get(t, "vibratoNotes") > 0) add("neutro", "Vibrato em " + num(get(t, "vibratoNotes")) + " notas.");
+        if (get(t, "scoops") > 0) add("scoop", get(t, "scoops") > 0.25 * get(t, "notes") ? "trabalhar" : "neutro", "Afinação: " + num(get(t, "scoops")) + " notas entram deslizando (scoop de mais de 30 cents).");
+        if (get(t, "vibratoNotes") > 0) add("vibrato", "neutro", "Vibrato em " + num(get(t, "vibratoNotes")) + (get(t, "vibratoNotes") == 1 ? " nota." : " notas."));
         int k = 0;
         for (const json& p : t.value("phrases", json::array())) {
             k++;
             if (std::fabs(get(p, "driftCents")) >= 30)
-                add("trabalhar", "Afinação na frase " + std::to_string(k) + " (" + num(get(p, "start"), 1) + " a " + num(get(p, "end"), 1) + " s): " +
+                add("phrase-drift", "trabalhar", "Afinação na frase " + std::to_string(k) + " (" + num(get(p, "start"), 1) + " a " + num(get(p, "end"), 1) + " s): " +
                     (get(p, "driftCents") < 0 ? "caiu " : "subiu ") + num(std::fabs(get(p, "driftCents"))) + " cents do começo ao fim.");
         }
         std::vector<std::pair<double, int>> bars;
@@ -125,13 +131,13 @@ Facts facts(const std::string& text) {
             if (get(b, "notes") >= 2) bars.emplace_back(get(b, "meanAbsCents"), int(get(b, "bar")));
         std::sort(bars.rbegin(), bars.rend());
         for (size_t i = 0; i < bars.size() && i < 2; i++)
-            if (bars[i].first >= 25) add("trabalhar", "Afinação no compasso " + std::to_string(bars[i].second) + ": erro médio " + num(bars[i].first) + " cents.");
+            if (bars[i].first >= 25) add("intonation-bar", "trabalhar", "Afinação no compasso " + std::to_string(bars[i].second) + ": erro médio " + num(bars[i].first) + " cents.");
     }
     if (m.contains("harmony") && get(m["harmony"], "changes") > 0) {
         const json& h = m["harmony"];
         const double conf = get(h, "confidence");
         f.lowConfidence |= conf < 0.5;
-        add(conf < 0.5 ? "neutro" : std::fabs(get(h, "changeMeanMs")) <= 15 && get(h, "changeSpreadMs") <= 25 ? "bom" : "trabalhar", "Trocas de acorde: " + num(get(h, "changes")) + ", em média " + num(get(h, "changeMeanMs"), 0, true) + " ms do tempo, desvio " +
+        add("changes", conf < 0.5 ? "neutro" : std::fabs(get(h, "changeMeanMs")) <= 15 && get(h, "changeSpreadMs") <= 25 ? "bom" : "trabalhar", "Trocas de acorde: " + num(get(h, "changes")) + ", em média " + num(get(h, "changeMeanMs"), 0, true) + " ms do tempo, desvio " +
             num(get(h, "changeSpreadMs")) + " ms; confiança " + level(conf) + ".");
         // The latest changes and the gaps, by bar; the chord a change goes to.
         const json chords = h.value("chordList", json::array());
@@ -152,16 +158,16 @@ Facts facts(const std::string& text) {
         for (size_t i = 0; i < late.size() && i < 2; i++)
             if (std::fabs(late[i].first) >= 30) {
                 const std::string sym = to(get(late[i].second, "time"));
-                add("trabalhar", "Troca" + (sym.empty() ? std::string() : " para " + sym) + " no compasso " + std::to_string(int(get(late[i].second, "bar"))) + ": " +
+                add("late-change", "trabalhar", "Troca" + (sym.empty() ? std::string() : " para " + sym) + " no compasso " + std::to_string(int(get(late[i].second, "bar"))) + ": " +
                     num(late[i].first, 0, true) + " ms.");
             }
         if (!gaps.empty()) {
             std::string list;
             for (size_t i = 0; i < gaps.size() && i < 4; i++) list += (i ? ", " : "") + gaps[i];
-            add("trabalhar", "O som cai antes da troca (mão sai cedo) em " + num(double(gapCount)) + " trocas: compasso" + (gaps.size() > 1 ? "s " : " ") + list + ".");
+            add("gap", "trabalhar", "O som cai antes da troca (mão sai cedo) em " + num(double(gapCount)) + " trocas: compasso" + (gaps.size() > 1 ? "s " : " ") + list + ".");
         }
         if (has(h, "cleanPct"))
-            add("neutro", "Acordes limpos: " + num(get(h, "cleanPct")) + "% das notas ouvidas são do acorde (compare entre takes: a escuta põe parte das notas fora).");
+            add("clean", "neutro", "Acordes limpos: " + num(get(h, "cleanPct")) + "% das notas ouvidas são do acorde (compare entre takes: a escuta põe parte das notas fora).");
     }
     if (m.contains("dynamics") && has(m["dynamics"], "integratedLufs")) {
         const json& d = m["dynamics"];
@@ -169,7 +175,7 @@ Facts facts(const std::string& text) {
         if (has(d, "attackSpreadDb")) s += "; as batidas variam " + num(get(d, "attackSpreadDb"), 1) + " dB na mesma posição";
         if (std::fabs(get(d, "trendLu")) >= 2) s += std::string("; ") + (get(d, "trendLu") > 0 ? "cresce " : "cai ") + num(std::fabs(get(d, "trendLu")), 1) + " LU ao longo do take";
         const double spread = get(d, "attackSpreadDb", 3);
-        add(spread <= 2.5 ? "bom" : spread > 4 ? "trabalhar" : "neutro", s + ".");
+        add("dynamics", spread <= 2.5 ? "bom" : spread > 4 ? "trabalhar" : "neutro", s + ".");
     }
     if (m.contains("form") && !m["form"].value("form", "").empty()) {
         const json& t = m["form"];
@@ -178,11 +184,15 @@ Facts facts(const std::string& text) {
             s += "; as repetições batem " + num(get(t, "repeatMatchPct")) + "% com a primeira vez";
             if (has(t, "repeatTempoChangePct")) s += ", com o tempo " + num(get(t, "repeatTempoChangePct"), 1) + "% diferente";
         }
-        add(get(t, "repeats") > 0 && get(t, "repeatMatchPct") >= 85 ? "bom" : "neutro", s + ".");
+        add("form", get(t, "repeats") > 0 && get(t, "repeatMatchPct") >= 85 ? "bom" : "neutro", s + ".");
     }
     if (root.contains("limits"))
         for (const json& w : root["limits"].value("warnings", json::array()))
-            if (w.is_string()) add("limite", warning(w.get<std::string>()) + ".");
+            if (w.is_string()) {
+                const std::string text = w.get<std::string>();
+                add(text.rfind("clipping", 0) == 0 ? "clipping" : text.rfind("very quiet", 0) == 0 ? "quiet" : text.rfind("frames dropped", 0) == 0 ? "dropped" : "low-confidence",
+                    "limite", warning(text) + ".");
+            }
     return f;
 }
 
@@ -198,18 +208,77 @@ ch ::= [A-Za-zÀ-ÿ0-9 ,;:!?()'"%+/=–—…-]
     return g;
 }
 
-std::string prompt(const std::vector<Example>& examples, const Facts& take) {
+Exercises parse_exercises(const std::string& text) {
+    Exercises e;
+    size_t pos = 0;
+    while (pos < text.size()) {
+        size_t end = text.find('\n', pos);
+        if (end == std::string::npos) end = text.size();
+        std::string line = text.substr(pos, end - pos);
+        pos = end + 1;
+        if (line.empty() || line[0] == '#') continue;
+        const size_t colon = line.find(':');
+        if (colon == std::string::npos) continue;
+        size_t t = colon + 1;
+        while (t < line.size() && line[t] == ' ') t++;
+        e[line.substr(0, colon)].push_back(line.substr(t));
+    }
+    return e;
+}
+
+namespace {
+// The kinds of fact a take has to work on: the limits first, then [trabalhar] in the facts' order.
+std::vector<std::string> to_work_on(const Facts& f) {
+    std::vector<std::string> k;
+    for (const char* tag : {"[limite]", "[trabalhar]"})
+        for (size_t i = 0; i < f.lines.size() && i < f.kinds.size(); i++)
+            if (f.lines[i].rfind(tag, 0) == 0 && std::find(k.begin(), k.end(), f.kinds[i]) == k.end()) k.push_back(f.kinds[i]);
+    return k;
+}
+bool sung(const Facts& f) { return std::find(f.kinds.begin(), f.kinds.end(), "intonation") != f.kinds.end(); }
+}  // namespace
+
+std::vector<Example> select(const std::vector<Example>& bank, const Facts& take, size_t n) {
+    const std::vector<std::string> list = to_work_on(take);
+    const std::set<std::string> want(list.begin(), list.end());
+    std::vector<std::pair<int, size_t>> score;
+    for (size_t i = 0; i < bank.size(); i++) {
+        int s = sung(bank[i].facts) == sung(take) ? 3 : 0;
+        for (const std::string& k : to_work_on(bank[i].facts)) s += 2 * int(want.count(k));
+        if (take.lowConfidence && bank[i].facts.lowConfidence) s += 3;
+        score.emplace_back(-s, i);
+    }
+    std::sort(score.begin(), score.end());
+    std::vector<size_t> pick;
+    for (size_t i = 0; i < score.size() && i < n; i++) pick.push_back(score[i].second);
+    std::sort(pick.begin(), pick.end());   // the bank's order: the same examples make the same prompt prefix
+    std::vector<Example> out;
+    for (size_t i : pick) out.push_back(bank[i]);
+    return out;
+}
+
+std::string prompt(const std::vector<Example>& examples, const Facts& take, const Exercises& exercises) {
     std::string p =
         "Dissonância — relatórios de treino\n\n"
         "Cada relatório lê só os fatos medidos no take. Cada frase cita um fato com o seu valor e nunca inventa um número. "
         "Onde a confiança é baixa, o relatório diz isso. Ele diz o que foi bem (os fatos marcados [bom]), uma ou duas coisas para trabalhar "
-        "(os marcados [trabalhar] ou [limite]), e um exercício para cada uma. Sem fato [bom], o que foi bem vem do melhor dos [neutro]. "
+        "(os marcados [trabalhar] ou [limite]), e um exercício para cada uma, escolhido do repertório e ajustado aos compassos e ao tempo do take. "
+        "Sem fato [bom], o que foi bem vem do melhor dos [neutro]. "
         "Não compara com takes anteriores: só este take foi medido. Se um fato tem confiança baixa, o relatório termina com uma seção "
         "Confiança que diz isso.\n";
     int n = 0;
     auto block = [&](const Facts& f) {
         p += "\n### Take " + std::to_string(++n) + "\nFatos:\n";
         for (const std::string& l : f.lines) p += "- " + l + "\n";
+        // The repertoire for what this take has to work on: two per kind, six at most.
+        std::vector<std::string> ex;
+        for (const std::string& k : to_work_on(f))
+            if (auto it = exercises.find(k); it != exercises.end())
+                for (size_t i = 0; i < it->second.size() && i < 2 && ex.size() < 6; i++) ex.push_back(it->second[i]);
+        if (!ex.empty()) {
+            p += "Repertório de exercícios:\n";
+            for (const std::string& e : ex) p += "- " + e + "\n";
+        }
         p += "Relatório:\n";
     };
     for (const Example& e : examples) {

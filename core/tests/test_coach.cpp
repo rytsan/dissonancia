@@ -1,4 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
+#include <filesystem>
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -70,14 +72,16 @@ TEST_CASE("coach: the prompt is the examples, then this take's facts, then the r
     Facts a, b;
     a.lines = {"Timing: média +5 ms."};
     b.lines = {"Timing: média -8 ms."};
-    const std::string p = prompt({{a, "O que foi bem:\n- x\n"}}, b);
+    const std::string p = prompt({{"a", a, "O que foi bem:\n- x\n"}}, b);
     CHECK(p.find("### Take 1\nFatos:\n- Timing: média +5 ms.\nRelatório:\nO que foi bem:\n- x\n") != std::string::npos);
     const std::string tail = "### Take 2\nFatos:\n- Timing: média -8 ms.\nRelatório:\n";
     CHECK(p.ends_with(tail));
 }
 
 TEST_CASE("coach: the worked examples pass the check against their own facts (the contract holds)") {
-    for (const char* name : {"1-guitar", "2-voice", "3-short-clipped"}) {
+    for (const auto& e : std::filesystem::directory_iterator(DZ_COACH_DIR "/examples")) {
+        if (e.path().extension() != ".json") continue;
+        const std::string name = e.path().stem().string();
         const std::string base = std::string(DZ_COACH_DIR "/examples/") + name;
         const Checked c = check(slurp(base + ".txt"), facts(slurp(base + ".json")));
         INFO(name << ": " << c.dropped << " dropped" << (c.droppedItems.empty() ? "" : ": " + c.droppedItems[0]));
@@ -85,4 +89,29 @@ TEST_CASE("coach: the worked examples pass the check against their own facts (th
         CHECK(c.ok);
     }
     CHECK(facts(slurp(DZ_COACH_DIR "/examples/3-short-clipped.json")).lowConfidence);
+}
+
+TEST_CASE("coach: the closest examples, and the repertoire for what the take has to work on") {
+    std::vector<Example> bank;
+    for (const auto& e : std::filesystem::directory_iterator(DZ_COACH_DIR "/examples"))
+        if (e.path().extension() == ".json")
+            bank.push_back({e.path().stem().string(), facts(slurp(e.path().string())), slurp(std::filesystem::path(e.path()).replace_extension(".txt").string())});
+    std::sort(bank.begin(), bank.end(), [](const Example& a, const Example& b) { return a.name < b.name; });
+    auto names = [](const std::vector<Example>& v) { std::string s; for (const Example& e : v) s += e.name + " "; return s; };
+    // A sung take gets sung examples; a guitar take with gaps and low confidence, guitar ones with those.
+    const Facts voice = facts(slurp(DZ_COACH_DIR "/tests/voice-25.json"));
+    INFO(names(select(bank, voice)));
+    for (const Example& e : select(bank, voice)) CHECK(e.name.find("voice") != std::string::npos);
+    const Facts quiet = facts(slurp(DZ_COACH_DIR "/tests/quiet-short.json"));
+    const auto q = select(bank, quiet);
+    INFO(names(q));
+    CHECK(std::any_of(q.begin(), q.end(), [](const Example& e) { return e.facts.lowConfidence; }));
+    for (const Example& e : q) CHECK(e.name.find("voice") == std::string::npos);
+    // The repertoire: the exercises for the take's kinds to work on, and no digits in them.
+    const Exercises ex = parse_exercises(slurp(DZ_COACH_DIR "/exercises.txt"));
+    CHECK(ex.at("gap").size() == 2);
+    for (const auto& [kind, list] : ex)
+        for (const std::string& t : list) CHECK(std::none_of(t.begin(), t.end(), ::isdigit));
+    const std::string p = prompt(q, quiet, ex);
+    CHECK(p.find("Repertório de exercícios:\n- Aumente o ganho de entrada") != std::string::npos);
 }

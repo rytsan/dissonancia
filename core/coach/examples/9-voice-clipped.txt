@@ -1,0 +1,8 @@
+O que foi bem:
+- A afinação de referência está centrada: 0 cents do A4 = 440 Hz.
+Para trabalhar:
+- O sinal clipou: o volume de entrada estava alto demais.
+- Só 54% das notas ficaram a até 20 cents da sua afinação, e 22 notas entram deslizando.
+Exercícios:
+- Baixe o ganho de entrada até o pico parar de clipar e grave de novo um take mais longo.
+- Imagine a nota antes de cantar e ataque com um som curto e preciso, depois sustente, começando pelo compasso 5.

@@ -4,6 +4,7 @@
 // continues under a grammar; the report it writes is checked: every number must be one of the facts'.
 // No model here: dz_coach runs it.
 #pragma once
+#include <map>
 #include <string>
 #include <vector>
 
@@ -14,6 +15,7 @@ constexpr const char* kContract = "dissonancia-coach/1";
 
 struct Facts {
     std::vector<std::string> lines;   // "[bom] Timing: média +2 ms ...": our judgement, then the fact
+    std::vector<std::string> kinds;   // per line, what it is about ("timing-bar", "gap", "scoop", ...)
     bool lowConfidence = false;       // a metric the report must hedge
     double bpm = 0;                   // the take's metronome (exercises may slow it down)
 };
@@ -22,12 +24,24 @@ struct Facts {
 Facts facts(const std::string& sessionJson);
 
 struct Example {
+    std::string name;
     Facts facts;
     std::string report;   // written by us, in the grammar's sections
 };
 
-// The document the model continues: a header, the examples, this take's facts, "Relatório:\n".
-std::string prompt(const std::vector<Example>& examples, const Facts& take);
+// The exercises we wrote, by the kind of fact they work on ("gap", "scoop", ...): the model picks
+// and fits them to the take (bars, tempo) rather than inventing one.
+using Exercises = std::map<std::string, std::vector<std::string>>;
+// "kind: text" per line; '#' starts a comment.
+Exercises parse_exercises(const std::string& text);
+
+// The n examples closest to the take (the same instrument, the same kinds of fact to work on, low
+// confidence when the take has it), in the bank's order.
+std::vector<Example> select(const std::vector<Example>& bank, const Facts& take, size_t n = 2);
+
+// The document the model continues: a header, the examples, then this take; each take its facts,
+// the exercises for what it has to work on, "Relatório:\n".
+std::string prompt(const std::vector<Example>& examples, const Facts& take, const Exercises& exercises = {});
 
 // The report's sections (llama.cpp GBNF), from right after "Relatório:\n" to its end; a take with
 // low confidence adds a "Confiança:" section that says so.

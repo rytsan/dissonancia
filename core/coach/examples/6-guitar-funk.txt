@@ -1,0 +1,9 @@
+O que foi bem:
+- As trocas de acorde caem no tempo: em média 0 ms, com desvio de 11 ms nas 16 trocas.
+- A forma se repete bem: as repetições batem 85% com a primeira vez.
+Para trabalhar:
+- O '&' do tempo arrasta: +42 ms, enquanto a média geral é +14 ms.
+- A mão sai cedo antes de 3 trocas, nos compassos 3, 12 e 13.
+Exercícios:
+- Com o metrônomo a 80 bpm marcando as colcheias, toque a frase prestando atenção só no '&' até ele cair junto com o clique.
+- Toque só as trocas dos compassos 12 e 13 a 80 bpm, segurando o acorde até o último instante antes de trocar.

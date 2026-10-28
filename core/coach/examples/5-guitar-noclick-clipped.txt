@@ -1,0 +1,9 @@
+O que foi bem:
+- O pulso ficou firme sem metrônomo: desvio de 19 ms em 122 ataques.
+- As trocas de acorde caem no tempo: em média -10 ms nas 21 trocas.
+Para trabalhar:
+- O sinal clipou: o volume de entrada estava alto demais.
+- Duas trocas chegam adiantadas: para Cm7/G no compasso 5, a -42 ms, e para Dbadd9/Eb no compasso 10, a -44 ms.
+Exercícios:
+- Baixe o ganho de entrada até o pico parar de clipar e grave de novo um take mais longo.
+- Toque só as trocas dos compassos 5 e 10, indo e voltando entre os dois acordes a 70 bpm, até a mão chegar junto com o clique.

@@ -1,0 +1,9 @@
+O que foi bem:
+- O timing está em cima do metrônomo: média -3 ms, com desvio de 20 ms em 87 ataques.
+- As trocas de acorde caem no tempo: em média -6 ms nas 16 trocas.
+Para trabalhar:
+- O compasso 12 corre: -22 ms, e a troca para F# nele chega a -30 ms.
+- A mão sai cedo antes de 3 trocas, nos compassos 6, 12 e 13.
+Exercícios:
+- Toque os compassos 12 e 13 sem parar a 90 bpm, mirando a primeira batida do compasso 13 em cima do clique.
+- Toque as trocas dos compassos 6 e 12 mantendo a mão direita batendo o tempo todo, mesmo que a troca saia suja no começo.

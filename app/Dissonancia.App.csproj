@@ -57,6 +57,7 @@
     <!-- llama.cpp's libraries and ggml's backend plugins (CPU variants, CUDA, Vulkan: what this machine built). -->
     <None Include="../core/build/bin/libllama.so*;../core/build/bin/libggml*.so*;../core/build/bin/libllama*.dylib;../core/build/bin/libggml*.dylib;../core/build/bin/llam?.dll;../core/build/bin/ggml*.dll"
           CopyToOutputDirectory="PreserveNewest" Link="%(Filename)%(Extension)" Visible="false" />
+    <None Include="../core/coach/exercises.txt" CopyToOutputDirectory="PreserveNewest" Link="coach/exercises.txt" Visible="false" />
     <None Include="../core/coach/examples/*" CopyToOutputDirectory="PreserveNewest"
           Link="coach/examples/%(Filename)%(Extension)" Visible="false" />
   </ItemGroup>

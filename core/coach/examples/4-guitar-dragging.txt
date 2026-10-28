@@ -1,0 +1,10 @@
+O que foi bem:
+- O andamento se manteve: 67 bpm tocados contra 68 do metrônomo, com deriva de só +0,7 bpm.
+Para trabalhar:
+- A batida arrasta: média de +28 ms atrás do metrônomo, com desvio de 34 ms.
+- As semicolcheias do 'e' saem bem atrasadas: +68 ms.
+Exercícios:
+- Toque só as semicolcheias do 'e', abafando as outras batidas, com o metrônomo a 60 bpm e contando a subdivisão em voz alta.
+- Toque em loop os compassos 1 e 5 com o metrônomo a 60 bpm, contando em voz alta, até eles ficarem iguais aos outros.
+Confiança:
+- As trocas de acorde têm confiança baixa neste take: poucas trocas no grid, então não as comento.
