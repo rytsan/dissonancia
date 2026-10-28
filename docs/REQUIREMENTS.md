@@ -99,8 +99,10 @@ it rests on.
   - a concrete exercise for each (for example, "bar 5–8: changes to D are 120 ms late — loop them
     at 70 bpm").
 - R4.4: Language: Portuguese by default.
-- R4.5: The model is **local and a base model**: pre-trained only, not instruct or thinking
-  (decision 2026-10-21). It continues a document; it is not a chat.
+- R4.5: The model is **local**, and it continues a document; it is not a chat (decision
+  2026-10-21). A base model was the plan; on 2026-10-28 the user kept Qwen3.6-35B-A3B, an instruct
+  model run as a plain continuation, because it passed the R4.6 test and no official base GGUF of a
+  recent model was found. Any GGUF the user chooses still goes through that test.
   - The user downloads the model and accepts its license; a model is a separate contract. The app
     points to a GGUF file of the user's choice, and nothing is fetched or bundled by us.
   - Inference runs in llama.cpp, built locally from a pinned release (P4). Like `dz_separate`, it

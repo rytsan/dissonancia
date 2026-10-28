@@ -91,8 +91,8 @@ and GuitarSet beats; intonation uses vocadito and Dagstuhl.
 ## Phase 3 — AI feedback (R4)
 
 Steps 1–5 built 2026-10-26 (`dz_coach`, `core/src/coach.cpp`, the COACH unit; IMPLEMENTATION.md).
-Scored so far only on an instruct model run as a continuation; a base model of the user's choice,
-and the exit test on the user's own sessions, are next.
+Model kept 2026-10-28: Qwen3.6-35B-A3B (instruct, run as a continuation; see R4.5). Next: the exit
+test on the user's own sessions.
 
 1. `dz_coach`: a helper process on llama.cpp, built from a pinned release. It loads the GGUF base
    model the user downloaded and chose.
@@ -125,14 +125,14 @@ when they serve the coach. Likely first:
 ## Open decisions
 
 Decided 2026-10-21:
-- **AI model:** local, a base model (not instruct or thinking), downloaded by the user under its own
-  license.
+- **AI model:** local, downloaded by the user under its own license; a document it continues, not a
+  chat. 2026-10-28: Qwen3.6-35B-A3B (instruct) kept instead of a base model (R4.5).
 - **Use:** a non-commercial study and proof of concept, so RWC's CC BY-NC audio fits.
 
 Still open:
 1. **RWC annotations' licence** (they are kept apart from the audio).
-2. **Portuguese from a base model.** Small base models write weaker Portuguese than English. Measure
-   it on the test set; the fact lines carry the content either way.
+2. **Portuguese from a base model.** Closed for now: the kept model writes good Portuguese on the
+   test set. Reopen if a smaller model is tried.
 3. **What "≥ 90 %" covers.** Harmony on a full band (RWC Pop) and on a solo guitar (GuitarSet)
    are different problems. Should the target hold on both, or on the full band first?
    Measured 2026-10-24: on RWC-Pop even perfect notes with each chord's bounds given reach 88 %, so
