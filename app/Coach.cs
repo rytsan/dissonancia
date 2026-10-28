@@ -2,10 +2,6 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Avalonia;
-using Avalonia.Controls;
-using Avalonia.Media;
-using Avalonia.Platform.Storage;
 
 namespace Dissonancia;
 
@@ -38,48 +34,151 @@ public sealed class CoachSettings
     }
 }
 
-/// One report: the helper on a take's JSON, its checked report (stdout) and its verdict (stderr).
-public sealed class CoachJob
+/// The coach helper kept open (dz_coach serve): the model is loaded once and stays while reports are
+/// asked for, then closes after a while unused (it holds the model's memory). One report at a time:
+/// a session JSON path in, its checked report out.
+public sealed class CoachServer
 {
-    public static string Helper => Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "dz_coach.exe" : "dz_coach");
-    public static string Examples => Path.Combine(AppContext.BaseDirectory, "coach", "examples");
+    public static string Helper => Environment.GetEnvironmentVariable("DZ_COACH_HELPER") is { Length: > 0 } h ? h   // tools and tests
+        : Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "dz_coach.exe" : "dz_coach");
+    public static string Examples => Path.Combine(Path.GetDirectoryName(Helper)!, "coach", "examples");
     public static bool Available => File.Exists(Helper);
+    public static readonly TimeSpan Idle = TimeSpan.FromMinutes(10);
 
-    readonly Process _p;
-    readonly System.Text.StringBuilder _out = new();
+    Process? _p;
     readonly object _lock = new();
-    string _verdict = "";
-    public readonly string Take;
+    readonly System.Text.StringBuilder _out = new();
+    string _model = "", _plan = "", _error = "";
+    bool _ready, _busy;
+    string? _queued;
+    long _lastUse;
 
-    CoachJob(Process p, string take) { _p = p; Take = take; }
-
-    public static CoachJob? Start(CoachSettings s, string takeJson, out string? error)
+    public string Take { get; private set; } = "";        // the report being written, or the last one
+    public string Report { get; private set; } = "";
+    public int Code { get; private set; } = -1;           // 0: passed the check; 3: some items dropped; 1: failed; -1: none yet
+    public int Items { get; private set; }
+    public int Dropped { get; private set; }
+    public double Seconds { get; private set; }
+    public bool Loading { get { lock (_lock) return _p is { HasExited: false } && !_ready; } }
+    public bool Busy
     {
-        error = null;
-        var psi = new ProcessStartInfo(Helper) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-        foreach (var a in new[] { "run", s.Model, takeJson, "--examples", Examples, "--gpu", s.GpuLayers < 0 ? "auto" : s.GpuLayers.ToString(CultureInfo.InvariantCulture) })
+        get
+        {
+            lock (_lock)
+            {
+                if ((_busy || _queued is not null) && _p is not { HasExited: false })   // the helper died mid-report
+                {
+                    _busy = false;
+                    _queued = null;
+                    Code = 1;
+                    if (_error.Length == 0) _error = "o coach parou";
+                }
+                return _busy || _queued is not null;
+            }
+        }
+    }
+    public string Plan { get { lock (_lock) return _plan; } }
+    public string Error { get { lock (_lock) return _error; } }
+
+    /// The report on a take's JSON: the helper starts (or restarts for another model) when needed.
+    public void Request(CoachSettings s, string takeJson)
+    {
+        lock (_lock)
+        {
+            _lastUse = Environment.TickCount64;
+            if (_p is not { HasExited: false } || _model != s.Model) Start(s);
+            Take = takeJson;
+            Report = "";
+            Code = -1;
+            _error = "";
+            if (_ready && !_busy) Send(takeJson); else _queued = takeJson;
+        }
+    }
+
+    void Start(CoachSettings s)
+    {
+        Stop();
+        var psi = new ProcessStartInfo(Helper) { UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+        foreach (var a in new[] { "serve", s.Model, "--gpu", s.GpuLayers < 0 ? "auto" : s.GpuLayers.ToString(CultureInfo.InvariantCulture) })
             psi.ArgumentList.Add(a);
+        if (Directory.Exists(Examples)) { psi.ArgumentList.Add("--examples"); psi.ArgumentList.Add(Examples); }   // else the helper's own
         try
         {
-            var p = Process.Start(psi);
-            if (p is null) { error = "o coach não iniciou"; return null; }
-            var job = new CoachJob(p, takeJson);
-            p.OutputDataReceived += (_, e) => { if (e.Data is not null) lock (job._lock) job._out.AppendLine(e.Data); };
+            var p = Process.Start(psi) ?? throw new InvalidOperationException("o coach não iniciou");
+            _p = p;
+            _model = s.Model;
+            _ready = _busy = false;
+            p.OutputDataReceived += (_, e) => Line(e.Data);
             p.ErrorDataReceived += (_, e) =>
             {
                 if (e.Data is not { } l) return;
-                if (l.StartsWith("checked:") || l.StartsWith("dz_coach:") || l.StartsWith("cannot")) lock (job._lock) job._verdict = l;
-                var m = Regex.Match(l, @"^checked:.*, ([0-9]+) s$");
-                if (m.Success) job.Seconds = double.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture);
+                lock (_lock)
+                {
+                    if (l.StartsWith("plan: ")) _plan = l[6..];
+                    else if (l.StartsWith("dz_coach:") || l.StartsWith("cannot")) _error = l;
+                }
             };
             p.BeginOutputReadLine();
             p.BeginErrorReadLine();
-            return job;
         }
-        catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException) { error = e.Message; return null; }
+        catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException) { _error = e.Message; _p = null; }
     }
 
-    public double Seconds;   // as the helper measured it, once done
+    void Send(string json)
+    {
+        _busy = true;
+        _out.Clear();
+        try { _p!.StandardInput.WriteLine(json); _p.StandardInput.Flush(); }
+        catch (Exception e) when (e is IOException or InvalidOperationException) { _busy = false; _error = e.Message; }
+    }
+
+    void Line(string? l)
+    {
+        if (l is null) return;
+        lock (_lock)
+        {
+            if (l == "@@ready")
+            {
+                _ready = true;
+                if (_queued is { } q) { _queued = null; Send(q); }
+                return;
+            }
+            if (l.StartsWith("@@end "))
+            {
+                var f = l.Split(' ');
+                Code = int.Parse(f[1], CultureInfo.InvariantCulture);
+                Items = int.Parse(f[2], CultureInfo.InvariantCulture);
+                Dropped = int.Parse(f[3], CultureInfo.InvariantCulture);
+                Seconds = double.Parse(f[4], CultureInfo.InvariantCulture);
+                Report = _out.ToString();
+                _busy = false;
+                _lastUse = Environment.TickCount64;
+                if (_queued is { } q) { _queued = null; Send(q); }
+                return;
+            }
+            _out.AppendLine(l);
+            Report = _out.ToString();
+        }
+    }
+
+    /// Closes the helper when it has been idle long enough (its model's memory goes back).
+    public void Tick()
+    {
+        lock (_lock)
+            if (_p is { HasExited: false } && !_busy && _queued is null && Environment.TickCount64 - _lastUse > Idle.TotalMilliseconds) Stop();
+    }
+
+    public void Stop()
+    {
+        lock (_lock)
+        {
+            try { if (_p is { HasExited: false }) _p.Kill(true); } catch (InvalidOperationException) { }
+            _p?.Dispose();
+            _p = null;
+            _ready = _busy = false;
+            _queued = null;
+        }
+    }
 
     /// What this machine will do with the model (dz_coach probe): its lines as key -> value.
     public static Dictionary<string, string> Probe(string model)
@@ -116,98 +215,4 @@ public sealed class CoachJob
         return lastSeconds > 0 ? $"{where} · último relatório: {lastSeconds:0} s" : where;
     }
 
-    public bool Running => !_p.HasExited;
-    /// 0: checked and passed; 3: the best of its tries, some items dropped; else an error.
-    public int ExitCode => _p.HasExited ? _p.ExitCode : -1;
-    public string Report { get { lock (_lock) return _out.ToString(); } }
-    public string Verdict { get { lock (_lock) return _verdict; } }
-    public void Cancel() { try { if (!_p.HasExited) _p.Kill(true); } catch (InvalidOperationException) { } }
-}
-
-/// DS-C COACH: the newest take's report, written once its metrics are in (after REC) or on request.
-public sealed class CoachModule : KeyedModule
-{
-    public CoachModule() { Title = "DS-C  COACH"; }
-
-    readonly CoachSettings _s = CoachSettings.Load();
-    CoachJob? _job;
-    string _machine = "";   // the probe of the chosen model on this machine
-    bool _probed;
-    TakeReport? _take;
-    string _done = "", _status = "";
-    long _lastLoad;
-    bool _primed;   // the take there at start is not reported on by itself (only a new one, or on request)
-    double _scroll;
-
-    void Generate(string json)
-    {
-        _job?.Cancel();
-        _job = CoachJob.Start(_s, json, out var error);
-        _status = error ?? "";
-        _done = json;
-    }
-
-    protected override void Draw(DrawingContext ctx, Rect r)
-    {
-        long now = Environment.TickCount64;
-        if (now - _lastLoad > 1000)
-        {
-            _lastLoad = now;
-            _take = TakeReport.Latest(_take);
-            if (!_primed) { _primed = true; _done = _take?.Path ?? ""; }
-        }
-        bool model = _s.Model.Length > 0 && File.Exists(_s.Model);
-        if (model && CoachJob.Available && !_probed)
-        {
-            _probed = true;
-            var path = _s.Model;
-            Task.Run(() => _machine = CoachJob.Describe(CoachJob.Probe(path), _s.LastSeconds));
-        }
-        if (_job is { Running: false, Seconds: > 0 } done && done.Seconds != _s.LastSeconds)
-        {
-            _s.LastSeconds = done.Seconds;
-            _s.Save();
-            _probed = false;   // the line shows the new time
-        }
-        // A new take with its metrics in: its report, once.
-        if (model && CoachJob.Available && _take is { Pending: false } t && t.Path != _done && _job?.Running != true) Generate(t.Path);
-
-        double kx = r.Right - 280;
-        Key(ctx, new Rect(kx, r.Y, 130, 22), "MODELO GGUF…", PickModel, model, Ui.Green);
-        Key(ctx, new Rect(kx + 136, r.Y, 70, 22), "GERAR", () => { if (_take is { Pending: false } tk && model) Generate(tk.Path); }, withLed: false);
-        Key(ctx, new Rect(kx + 212, r.Y, 66, 22), "PARAR", () => { _job?.Cancel(); _status = "parado"; }, _job?.Running == true, Ui.Amber);
-        string head = !CoachJob.Available ? "dz_coach não está instalado (build sem o coach)"
-            : !model ? "escolha um modelo base em GGUF (você baixa e aceita a licença dele): MODELO GGUF…"
-            : _take is null ? "nenhum take ainda: grave com REC"
-            : _take.Pending ? "take gravado · esperando as métricas…"
-            : _job?.Running == true ? $"escrevendo o relatório de {Path.GetFileNameWithoutExtension(_take.Path)}… (o modelo roda localmente)"
-            : _status.Length > 0 ? _status
-            : _job is { } j ? (j.ExitCode == 0 ? "relatório conferido: cada número vem das métricas do take" : j.ExitCode == 3 ? $"relatório com itens cortados na conferência ({j.Verdict})" : $"falhou: {j.Verdict}")
-            : "";
-        Ui.Text(ctx, _machine.Length > 0 ? $"{Path.GetFileName(_s.Model)} · {_machine}" : Path.GetFileName(_s.Model), r.X + 4, r.Y + 2, 9, Ui.LcdDim, Ui.Mono);
-        Ui.Text(ctx, head, r.X + 4, r.Y + 14, 9, Ui.Label, Ui.Sans);
-
-        var box = new Rect(r.X, r.Y + 30, r.Width, r.Height - 32);
-        if (box.Height < 20) return;
-        ctx.DrawRectangle(Ui.Lcd, Ui.LcdEdge, box, 3, 3);
-        string text = _job?.Report ?? "";
-        if (text.Length == 0) return;
-        var ft = new FormattedText(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, Ui.Sans, 11, Ui.LcdText) { MaxTextWidth = box.Width - 16 };
-        _scroll = Math.Clamp(_scroll, 0, Math.Max(0, ft.Height - box.Height + 12));
-        using (ctx.PushClip(box.Deflate(4))) ctx.DrawText(ft, new Point(box.X + 8, box.Y + 6 - _scroll));
-        double end = ft.Height - box.Height + 12;
-        if (end > 0) Area(box, () => _scroll = _scroll >= end ? 0 : _scroll + 40);   // a click scrolls on, then back to the top
-    }
-
-    async void PickModel()
-    {
-        if (TopLevel.GetTopLevel(this)?.StorageProvider is not { } sp) return;
-        var files = await sp.OpenFilePickerAsync(new FilePickerOpenOptions
-        {
-            Title = "Modelo base (GGUF) para o coach",
-            FileTypeFilter = [new FilePickerFileType("GGUF") { Patterns = ["*.gguf"] }],
-        });
-        if (files.Count > 0 && files[0].TryGetLocalPath() is { } path) { _s.Model = path; _s.LastSeconds = 0; _s.Save(); _done = ""; _probed = false; _machine = ""; }
-        InvalidateVisual();
-    }
 }

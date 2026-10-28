@@ -349,9 +349,17 @@ Checked check(const std::string& report, const Facts& f) {
         bool ok = !why;
         std::multiset<double> nums;
         bool praise = false;   // a number from a fact that is not one to work on
+        // A quoted position ('e', '&') must be one the facts name.
+        static const std::regex quoted(R"('([^']{1,3})')");
+        for (auto it = std::sregex_iterator(line.begin(), line.end(), quoted); it != std::sregex_iterator() && ok; ++it)
+            if (!std::any_of(f.lines.begin(), f.lines.end(), [&](const std::string& l) { return l.find(it->str()) != std::string::npos; }))
+                ok = false, why = "a position the facts do not name", c.invented++;
+        const bool exercise = section.rfind("Exercícios", 0) == 0;
         for (auto it = std::sregex_iterator(rest.begin(), rest.end(), number); it != std::sregex_iterator() && ok; ++it) {
             const double v = value(it->str());
-            const std::set<std::string> tags = tagsOf(v);
+            std::set<std::string> tags = tagsOf(v);
+            // An exercise may run on into the bar after one the facts name ("the bars 12 and 13").
+            if (tags.empty() && exercise && v == std::floor(v) && v > 1 && line.find("compasso") != std::string::npos) tags = tagsOf(v - 1);
             ok = !tags.empty();
             if (!ok) why = "a number not in the facts", c.invented++;
             nums.insert(std::fabs(v));

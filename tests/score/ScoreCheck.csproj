@@ -9,7 +9,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../../app/Score.cs;../../app/Theory.cs;../../app/Verovio.cs;../../app/RackCatalog.cs;../../app/EditList.cs;../../app/LeadSheet.cs;../../app/Review.cs;../../app/StudioPlugins.cs;../../app/LiveSong.cs;../../app/StudioSeparation.cs;../../app/TorchCheckpoint.cs;../../app/StudioMix.cs;../../app/Playground.cs;../../app/SongMidi.cs;../../app/SampleBank.cs;../../app/Accel.cs;../../app/BasicPitch.cs;../../app/YourMt3.cs;../../app/TakeReport.cs" />
+    <Compile Include="../../app/Score.cs;../../app/Theory.cs;../../app/Verovio.cs;../../app/RackCatalog.cs;../../app/EditList.cs;../../app/LeadSheet.cs;../../app/Review.cs;../../app/StudioPlugins.cs;../../app/LiveSong.cs;../../app/StudioSeparation.cs;../../app/TorchCheckpoint.cs;../../app/StudioMix.cs;../../app/Playground.cs;../../app/SongMidi.cs;../../app/SampleBank.cs;../../app/Accel.cs;../../app/BasicPitch.cs;../../app/YourMt3.cs;../../app/TakeReport.cs;../../app/Coach.cs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.20.1" />  <!-- Playground.cs -> Setup (Accel.cs) -->

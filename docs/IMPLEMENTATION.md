@@ -1006,10 +1006,37 @@ base model on this machine yet), 22 layers on the 2080 Ti, ~80 s a take:
 | facts and number check only | 7 / 7 | 1 of 49 | 1 | 1 of 2 |
 | + tags, Confiança section, bounded items | 7 / 7 | 0 of 51 | 4 (told as going well, a repeat) | 2 of 2 |
 
-**COACH unit** (`app/Coach.cs`, DS-C in LIVE's default rack under DS-X): MODELO GGUF… points to
-the user's file (kept in `coach.json` with the GPU layers); once a new take's metrics are in, it
-runs `dz_coach run` on it (GERAR on request, PARAR stops it) and shows the checked report, scrolled
-by a click. The take there when the app starts is not reported on by itself. The app ships
+**Repertoire and examples.** Each fact has a kind (`timing-bar`, `gap`, `scoop`, ...).
+`core/coach/exercises.txt` holds the exercises we wrote per kind, without digits; the prompt lists
+those for the kinds the take has to work on (limits first) and the model fits them to the take's
+bars and a slower tempo. The worked examples are a bank (9 now); the two closest to the take go in
+(the same instrument, the same kinds to work on, low confidence when the take has it). This is the
+retrieval that pays here, by our tags: no embedding model. The check also drops a quoted position
+the facts do not name ('e' for '&'), and lets an exercise name the bar after one in the facts.
+
+**Speed** (Qwen3.6-35B-A3B IQ4_XS, RTX 2080 Ti 11 GB, Ryzen 5 3600X):
+- A mixture of experts that does not fit: every layer on the GPU but the experts (85 % of this
+  model) of the first layers, kept on the CPU, as many as needed (24 of 40 here), found from the
+  GGUF's tensor sizes. 46 s against 65 s for the layer split (20 of 41 layers).
+- Threads: the physical cores (half the logical CPUs); the experts are bound by memory bandwidth
+  (10 threads 6.6 tokens/s, 5: 8.1, ggml's default 4: 7.7).
+- `dz_coach serve`: kept open by the app (a session JSON path per line in, the report and
+  `@@end <code> <items> <dropped> <seconds>` out), closed after 10 minutes unused. The model loads
+  once (~85 s from a cold disk). The prompt is read in two parts, and the state after the header and
+  the examples is kept as a snapshot (this model is hybrid: its recurrent state cannot be cut back
+  to a prefix); a take with the same examples reads only its own part: 11 s → 3 s.
+- A report now: ~8 s reading (3 s with the examples reused) and ~25–35 s writing 180–270 tokens at
+  ~8 tokens/s. Writing is the bulk; it is bound by the CPU's memory bandwidth for the experts.
+
+Scoring with the repertoire and the bank (7 fixed takes, one try each): 7 passed, 2 invented of 51
+items (the next bar's number, now allowed in an exercise), 6 dropped in all, low confidence said
+2 of 2.
+
+**COACH unit** (`app/CoachModule.cs`, the helper's protocol in `app/Coach.cs`; DS-C in LIVE's
+default rack under DS-X): MODELO GGUF… points to the user's file (kept in `coach.json` with the GPU
+layers, `-1` auto); once a new take's metrics are in, it asks the kept-open helper for its report
+(GERAR on request, PARAR closes the helper) and shows the checked report, scrolled by a click.
+`tests/score` runs the helper on two fixed takes when `DZ_COACH_MODEL` names a model. The take there when the app starts is not reported on by itself. The app ships
 `dz_coach` and `coach/examples` beside it. Not looked at on screen yet.
 
 What the number check could not catch, and the tags fixed: "the intonation improved" (no earlier

@@ -4,6 +4,7 @@
 //   dz_coach prompt session.json [examples]           the document the model continues
 //   dz_coach run model.gguf session.json [options]    the checked report on stdout
 //   dz_coach eval model.gguf dir [options]            R4.6: the model scored on the sessions in dir
+//   dz_coach serve model.gguf [options]               kept open: a session JSON path per line in, its report and "@@end ..." out
 // options: --examples dir (default: the coach/examples next to the binary, else the source tree's),
 // --gpu layers|auto (default auto: as many as the free GPU memory holds; 0: CPU), --seed n, --tries n
 // (default 3), --verbose.
@@ -16,9 +17,11 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <regex>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "coach.hpp"
@@ -82,6 +85,8 @@ struct Plan {
     size_t gpuFree = 0, gpuTotal = 0, ram = 0, ramFree = 0, model = 0;
     int layers = 0;           // the model's blocks
     int gpuLayers = 0;        // n_gpu_layers to load with (layers + 1: all, the output too)
+    size_t experts = 0;       // bytes of a mixture of experts' expert tensors (0: not one)
+    int cpuExperts = 0;       // MoE: every layer on the GPU but the experts of the first ones, kept on the CPU
     std::string verdict;      // gpu | partial | cpu | too-big
 };
 
@@ -117,6 +122,8 @@ Plan plan(const std::string& modelPath, int gpu) {
             const int64_t b = gguf_find_key(g, (std::string(gguf_get_val_str(g, a)) + ".block_count").c_str());
             if (b >= 0) p.layers = int(gguf_get_val_u32(g, b));
         }
+        for (int64_t i = 0; i < gguf_get_n_tensors(g); i++)
+            if (std::strstr(gguf_get_tensor_name(g, i), "_exps")) p.experts += gguf_get_tensor_size(g, i);
         gguf_free(g);
     }
     for (size_t i = 0; i < ggml_backend_dev_count(); i++) {
@@ -127,11 +134,22 @@ Plan plan(const std::string& modelPath, int gpu) {
         if (free > p.gpuFree) p.gpuFree = free, p.gpuTotal = total, p.gpu = ggml_backend_dev_description(d);
     }
     p.ramFree = ram_available(p.ram);
-    constexpr size_t kReserve = size_t(1536) << 20;
+    constexpr size_t kReserve = size_t(1536) << 20;   // 1 GB: 22 layers of experts on the CPU, 8.2 against 7.7 tokens/s; kept wide for what else takes GPU memory
     if (gpu >= 0) p.gpuLayers = gpu;
-    else if (!p.gpu.empty() && p.layers > 0 && p.gpuFree > kReserve)
-        p.gpuLayers = std::min(p.layers + 1, int((p.gpuFree - kReserve) / (p.model / size_t(p.layers + 1))));
-    const double onGpu = p.layers > 0 ? std::min(1.0, double(p.gpuLayers) / (p.layers + 1)) : 0;
+    else if (!p.gpu.empty() && p.layers > 0 && p.gpuFree > kReserve) {
+        const size_t room = p.gpuFree - kReserve;
+        p.gpuLayers = std::min(p.layers + 1, int(room / (p.model / size_t(p.layers + 1))));
+        // A mixture of experts that does not fit: everything but the experts goes to the GPU (attention
+        // and the shared weights run every token), and only as many layers' experts as fit stay there.
+        if (p.gpuLayers <= p.layers && p.experts > 0 && p.model - p.experts < room) {
+            const size_t perLayer = p.experts / size_t(p.layers);
+            const size_t over = p.model - room;
+            p.cpuExperts = std::min(p.layers, int((over + perLayer - 1) / perLayer));
+            p.gpuLayers = p.layers + 1;
+        }
+    }
+    double onGpu = p.layers > 0 ? std::min(1.0, double(p.gpuLayers) / (p.layers + 1)) : 0;
+    if (p.cpuExperts > 0) onGpu = 1 - double(p.experts) * p.cpuExperts / p.layers / double(p.model);
     const double onCpu = double(p.model) * (1 - onGpu);
     p.verdict = p.ramFree > 0 && onCpu > 0.9 * double(p.ramFree) ? "too-big" : onGpu >= 1 ? "gpu" : onGpu > 0 ? "partial" : "cpu";
     return p;
@@ -143,6 +161,8 @@ struct Generated {
     int tries = 0;
     bool ok = false;
     double seconds = 0;   // reading the prompt and writing the tries
+    double promptSeconds = 0;
+    int prompt = 0, reused = 0, written = 0;   // tokens: the prompt, its part already read, the tries' output
 };
 
 // One model, loaded once; a context per take.
@@ -152,35 +172,94 @@ struct Coach {
 
     bool load(const std::string& path, int gpu) {
         const Plan p = plan(path, gpu);
-        std::fprintf(stderr, "plan: %s, %d of %d layers on the GPU (%s)\n", p.verdict.c_str(), p.gpuLayers, p.layers + 1, p.gpu.empty() ? "no GPU" : p.gpu.c_str());
+        std::fprintf(stderr, "plan: %s, %d of %d layers on the GPU%s (%s)\n", p.verdict.c_str(), p.gpuLayers, p.layers + 1,
+                     p.cpuExperts ? (", the experts of " + std::to_string(p.cpuExperts) + " on the CPU").c_str() : "", p.gpu.empty() ? "no GPU" : p.gpu.c_str());
         llama_backend_init();
         llama_model_params mp = llama_model_default_params();
         mp.n_gpu_layers = p.gpuLayers;
+        // MoE: the first layers' experts on the CPU ("blk.N.ffn_up_exps" and the like; not the shared experts).
+        static std::string pattern;
+        static llama_model_tensor_buft_override overrides[2] = {};
+        if (p.cpuExperts > 0) {
+            pattern = "^blk\\.(";
+            for (int i = 0; i < p.cpuExperts; i++) pattern += (i ? "|" : "") + std::to_string(i);
+            pattern += ")\\.ffn_(up|down|gate|gate_up)_exps";
+            overrides[0] = {pattern.c_str(), ggml_backend_dev_buffer_type(ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU))};
+            overrides[1] = {nullptr, nullptr};
+            mp.tensor_buft_overrides = overrides;
+        }
         model = llama_model_load_from_file(path.c_str(), mp);
         if (model) vocab = llama_model_get_vocab(model);
         return model != nullptr;
     }
-    ~Coach() { if (model) llama_model_free(model); }
+    void release() {
+        if (ctx) llama_free(ctx), ctx = nullptr;
+        if (model) llama_model_free(model), model = nullptr;
+    }
 
     // The report continued from doc, checked; up to `tries` times until one passes.
+    // One context, kept. The document is read in two parts: the header and the examples, then this
+    // take. The state after the first part is kept (a snapshot: a hybrid model's recurrent state cannot
+    // be cut back to a prefix), so a report with the same examples reads only its take.
+    llama_context* ctx = nullptr;
+    uint32_t nCtx = 0;
+    std::vector<llama_token> shared;      // the first part's tokens, as last read
+    std::vector<uint8_t> sharedState, promptState;
+
+    std::vector<llama_token> tokenize(const std::string& text, bool first) {
+        const int n = -llama_tokenize(vocab, text.c_str(), int32_t(text.size()), nullptr, 0, first, false);
+        std::vector<llama_token> t(static_cast<size_t>(std::max(0, n)));
+        llama_tokenize(vocab, text.c_str(), int32_t(text.size()), t.data(), n, first, false);
+        return t;
+    }
+    std::vector<uint8_t> save() {
+        std::vector<uint8_t> b(llama_state_seq_get_size(ctx, 0));
+        b.resize(llama_state_seq_get_data(ctx, b.data(), b.size(), 0));
+        return b;
+    }
+    bool restore(const std::vector<uint8_t>& b) {
+        llama_memory_clear(llama_get_memory(ctx), true);
+        return !b.empty() && llama_state_seq_set_data(ctx, b.data(), b.size(), 0) == b.size();
+    }
+
     Generated generate(const std::string& doc, const Facts& f, uint32_t seed, int tries) {
         Generated g;
-        const int n = -llama_tokenize(vocab, doc.c_str(), int32_t(doc.size()), nullptr, 0, true, false);
-        std::vector<llama_token> tokens(static_cast<size_t>(n));
-        llama_tokenize(vocab, doc.c_str(), int32_t(doc.size()), tokens.data(), n, true, false);
+        const size_t split = doc.rfind("\n### Take ");
+        const std::vector<llama_token> a = tokenize(doc.substr(0, split + 1), true), b = tokenize(doc.substr(split + 1), false);
+        const int n = int(a.size() + b.size());
         constexpr int kMaxReport = 600;   // tokens
-        llama_context_params cp = llama_context_default_params();
-        cp.n_ctx = uint32_t(n + kMaxReport + 16);
-        cp.n_batch = cp.n_ctx;
-        llama_context* ctx = llama_init_from_model(model, cp);
         const auto t0 = std::chrono::steady_clock::now();
-        if (!ctx || llama_decode(ctx, llama_batch_get_one(tokens.data(), n)) != 0) {
-            std::fprintf(stderr, "cannot read the prompt (%d tokens)\n", n);
+        if (!ctx || nCtx < uint32_t(n + kMaxReport + 16)) {
             if (ctx) llama_free(ctx);
+            llama_context_params cp = llama_context_default_params();
+            cp.n_ctx = nCtx = std::max<uint32_t>(4096, uint32_t(n + kMaxReport + 16));
+            cp.n_batch = cp.n_ctx;
+            // The physical cores (half the logical CPUs): the experts on the CPU are bound by memory
+            // bandwidth; every logical CPU contends for it (10: 6.6 tokens/s, 5: 8.1, ggml's 4: 7.7).
+            cp.n_threads = cp.n_threads_batch = int(std::max(1u, std::thread::hardware_concurrency() / 2));
+            ctx = llama_init_from_model(model, cp);
+            shared.clear();
+        }
+        bool ok = ctx != nullptr;
+        if (ok && a == shared && restore(sharedState)) g.reused = int(a.size());
+        else if (ok) {
+            llama_memory_clear(llama_get_memory(ctx), true);
+            std::vector<llama_token> first = a;
+            ok = llama_decode(ctx, llama_batch_get_one(first.data(), int32_t(first.size()))) == 0;
+            if (ok) shared = a, sharedState = save();
+        }
+        std::vector<llama_token> rest = b;
+        ok = ok && llama_decode(ctx, llama_batch_get_one(rest.data(), int32_t(rest.size()))) == 0;
+        if (!ok) {
+            std::fprintf(stderr, "cannot read the prompt (%d tokens)\n", n);
+            shared.clear();
             return g;
         }
+        promptState = save();
+        g.prompt = n;
+        g.promptSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
         for (int t = 0; t < tries; t++) {
-            if (t) llama_memory_seq_rm(llama_get_memory(ctx), 0, n, -1);   // back to the end of the prompt
+            if (t && !restore(promptState)) break;   // back to the end of the prompt
             llama_sampler* s = llama_sampler_chain_init(llama_sampler_chain_default_params());
             llama_sampler_chain_add(s, llama_sampler_init_grammar(vocab, grammar(f).c_str(), "root"));
             llama_sampler_chain_add(s, llama_sampler_init_top_p(0.9f, 1));
@@ -193,6 +272,7 @@ struct Coach {
                 char piece[256];
                 const int len = llama_token_to_piece(vocab, tok, piece, sizeof piece, 0, false);
                 if (len > 0) out.append(piece, size_t(len));
+                g.written++;
                 if (llama_decode(ctx, llama_batch_get_one(&tok, 1)) != 0) break;
             }
             llama_sampler_free(s);
@@ -203,7 +283,8 @@ struct Coach {
             if (c.ok) { g.ok = true; break; }
         }
         g.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
-        llama_free(ctx);
+        std::fprintf(stderr, "time: prompt %d tokens (%d reused) %.1f s, report %d tokens %.1f s (%.1f tokens/s)\n", g.prompt, g.reused, g.promptSeconds,
+                     g.written, g.seconds - g.promptSeconds, g.written / std::max(1e-3, g.seconds - g.promptSeconds));
         return g;
     }
 };
@@ -221,9 +302,9 @@ int main(int argc, char** argv) {
         const std::string mode = argv[1];
         if (mode == "probe") {   // what this machine does with the model, before loading it
             const Plan p = plan(argv[2], -1);
-            std::printf("gpu %s\ngpu_free_mb %zu\ngpu_total_mb %zu\nram_mb %zu\nram_free_mb %zu\nmodel_mb %zu\nlayers %d\ngpu_layers %d\nverdict %s\n",
-                        p.gpu.empty() ? "-" : p.gpu.c_str(), p.gpuFree >> 20, p.gpuTotal >> 20, p.ram >> 20, p.ramFree >> 20, p.model >> 20, p.layers + 1,
-                        p.gpuLayers, p.verdict.c_str());
+            std::printf("gpu %s\ngpu_free_mb %zu\ngpu_total_mb %zu\nram_mb %zu\nram_free_mb %zu\nmodel_mb %zu\nexperts_mb %zu\nlayers %d\ngpu_layers %d\ncpu_experts %d\nverdict %s\n",
+                        p.gpu.empty() ? "-" : p.gpu.c_str(), p.gpuFree >> 20, p.gpuTotal >> 20, p.ram >> 20, p.ramFree >> 20, p.model >> 20, p.experts >> 20,
+                        p.layers + 1, p.gpuLayers, p.cpuExperts, p.verdict.c_str());
             return 0;
         }
         if (mode == "facts") {
@@ -235,11 +316,11 @@ int main(int argc, char** argv) {
             std::fputs(document(ex, examples(ex), facts(slurp(argv[2]))).c_str(), stdout);
             return 0;
         }
-        if ((mode == "run" || mode == "eval") && argc > 3) {
+        if (((mode == "run" || mode == "eval") && argc > 3) || (mode == "serve" && argc > 2)) {
             fs::path ex = default_examples(argv[0]);
             int gpu = -1, tries = mode == "eval" ? 1 : 3;
             uint32_t seed = 1;
-            for (int i = 4; i < argc; i++) {
+            for (int i = mode == "serve" ? 3 : 4; i < argc; i++) {
                 const std::string a = argv[i];
                 if (a == "--verbose") verbose = true;
                 else if (i + 1 < argc && a == "--examples") ex = argv[++i];
@@ -250,6 +331,29 @@ int main(int argc, char** argv) {
             const std::vector<Example> shots = examples(ex);
             Coach coach;
             if (!coach.load(argv[2], gpu)) { std::fprintf(stderr, "cannot load %s\n", argv[2]); return 1; }
+            if (mode == "serve") {
+                // The app keeps it open: one session JSON path per line in, its report out, then
+                // "@@end <exit code> <items> <dropped> <seconds>"; the model is loaded once.
+                std::printf("@@ready\n");
+                std::fflush(stdout);
+                for (std::string line; std::getline(std::cin, line);) {
+                    if (line.empty()) continue;
+                    int code = 1, items = 0, dropped = 0;
+                    double secs = 0;
+                    try {
+                        const Facts f = facts(slurp(line));
+                        const Generated g = coach.generate(document(ex, shots, f), f, seed, tries);
+                        for (const std::string& d : g.best.droppedItems) std::fprintf(stderr, "dropped %s\n", d.c_str());
+                        std::fputs(g.best.report.c_str(), stdout);
+                        code = g.tries == 0 ? 1 : g.ok ? 0 : 3, items = g.best.items, dropped = g.best.dropped, secs = g.seconds;
+                    } catch (const std::exception& e) {
+                        std::fprintf(stderr, "dz_coach: %s\n", e.what());
+                    }
+                    std::printf("@@end %d %d %d %.0f\n", code, items, dropped, secs);
+                    std::fflush(stdout);
+                }
+                return 0;
+            }
             if (mode == "run") {
                 const Facts f = facts(slurp(argv[3]));
                 const Generated g = coach.generate(document(ex, shots, f), f, seed, tries);

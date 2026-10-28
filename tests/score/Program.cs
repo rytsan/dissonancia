@@ -236,6 +236,22 @@ Check(session.Notes.Count == 1 && session.BeatsPerBar == 3 && session.Cadences.C
     Check(TakeReport.Latest(rep) is { Pending: true }, "take report: metrics not yet written");
     Environment.SetEnvironmentVariable("DISSONANCIA_TAKES", null);
 }
+// COACH (optional, needs a model): DZ_COACH_MODEL=path.gguf runs the kept-open helper on two fixed
+// sessions; the second reuses the loaded model.
+if (Environment.GetEnvironmentVariable("DZ_COACH_MODEL") is { Length: > 0 } coachModel && CoachServer.Available)
+{
+    var server = new CoachServer();
+    var settings = new CoachSettings { Model = coachModel };
+    string tests = Path.Combine(AppContext.BaseDirectory, "../../../../../core/coach/tests");
+    foreach (var name in new[] { "bossa", "voice-12" })
+    {
+        server.Request(settings, Path.GetFullPath(Path.Combine(tests, name + ".json")));
+        var until = DateTime.Now.AddMinutes(10);
+        while ((server.Busy || server.Loading) && DateTime.Now < until) Thread.Sleep(200);
+        Check(server.Code is 0 or 3 && server.Report.Contains("O que foi bem:"), $"coach server: {name} -> code {server.Code}, {server.Items} items, {server.Seconds} s");
+    }
+    server.Stop();
+}
 
 // Likely guitar shapes: the common open and barre chords.
 // STUDIO harmony map: chords folded into triads (colours, inversions and passing chords out), degrees in the key.

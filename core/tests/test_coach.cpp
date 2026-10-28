@@ -66,6 +66,9 @@ TEST_CASE("coach: the check drops an item with a number the facts do not hold") 
     f.lines.push_back("[trabalhar] Timing no compasso 8: -38 ms.");
     const Checked tags = check("O que foi bem:\n- O compasso 8 corre: -38 ms.\n- +9 cents do A4.\n- A sua afinação: +9 cents.\n", f);
     CHECK(tags.dropped == 2);
+    // A position the facts do not name is invented; the bar after a named one is fine in an exercise.
+    f.lines.push_back("[trabalhar] Timing na posição '&' do tempo: +24 ms (30 ataques).");
+    CHECK(check("Para trabalhar:\n- O 'e' arrasta: +24 ms.\n- O '&' arrasta: +24 ms.\nExercícios:\n- Toque os compassos 8 e 9 sem parar.\n- Toque os compassos 8 e 12.\n", f).dropped == 2);
 }
 
 TEST_CASE("coach: the prompt is the examples, then this take's facts, then the report's start") {
