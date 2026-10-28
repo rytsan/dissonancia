@@ -141,6 +141,15 @@ it rests on.
 - R6.1: CI builds and runs every test on Linux on each push, then on Windows.
 - R6.2: Windows 10+ (WASAPI) and Linux are supported; macOS follows.
 - R6.3: One installable package per OS. On first start, Setup fetches the components.
+- R6.4: The machine is read at run time, not assumed. Each machine builds its own helpers with the
+  GPU toolkits it has (CUDA, Vulkan); at run time the best CPU variant and any GPU present are used,
+  and the GPU's share of a model follows its free memory. Before the coach runs, the app tells the
+  user what this machine will do with the chosen model (on the GPU, split, CPU only, or too big),
+  and after each report how long it took.
+  - The coach's model needs RAM plus GPU memory above its file size plus ~2 GB. With no GPU, a
+    report takes minutes (Qwen3.6-35B-A3B: ~11 min on 10 cores; ~80 s with 22 of 41 layers on an
+    RTX 2080 Ti). A smaller model is the answer on a smaller machine; it is scored with the same
+    test (R4.6) before it is trusted.
 
 ## Frozen (maintenance only until R1–R4 meet their targets)
 

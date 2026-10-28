@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
@@ -14,7 +15,8 @@ namespace Dissonancia;
 public sealed class CoachSettings
 {
     public string Model { get; set; } = "";
-    public int GpuLayers { get; set; }   // used by a CUDA build of dz_coach; 0 = CPU
+    public int GpuLayers { get; set; } = -1;   // -1: as many as this GPU's free memory holds; 0: CPU only
+    public double LastSeconds { get; set; }    // how long the last report took on this machine
 
     static string FilePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Dissonancia", "coach.json");
 
@@ -55,7 +57,7 @@ public sealed class CoachJob
     {
         error = null;
         var psi = new ProcessStartInfo(Helper) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-        foreach (var a in new[] { "run", s.Model, takeJson, "--examples", Examples, "--gpu", s.GpuLayers.ToString(CultureInfo.InvariantCulture) })
+        foreach (var a in new[] { "run", s.Model, takeJson, "--examples", Examples, "--gpu", s.GpuLayers < 0 ? "auto" : s.GpuLayers.ToString(CultureInfo.InvariantCulture) })
             psi.ArgumentList.Add(a);
         try
         {
@@ -63,12 +65,55 @@ public sealed class CoachJob
             if (p is null) { error = "o coach não iniciou"; return null; }
             var job = new CoachJob(p, takeJson);
             p.OutputDataReceived += (_, e) => { if (e.Data is not null) lock (job._lock) job._out.AppendLine(e.Data); };
-            p.ErrorDataReceived += (_, e) => { if (e.Data?.StartsWith("checked:") == true || e.Data?.StartsWith("dz_coach:") == true || e.Data?.StartsWith("cannot") == true) lock (job._lock) job._verdict = e.Data; };
+            p.ErrorDataReceived += (_, e) =>
+            {
+                if (e.Data is not { } l) return;
+                if (l.StartsWith("checked:") || l.StartsWith("dz_coach:") || l.StartsWith("cannot")) lock (job._lock) job._verdict = l;
+                var m = Regex.Match(l, @"^checked:.*, ([0-9]+) s$");
+                if (m.Success) job.Seconds = double.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture);
+            };
             p.BeginOutputReadLine();
             p.BeginErrorReadLine();
             return job;
         }
         catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException) { error = e.Message; return null; }
+    }
+
+    public double Seconds;   // as the helper measured it, once done
+
+    /// What this machine will do with the model (dz_coach probe): its lines as key -> value.
+    public static Dictionary<string, string> Probe(string model)
+    {
+        var d = new Dictionary<string, string>();
+        try
+        {
+            var psi = new ProcessStartInfo(Helper) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+            psi.ArgumentList.Add("probe");
+            psi.ArgumentList.Add(model);
+            using var p = Process.Start(psi);
+            if (p is null) return d;
+            string all = p.StandardOutput.ReadToEnd();
+            p.WaitForExit(10000);
+            foreach (var line in all.Split('\n'))
+                if (line.IndexOf(' ') is int i and > 0) d[line[..i]] = line[(i + 1)..].Trim();
+        }
+        catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException or IOException) { }
+        return d;
+    }
+
+    /// The probe in a line: what runs where, and what to expect.
+    public static string Describe(Dictionary<string, string> p, double lastSeconds)
+    {
+        if (!p.TryGetValue("verdict", out var v)) return "";
+        string gpu = p.GetValueOrDefault("gpu", "-");
+        string where = v switch
+        {
+            "gpu" => $"todo na GPU ({gpu})",
+            "partial" => $"{p.GetValueOrDefault("gpu_layers")} de {p.GetValueOrDefault("layers")} camadas na GPU ({gpu}), o resto na CPU",
+            "cpu" => "só CPU: cada relatório leva minutos",
+            _ => $"não cabe: modelo {p.GetValueOrDefault("model_mb")} MB, RAM livre {p.GetValueOrDefault("ram_free_mb")} MB — escolha um modelo menor",
+        };
+        return lastSeconds > 0 ? $"{where} · último relatório: {lastSeconds:0} s" : where;
     }
 
     public bool Running => !_p.HasExited;
@@ -86,6 +131,8 @@ public sealed class CoachModule : KeyedModule
 
     readonly CoachSettings _s = CoachSettings.Load();
     CoachJob? _job;
+    string _machine = "";   // the probe of the chosen model on this machine
+    bool _probed;
     TakeReport? _take;
     string _done = "", _status = "";
     long _lastLoad;
@@ -110,6 +157,18 @@ public sealed class CoachModule : KeyedModule
             if (!_primed) { _primed = true; _done = _take?.Path ?? ""; }
         }
         bool model = _s.Model.Length > 0 && File.Exists(_s.Model);
+        if (model && CoachJob.Available && !_probed)
+        {
+            _probed = true;
+            var path = _s.Model;
+            Task.Run(() => _machine = CoachJob.Describe(CoachJob.Probe(path), _s.LastSeconds));
+        }
+        if (_job is { Running: false, Seconds: > 0 } done && done.Seconds != _s.LastSeconds)
+        {
+            _s.LastSeconds = done.Seconds;
+            _s.Save();
+            _probed = false;   // the line shows the new time
+        }
         // A new take with its metrics in: its report, once.
         if (model && CoachJob.Available && _take is { Pending: false } t && t.Path != _done && _job?.Running != true) Generate(t.Path);
 
@@ -125,7 +184,7 @@ public sealed class CoachModule : KeyedModule
             : _status.Length > 0 ? _status
             : _job is { } j ? (j.ExitCode == 0 ? "relatório conferido: cada número vem das métricas do take" : j.ExitCode == 3 ? $"relatório com itens cortados na conferência ({j.Verdict})" : $"falhou: {j.Verdict}")
             : "";
-        Ui.Text(ctx, $"{Path.GetFileName(_s.Model)}", r.X + 4, r.Y + 2, 9, Ui.LcdDim, Ui.Mono);
+        Ui.Text(ctx, _machine.Length > 0 ? $"{Path.GetFileName(_s.Model)} · {_machine}" : Path.GetFileName(_s.Model), r.X + 4, r.Y + 2, 9, Ui.LcdDim, Ui.Mono);
         Ui.Text(ctx, head, r.X + 4, r.Y + 14, 9, Ui.Label, Ui.Sans);
 
         var box = new Rect(r.X, r.Y + 30, r.Width, r.Height - 32);
@@ -148,7 +207,7 @@ public sealed class CoachModule : KeyedModule
             Title = "Modelo base (GGUF) para o coach",
             FileTypeFilter = [new FilePickerFileType("GGUF") { Patterns = ["*.gguf"] }],
         });
-        if (files.Count > 0 && files[0].TryGetLocalPath() is { } path) { _s.Model = path; _s.Save(); _done = ""; }
+        if (files.Count > 0 && files[0].TryGetLocalPath() is { } path) { _s.Model = path; _s.LastSeconds = 0; _s.Save(); _done = ""; _probed = false; _machine = ""; }
         InvalidateVisual();
     }
 }

@@ -5,9 +5,12 @@
 //   dz_coach run model.gguf session.json [options]    the checked report on stdout
 //   dz_coach eval model.gguf dir [options]            R4.6: the model scored on the sessions in dir
 // options: --examples dir (default: the coach/examples next to the binary, else the source tree's),
-// --gpu layers (default 0: CPU), --seed n, --tries n (default 3), --verbose.
+// --gpu layers|auto (default auto: as many as the free GPU memory holds; 0: CPU), --seed n, --tries n
+// (default 3), --verbose.
+//   dz_coach probe model.gguf                         this machine with that model: GPU, RAM, layers on the GPU, verdict
 // Exit codes: 0 a report that passed the check, 3 the best one after the tries failed it, 1 an error.
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -19,7 +22,11 @@
 #include <vector>
 
 #include "coach.hpp"
+#include "gguf.h"
 #include "llama.h"
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 namespace fs = std::filesystem;
 using namespace dz::coach;
@@ -57,11 +64,74 @@ fs::path default_examples(const char* argv0) {
 
 bool verbose = false;
 
+// The machine, read at run time: the GPUs ggml found (their free memory), the RAM, the model's size
+// and layers (from its GGUF header, without loading it), and how many layers fit on the GPU.
+struct Plan {
+    std::string gpu;          // the GPU used, "" = none
+    size_t gpuFree = 0, gpuTotal = 0, ram = 0, ramFree = 0, model = 0;
+    int layers = 0;           // the model's blocks
+    int gpuLayers = 0;        // n_gpu_layers to load with (layers + 1: all, the output too)
+    std::string verdict;      // gpu | partial | cpu | too-big
+};
+
+size_t ram_available(size_t& total) {
+#ifdef _WIN32
+    MEMORYSTATUSEX m{sizeof m};
+    if (!GlobalMemoryStatusEx(&m)) return 0;
+    total = size_t(m.ullTotalPhys);
+    return size_t(m.ullAvailPhys);
+#else
+    std::ifstream f("/proc/meminfo");
+    size_t avail = 0;
+    for (std::string k; f >> k;) {
+        size_t kb = 0;
+        f >> kb;
+        if (k == "MemTotal:") total = kb * 1024;
+        if (k == "MemAvailable:") avail = kb * 1024;
+        f.ignore(64, '\n');
+    }
+    return avail;
+#endif
+}
+
+// gpu < 0: as many layers as the free GPU memory holds, after ~1.5 GB for the context and the
+// compute buffers (a 3k-token context; measured 0.5 GB of compute on CPU).
+Plan plan(const std::string& modelPath, int gpu) {
+    Plan p;
+    p.model = size_t(fs::file_size(modelPath));
+    gguf_init_params gp{true, nullptr};
+    if (gguf_context* g = gguf_init_from_file(modelPath.c_str(), gp)) {
+        const int64_t a = gguf_find_key(g, "general.architecture");
+        if (a >= 0) {
+            const int64_t b = gguf_find_key(g, (std::string(gguf_get_val_str(g, a)) + ".block_count").c_str());
+            if (b >= 0) p.layers = int(gguf_get_val_u32(g, b));
+        }
+        gguf_free(g);
+    }
+    for (size_t i = 0; i < ggml_backend_dev_count(); i++) {
+        ggml_backend_dev_t d = ggml_backend_dev_get(i);
+        if (ggml_backend_dev_type(d) != GGML_BACKEND_DEVICE_TYPE_GPU) continue;
+        size_t free = 0, total = 0;
+        ggml_backend_dev_memory(d, &free, &total);
+        if (free > p.gpuFree) p.gpuFree = free, p.gpuTotal = total, p.gpu = ggml_backend_dev_description(d);
+    }
+    p.ramFree = ram_available(p.ram);
+    constexpr size_t kReserve = size_t(1536) << 20;
+    if (gpu >= 0) p.gpuLayers = gpu;
+    else if (!p.gpu.empty() && p.layers > 0 && p.gpuFree > kReserve)
+        p.gpuLayers = std::min(p.layers + 1, int((p.gpuFree - kReserve) / (p.model / size_t(p.layers + 1))));
+    const double onGpu = p.layers > 0 ? std::min(1.0, double(p.gpuLayers) / (p.layers + 1)) : 0;
+    const double onCpu = double(p.model) * (1 - onGpu);
+    p.verdict = p.ramFree > 0 && onCpu > 0.9 * double(p.ramFree) ? "too-big" : onGpu >= 1 ? "gpu" : onGpu > 0 ? "partial" : "cpu";
+    return p;
+}
+
 struct Generated {
     Checked best;
     std::string raw;   // the best try as written
     int tries = 0;
     bool ok = false;
+    double seconds = 0;   // reading the prompt and writing the tries
 };
 
 // One model, loaded once; a context per take.
@@ -70,10 +140,11 @@ struct Coach {
     const llama_vocab* vocab = nullptr;
 
     bool load(const std::string& path, int gpu) {
-        llama_log_set([](ggml_log_level level, const char* text, void*) { if (verbose || level >= GGML_LOG_LEVEL_ERROR) std::fputs(text, stderr); }, nullptr);
+        const Plan p = plan(path, gpu);
+        std::fprintf(stderr, "plan: %s, %d of %d layers on the GPU (%s)\n", p.verdict.c_str(), p.gpuLayers, p.layers + 1, p.gpu.empty() ? "no GPU" : p.gpu.c_str());
         llama_backend_init();
         llama_model_params mp = llama_model_default_params();
-        mp.n_gpu_layers = gpu;
+        mp.n_gpu_layers = p.gpuLayers;
         model = llama_model_load_from_file(path.c_str(), mp);
         if (model) vocab = llama_model_get_vocab(model);
         return model != nullptr;
@@ -91,6 +162,7 @@ struct Coach {
         cp.n_ctx = uint32_t(n + kMaxReport + 16);
         cp.n_batch = cp.n_ctx;
         llama_context* ctx = llama_init_from_model(model, cp);
+        const auto t0 = std::chrono::steady_clock::now();
         if (!ctx || llama_decode(ctx, llama_batch_get_one(tokens.data(), n)) != 0) {
             std::fprintf(stderr, "cannot read the prompt (%d tokens)\n", n);
             if (ctx) llama_free(ctx);
@@ -119,6 +191,7 @@ struct Coach {
             if (t == 0 || (c.ok && !g.best.ok) || c.dropped < g.best.dropped) g.best = c, g.raw = out;
             if (c.ok) { g.ok = true; break; }
         }
+        g.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
         llama_free(ctx);
         return g;
     }
@@ -131,8 +204,17 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "usage: dz_coach facts|prompt session.json [examples] | dz_coach run|eval model.gguf session.json|dir [--examples dir] [--gpu n] [--seed n] [--tries n] [--verbose]\n");
         return 1;
     }
+    llama_log_set([](ggml_log_level level, const char* text, void*) { if (verbose || level >= GGML_LOG_LEVEL_ERROR) std::fputs(text, stderr); }, nullptr);
+    ggml_backend_load_all_from_path(fs::absolute(argv[0]).parent_path().string().c_str());   // the backends this machine can run
     try {
         const std::string mode = argv[1];
+        if (mode == "probe") {   // what this machine does with the model, before loading it
+            const Plan p = plan(argv[2], -1);
+            std::printf("gpu %s\ngpu_free_mb %zu\ngpu_total_mb %zu\nram_mb %zu\nram_free_mb %zu\nmodel_mb %zu\nlayers %d\ngpu_layers %d\nverdict %s\n",
+                        p.gpu.empty() ? "-" : p.gpu.c_str(), p.gpuFree >> 20, p.gpuTotal >> 20, p.ram >> 20, p.ramFree >> 20, p.model >> 20, p.layers + 1,
+                        p.gpuLayers, p.verdict.c_str());
+            return 0;
+        }
         if (mode == "facts") {
             for (const std::string& l : facts(slurp(argv[2])).lines) std::printf("%s\n", l.c_str());
             return 0;
@@ -143,13 +225,13 @@ int main(int argc, char** argv) {
         }
         if ((mode == "run" || mode == "eval") && argc > 3) {
             fs::path ex = default_examples(argv[0]);
-            int gpu = 0, tries = mode == "eval" ? 1 : 3;
+            int gpu = -1, tries = mode == "eval" ? 1 : 3;
             uint32_t seed = 1;
             for (int i = 4; i < argc; i++) {
                 const std::string a = argv[i];
                 if (a == "--verbose") verbose = true;
                 else if (i + 1 < argc && a == "--examples") ex = argv[++i];
-                else if (i + 1 < argc && a == "--gpu") gpu = std::atoi(argv[++i]);
+                else if (i + 1 < argc && a == "--gpu") gpu = std::strcmp(argv[i + 1], "auto") == 0 ? (i++, -1) : std::atoi(argv[++i]);
                 else if (i + 1 < argc && a == "--seed") seed = uint32_t(std::atoi(argv[++i]));
                 else if (i + 1 < argc && a == "--tries") tries = std::max(1, std::atoi(argv[++i]));
             }
@@ -161,7 +243,7 @@ int main(int argc, char** argv) {
                 const Generated g = coach.generate(prompt(shots, f), f, seed, tries);
                 for (const std::string& d : g.best.droppedItems) std::fprintf(stderr, "dropped %s\n", d.c_str());
                 std::fputs(g.best.report.c_str(), stdout);
-                std::fprintf(stderr, "checked: %d items, %d dropped, %d tries, %s\n", g.best.items, g.best.dropped, g.tries, g.ok ? "ok" : "failed");
+                std::fprintf(stderr, "checked: %d items, %d dropped, %d tries, %s, %.0f s\n", g.best.items, g.best.dropped, g.tries, g.ok ? "ok" : "failed", g.seconds);
                 return g.tries == 0 ? 1 : g.ok ? 0 : 3;
             }
             // R4.6: the model on the fixed sessions in a directory (one try each, as written).

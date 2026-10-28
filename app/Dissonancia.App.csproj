@@ -52,8 +52,11 @@
 
   <!-- AI feedback helper (phase 3, optional): run as its own process on the user's GGUF; its worked examples beside it. -->
   <ItemGroup>
-    <None Include="../core/build/dz_coac?;../core/build/dz_coach.ex?" CopyToOutputDirectory="PreserveNewest"
+    <None Include="../core/build/bin/dz_coac?;../core/build/bin/dz_coach.ex?" CopyToOutputDirectory="PreserveNewest"
           Link="%(Filename)%(Extension)" Visible="false" />
+    <!-- llama.cpp's libraries and ggml's backend plugins (CPU variants, CUDA, Vulkan: what this machine built). -->
+    <None Include="../core/build/bin/libllama.so*;../core/build/bin/libggml*.so*;../core/build/bin/libllama*.dylib;../core/build/bin/libggml*.dylib;../core/build/bin/llam?.dll;../core/build/bin/ggml*.dll"
+          CopyToOutputDirectory="PreserveNewest" Link="%(Filename)%(Extension)" Visible="false" />
     <None Include="../core/coach/examples/*" CopyToOutputDirectory="PreserveNewest"
           Link="coach/examples/%(Filename)%(Extension)" Visible="false" />
   </ItemGroup>

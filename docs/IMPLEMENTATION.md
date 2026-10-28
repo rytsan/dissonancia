@@ -959,7 +959,23 @@ beats heard; the round-trip latency comes off the attacks. `dz_wav file.wav sess
 ## AI feedback (phase 3, 2026-10-26)
 
 `dz_coach` (`core/tools/dz_coach.cpp`) is a helper process on llama.cpp b11235 (pinned tarball,
-built with the core; CPU by default, `DZ_COACH_CUDA` for CUDA). It loads the GGUF the user points to.
+built with the core). It loads the GGUF the user points to. Nothing about the machine is assumed:
+- **Build**: ggml's backends are plugins in `core/build/bin` beside `dz_coach` (`GGML_BACKEND_DL`):
+  the CPU in every x86 instruction-set variant, CUDA when this machine has `nvcc` (found on the PATH,
+  `CUDA_PATH` or `/usr/local/cuda`), Vulkan when it has the SDK (AMD, Intel, NVIDIA). Each machine
+  builds what it can run.
+- **Run**: `dz_coach` loads every plugin it finds; ggml keeps those the machine can run (the best
+  CPU variant, a GPU only when present). With `--gpu auto` (the default) the layers on the GPU
+  follow its free memory: the model's size and block count from its GGUF header, ~1.5 GB kept for
+  the context and compute buffers.
+- **Probe**: `dz_coach probe model.gguf` prints the GPU and its free memory, the RAM, the model's
+  size and layers, the layers that fit, and a verdict (`gpu`, `partial`, `cpu`, `too-big` when what
+  stays on the CPU does not fit in free RAM). The COACH unit shows it in a line, with how long the
+  last report took on this machine.
+- **CUDA kernels for this machine's GPU**: the configure step reads `nvidia-smi`'s compute capability
+  and compiles for it. With ggml's generic list (PTX for 7.5) the driver compiled the kernels on the
+  first run: 530 s for a report that takes 62 s once cached. Compiled ahead: 45 s on the first run
+  (plus ~85 s to read the 17 GB model from a cold disk).
 The contract `dissonancia-coach/1` (`core/src/coach.{hpp,cpp}`) holds the rest:
 - **Facts**: the session JSON becomes short Portuguese lines, each a metric with its value (and its
   confidence where the JSON has one): timing (and its worst sixteenth and bars), swing, accents,

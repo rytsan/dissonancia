@@ -138,17 +138,44 @@ if(DZ_WITH_DEMUCS)
 endif()
 
 # Phase 3 AI feedback (R4.5): llama.cpp (MIT) at a pinned release, built into the dz_coach helper
-# the app runs as its own process. No model is fetched: the user points to a GGUF base model of their
-# choice. CPU by default; DZ_COACH_CUDA builds the CUDA backend in (needs the CUDA toolkit).
+# the app runs as its own process. No model is fetched: the user points to a GGUF of their choice.
+# The machine decides at run time: ggml's backends are plugins beside dz_coach (GGML_BACKEND_DL), the
+# CPU in every instruction-set variant (the best one for the CPU is loaded), CUDA when this machine
+# has the toolkit, Vulkan (AMD, Intel, NVIDIA) when it has the SDK; a GPU that is not there is skipped.
 option(DZ_WITH_COACH "Build the AI feedback helper (dz_coach)" ON)
-option(DZ_COACH_CUDA "dz_coach on CUDA" OFF)
 if(DZ_WITH_COACH)
+  include(CheckLanguage)
+  # nvcc where the toolkit installs it, when it is not on the PATH.
+  find_program(DZ_NVCC nvcc HINTS ENV CUDA_PATH PATH_SUFFIXES bin PATHS /usr/local/cuda/bin /opt/cuda/bin)
+  if(DZ_NVCC AND NOT CMAKE_CUDA_COMPILER)
+    set(CMAKE_CUDA_COMPILER ${DZ_NVCC})
+  endif()
+  check_language(CUDA)
+  # Kernels for the GPUs this machine has (compiled ahead): with only the generic list, the driver
+  # compiles them on the first run (~8 min here, a 2080 Ti, then cached). No GPU seen: ggml's list.
+  if(CMAKE_CUDA_COMPILER AND NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+    execute_process(COMMAND nvidia-smi --query-gpu=compute_cap --format=csv,noheader OUTPUT_VARIABLE _caps RESULT_VARIABLE _rc ERROR_QUIET)
+    if(_rc EQUAL 0 AND _caps)
+      string(REPLACE "." "" _caps "${_caps}")
+      string(REGEX MATCHALL "[0-9]+" _caps "${_caps}")
+      list(REMOVE_DUPLICATES _caps)
+      set(CMAKE_CUDA_ARCHITECTURES ${_caps} CACHE STRING "this machine's GPUs (nvidia-smi)")
+      message(STATUS "dz_coach CUDA kernels for compute capability ${_caps}")
+    endif()
+  endif()
+  find_package(Vulkan COMPONENTS glslc QUIET)
+  set(_cuda OFF)
+  if(CMAKE_CUDA_COMPILER)
+    set(_cuda ON)
+  endif()
+  option(DZ_COACH_CUDA "dz_coach's CUDA backend (on when nvcc is found)" ${_cuda})
+  option(DZ_COACH_VULKAN "dz_coach's Vulkan backend (on when the Vulkan SDK is found)" ${Vulkan_FOUND})
+  message(STATUS "dz_coach backends: CPU (all variants), CUDA ${DZ_COACH_CUDA}, Vulkan ${DZ_COACH_VULKAN}")
   include(FetchContent)
   FetchContent_Declare(llama_cpp
     URL https://github.com/ggml-org/llama.cpp/archive/refs/tags/b11235.tar.gz
     URL_HASH SHA256=3a9982fad75cc4c8172e6bcd23a48bd5ca7b846ce848f78837e38dba6297d07e
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
-  set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
   set(LLAMA_BUILD_COMMON OFF CACHE BOOL "" FORCE)
   set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
   set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -156,18 +183,27 @@ if(DZ_WITH_COACH)
   set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
   set(LLAMA_CURL OFF CACHE BOOL "" FORCE)
   set(GGML_NATIVE OFF CACHE BOOL "" FORCE)   # portable: the helper runs on the user's machine
+  set(GGML_BACKEND_DL ON CACHE BOOL "" FORCE)
+  set(GGML_CPU_ALL_VARIANTS ON CACHE BOOL "" FORCE)
   set(GGML_CUDA ${DZ_COACH_CUDA} CACHE BOOL "" FORCE)
+  set(GGML_VULKAN ${DZ_COACH_VULKAN} CACHE BOOL "" FORCE)
+  # Shared libraries for llama.cpp only; it writes them and the backend plugins to bin/, where
+  # dz_coach goes too.
+  set(BUILD_SHARED_LIBS ON)
   FetchContent_GetProperties(llama_cpp)
   if(NOT llama_cpp_POPULATED)
     FetchContent_Populate(llama_cpp)
     add_subdirectory(${llama_cpp_SOURCE_DIR} ${llama_cpp_BINARY_DIR} EXCLUDE_FROM_ALL)
   endif()
+  unset(BUILD_SHARED_LIBS)
   # The JSON-to-facts contract, the prompt and the checker (no model needed: tested on their own).
   add_library(dz_coach_lib STATIC src/coach.cpp)
   target_include_directories(dz_coach_lib PUBLIC src SYSTEM PUBLIC ${llama_cpp_SOURCE_DIR}/vendor)
   target_compile_features(dz_coach_lib PUBLIC cxx_std_20)
   add_executable(dz_coach tools/dz_coach.cpp)
-  target_link_libraries(dz_coach PRIVATE dz_coach_lib llama)
+  target_link_libraries(dz_coach PRIVATE dz_coach_lib llama ggml)
+  set_target_properties(dz_coach PROPERTIES BUILD_RPATH "$ORIGIN" INSTALL_RPATH "$ORIGIN" RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+  add_dependencies(dz_coach ggml)   # the backend plugins are ggml's dependencies
   target_compile_definitions(dz_coach PRIVATE DZ_COACH_DIR="${CMAKE_CURRENT_SOURCE_DIR}/coach")
   if(DZ_TESTS)
     add_executable(dz_coach_tests tests/test_coach.cpp)
